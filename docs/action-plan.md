@@ -1,6 +1,6 @@
 # dsh-debate Action Plan
 
-> Resume point: S5 targetCwd done 2026-09-30 (vitest 56/56;verify12 ai_proxy 联调;3090 最新构建运行中;待定:建构者 prompt 是否加目标工作区提示)
+> Resume point: S6 extraction implementation and regression suite complete (61 tests, typecheck, build pass); live end-to-end validation remains pending because the only active 3090 session contains just “hi”. Use a populated real chat to verify the context reaches both debaters.
 
 ## Waves
 

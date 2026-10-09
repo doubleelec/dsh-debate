@@ -179,6 +179,41 @@ describe('extractSessionContext', () => {
     expect(ctx).toContain('Redis 压测过了')
     expect(ctx).not.toContain('debate_run')
   })
+  it('较早的任务背景不应因最近 10 条确认消息而丢失', () => {
+    const events = [
+      { type: 'user/message', data: { content: '我们正在评估迁移到 PostgreSQL，重点关注回滚窗口与复制延迟。' } },
+      ...Array.from({ length: 12 }, (_, i) => ({ type: i % 2 === 0 ? 'user/message' : 'assistant/message', data: { content: i % 2 === 0 ? '确认，继续。' : '收到，我继续处理。' } })),
+    ]
+    expect(extractSessionContext(events)).toContain('迁移到 PostgreSQL')
+    expect(extractSessionContext(events)).not.toContain('收到，我继续处理')
+  })
+  it('读取 DSH SessionEvent 的 message.content 文本块形状', () => {
+    const events = [
+      { type: 'user/message', data: { message: { role: 'user', content: [{ type: 'text', text: '先前已确认迁移计划需保留 PostgreSQL 复制延迟检查。' }] } } },
+      ...Array.from({ length: 12 }, (_, i) => ({ type: i % 2 === 0 ? 'user/message' : 'assistant/message', data: { message: { role: i % 2 === 0 ? 'user' : 'assistant', content: [{ type: 'text', text: i % 2 === 0 ? '继续。' : '收到。' }] } } })),
+    ]
+    expect(extractSessionContext(events)).toContain('PostgreSQL 复制延迟检查')
+  })
+  it('对话中提到 debate_run 不应导致整条历史被丢弃', () => {
+    const substantive = '我们前面已经确认：HTTP 硬触发负责启动，且 debate_run 仅是插件里的内部链路名，不是当前用户问题。'
+    const events = [{ type: 'assistant/message', data: { content: substantive } }]
+    expect(extractSessionContext(events)).toContain('HTTP 硬触发负责启动')
+  })
+  it('不把单独的继续确认当成背景消息', () => {
+    const events = [
+      { type: 'user/message', data: { content: '我们已经决定先保持 SSH 发布通道，HTTPS 作为备用。' } },
+      { type: 'user/message', data: { content: '那请继续吧。' } },
+    ]
+    expect(extractSessionContext(events)).toContain('保持 SSH 发布通道')
+    expect(extractSessionContext(events)).not.toContain('那请继续吧')
+  })
+  it('忽略触发噪声后仍能向前找较早的任务背景', () => {
+    const events = [
+      { type: 'user/message', data: { content: '我们正在评估迁移到 PostgreSQL，重点关注回滚窗口与复制延迟。' } },
+      ...Array.from({ length: 12 }, (_, i) => ({ type: i % 2 === 0 ? 'user/message' : 'assistant/message', data: { content: i % 2 === 0 ? '确认，继续。' : '收到' } })),
+    ]
+    expect(extractSessionContext(events)).toContain('迁移到 PostgreSQL')
+  })
   it('空事件返回空串', () => {
     expect(extractSessionContext([])).toBe('')
   })
@@ -190,8 +225,11 @@ describe('resolveAuto', () => {
     expect(auto?.question).toBe('主库延迟高怎么办')
     expect(auto?.questionType).toBe('causal')
   })
-  it('无 hint 取最近 user 消息', () => {
-    const auto = resolveAuto([{ type: 'user/message', data: { content: '架构满足指标吗' } }], '')
+  it('无 hint 跳过单独确认并取最近的实质 user 消息', () => {
+    const auto = resolveAuto([
+      { type: 'user/message', data: { content: '架构满足指标吗' } },
+      { type: 'user/message', data: { content: '那请继续吧。' } },
+    ], '')
     expect(auto?.question).toBe('架构满足指标吗')
     expect(auto?.questionType).toBe('review')
   })

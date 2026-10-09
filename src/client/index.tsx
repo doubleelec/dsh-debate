@@ -175,7 +175,6 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
   // 当前会话 id + cwd:服务线 sessionCwd 优先(0.2.0 官方线),overlay 快照只做回退。
   let liveSid = currentSid
   let liveCwd: string | null = sessionCwd
-  let snapKeys = ''
   try {
     const snap = props.useSessions ? (props.useSessions((s: unknown) => s) as { current?: unknown; byId?: Record<string, { cwd?: unknown }> }) : undefined
     if (typeof snap?.current === 'string' && snap.current !== '') liveSid = snap.current
@@ -183,7 +182,6 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
     const byId = snap?.byId ?? {}
     const cur = byId[liveSid]
     if (typeof cur?.cwd === 'string' && cur.cwd !== '') liveCwd = cur.cwd
-    try { snapKeys = `liveSid=${liveSid}|快照 keys:${Object.keys(snap ?? {}).join(',')}|byIdKeys=${Object.keys(byId).slice(0, 3).join(',')}|curKeys=${Object.keys(cur ?? {}).join(',')}` } catch { /* 忽略 */ }
   } catch { /* store 不可用时用 input.right 缓存 */ }
   // 实况自动滚到底:新条目进来才滚,用户往上翻看历史时不抢滚动。
   const feedRef = useRef<HTMLDivElement | null>(null)
@@ -358,9 +356,6 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
           <input type="number" min={1} max={10} value={rounds} onChange={(e) => setRounds(Number(e.target.value))} disabled={status === 'running'} />
         </div>
         <div className={C('dshd-note')}>输入框写问题 → 点开始辩论即开(工作区自动取当前会话,不用填)。实况在本面板看,跑完点"复制成果地图"并回对话。</div>
-        {snapKeys !== '' && (
-          <div className={C('dshd-note')}>{snapKeys}{liveCwd ? ` · cwd=${liveCwd}` : ' · cwd=空(辩手将用进程目录)'}</div>
-        )}
         {resolved !== null && (
           <div className={C('dshd-resolved')}>
             <div><b>{tr('auto.question')}</b>{resolved.question}</div>

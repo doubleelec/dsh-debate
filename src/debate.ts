@@ -403,18 +403,26 @@ function messageText(msg: unknown): string {
  * 取最近 N 条 user/assistant 消息文本,去工具结果与系统提示,拼成背景。
  * 返回 '' 表示无可用背景(新会话)。
  */
-export function extractSessionContext(events: SessionEventLike[], maxChars = CONTEXT_MAX_LEN, maxMessages = 10): string {
+export function extractSessionContext(events: SessionEventLike[], maxChars = CONTEXT_MAX_LEN, maxMessages = 40): string {
   const texts: string[] = []
   for (let i = events.length - 1; i >= 0 && texts.length < maxMessages; i--) {
     const ev = events[i]
     if (ev.type !== 'user/message' && ev.type !== 'assistant/message') continue
     const data = ev.data as Record<string, unknown> | undefined
     const t = messageText(data?.message ?? data?.content ?? data).trim()
-    if (t === '' || /debate_(open|round|synthesize|run)|辩论单/.test(t)) continue
+    // 只排除明确的控制指令/面板镜像与无信息确认,不要因正文提及内部工具名而丢整条历史。
+    if (t === '' || isDebateContextNoise(t)) continue
     texts.unshift(t)
   }
   const joined = texts.join('\n\n---\n\n')
   return joined.length > maxChars ? joined.slice(-maxChars) : joined
+}
+
+function isDebateContextNoise(text: string): boolean {
+  const t = text.trim()
+  if (/^(?:请)?(?:调用|执行)\s*debate_(?:open|round|synthesize|run)\b/i.test(t)) return true
+  if (/^(?:辩论单|⚔\s*辩论|辩论开题|交锋第|成果地图)/.test(t)) return true
+  return /^(?:(?:那请)?继续(?:处理|吧)?|好|好的|收到|嗯|明白|了解|确认|ok|okay)(?:[，,、\s]*(?:(?:我)?(?:继续(?:处理|吧)?|处理)|收到|好的?))*[。！!，,\s]*$/i.test(t)
 }
 
 /** transcript 条目。 */

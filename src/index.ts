@@ -201,7 +201,7 @@ function lastUserText(events: { type: string; data?: unknown }[]): string {
     const ev = events[i]
     if (ev.type !== 'user/message') continue
     const t = looseText(ev.data).trim()
-    if (t === '' || /debate_(open|round|synthesize|run)|辩论单|⚔ 辩论|辩论开题|交锋第|成果地图/.test(t)) continue
+    if (t === '' || /^(?:请)?(?:调用|执行)\s*debate_(?:open|round|synthesize|run)\b/i.test(t) || /^(?:辩论单|⚔\s*辩论|辩论开题|交锋第|成果地图)/.test(t) || /^(?:(?:那请)?继续(?:处理|吧)?|好|好的|收到|嗯|明白|了解|确认|ok|okay)(?:[，,、\s]*(?:(?:我)?(?:继续(?:处理|吧)?|处理)|收到|好的?))*[。！!，,\s]*$/i.test(t)) continue
     return t
   }
   return ''
