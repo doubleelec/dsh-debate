@@ -311,6 +311,7 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
     <div className={C('dshd-overlay')} role="dialog" aria-label={tr('panel.title')}>
       <div className={C('dshd-header')}>
         <span>⚔ {tr('panel.title')}</span>
+        <span className={C('dshd-version')} title={pkg.version}>v{pkg.version}</span>
         <span className={C('spacer')} />
         <button className={C('dshd-close')} onClick={props.onClose} aria-label={tr('btn.close')}>✕</button>
       </div>

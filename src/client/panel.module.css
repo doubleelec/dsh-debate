@@ -30,6 +30,16 @@
   flex: 1;
 }
 
+.dshd-version {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-caption, #8a8a8a);
+  background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.14));
+  border-radius: 8px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
 .dshd-close {
   border: 0;
   background: transparent;
