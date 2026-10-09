@@ -8,6 +8,10 @@ Write every commit subject and body in English so the public Git history is acce
 
 Examples: `fix(session): preserve earlier context` or `docs: clarify install steps`.
 
+## Git remotes
+
+Two remotes: `origin` (https://github.com/doubleelec/dsh-debate.git, public) and `wechat` (git@git.weixin.qq.com:doubleelec/dsh-debate.git, cold backup). Push feature work to `origin`; mirror `main` to `wechat` with `git push wechat main` when the cold backup needs updating. In the Windows sandbox, plain HTTPS push fails on schannel TLS state, so push via the `push-from-sandbox` skill.
+
 ## Agent skills
 
 ### Issue tracker
