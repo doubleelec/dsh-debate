@@ -372,6 +372,21 @@ export async function runHostDebate(
     const subagents = get('subagents') as SubagentsLike | undefined
     if (!subagents) throw new Error('subagents service unavailable')
     const agents = get('agents') as AgentsLike | undefined
+    // 真实会话历史:硬触发时 parent 是自建的(空事件),历史从 sessions.store 按真实 sid 读。
+    // sessions.store.get(sid).session.snapshotEvents(0) → 事件流,与 readParentEvents 同形。
+    const readRealSessionEvents = (realSid: string): { type: string; data?: unknown }[] => {
+      try {
+        if (realSid === '') return []
+        const ss = get('sessions') as unknown as { store?: { get?: (k: string) => unknown } } | undefined
+        const rec = ss?.store?.get?.(realSid) as { session?: { snapshotEvents?: (from?: number) => unknown } } | undefined
+        const snap = rec?.session?.snapshotEvents
+        if (typeof snap !== 'function') return []
+        const evs = snap.call(rec?.session, 0) as { type: string; data?: unknown }[] | undefined
+        return Array.isArray(evs) ? evs : []
+      } catch {
+        return []
+      }
+    }
     // E(聊天开局):工具入口直接给 parent(天生就是发起会话,cwd 全自动),跳过 sid/自建全套。
     let parent = givenParent
     if ((!parent || !parent.session) && sid !== '') {
@@ -402,7 +417,12 @@ export async function runHostDebate(
     session.mirrorToChat = owned === null
     session.parentSid = owned === null ? (parent.session.id as string) : null
     if (signal.aborted) throw new Error('aborted')
-    session.config.auto = resolveAuto(readParentEvents(parent), hint)
+    // 历史:真实 parent 读自有事件;自建 parent(硬触发)按真实 sid 从 sessions.store 读,
+    // 辩手开题能引用前面聊的上下文,不再是孤立的一句话。
+    const parentEvents = readParentEvents(parent)
+    const historyEvents = owned !== null ? readRealSessionEvents(sid) : []
+    const autoEvents = historyEvents.length > 0 ? historyEvents : parentEvents
+    session.config.auto = resolveAuto(autoEvents, hint)
     const auto = session.config.auto
     if (auto.question === '') throw new Error('empty-question:输入框没有问题,先写下要辩的问题再点开始')
     // 秒级直播:建单→自动判断完成即有进度,不用等第一个模型输出。

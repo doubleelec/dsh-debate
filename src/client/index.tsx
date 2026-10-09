@@ -179,9 +179,11 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
   try {
     const snap = props.useSessions ? (props.useSessions((s: unknown) => s) as { current?: unknown; byId?: Record<string, { cwd?: unknown }> }) : undefined
     if (typeof snap?.current === 'string' && snap.current !== '') liveSid = snap.current
-    const cur = typeof snap?.current === 'string' ? snap?.byId?.[snap.current] : undefined
+    // 0.2.0 快照已无 current:用 input.right 传的 sessionId(liveSid)直取 byId,不再靠 snap.current。
+    const byId = snap?.byId ?? {}
+    const cur = byId[liveSid]
     if (typeof cur?.cwd === 'string' && cur.cwd !== '') liveCwd = cur.cwd
-    try { snapKeys = `快照 keys:${Object.keys(snap ?? {}).join(',')}|current=${String(snap?.current)}|byIdKeys=${Object.keys(snap?.byId ?? {}).slice(0, 3).join(',')}|curKeys=${Object.keys(cur ?? {}).join(',')}` } catch { /* 忽略 */ }
+    try { snapKeys = `liveSid=${liveSid}|快照 keys:${Object.keys(snap ?? {}).join(',')}|byIdKeys=${Object.keys(byId).slice(0, 3).join(',')}|curKeys=${Object.keys(cur ?? {}).join(',')}` } catch { /* 忽略 */ }
   } catch { /* store 不可用时用 input.right 缓存 */ }
   // 实况自动滚到底:新条目进来才滚,用户往上翻看历史时不抢滚动。
   const feedRef = useRef<HTMLDivElement | null>(null)
