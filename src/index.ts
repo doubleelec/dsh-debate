@@ -836,7 +836,10 @@ export function epochStopDetail(events: readonly { type: string; data?: any }[])
  * composition 照抄子 agent 链路:先 join parent 的 preset 生成(优先 composeFrom,保证与 parent 同代),
  * 再挂 delegation 声明,最后 tools.restrict(deny 笼)。persona 不另挂:角色定义随每轮 prompt 进 inbox,
  * 常驻记忆里自然有。
- * parentAgent 活体拥有:parent 销毁时连带回收;meta 只带 cwd + preset,不写 lineage(保持根会话形状)。
+ * parentAgent 活体拥有:parent 销毁时连带回收;meta 另带子会话血统
+ * (parentSession/isSeeded/origin/delegationDepth,照抄 dsh-subagent childSessionMeta):
+ * origin=subagent 让侧边栏隐藏(parent 目录见 subagentCatalog,不堆未分组),
+ * isSeeded=false 保证互盲(不继承 parent 历史)。
  */
 export async function createResidentPair(
   ctx: Context,
@@ -878,12 +881,19 @@ export async function createResidentPair(
       agentCtx.tools.restrict({ deny: DEBATE_TOOL_DENY })
     } catch { /* restrict 失败时抛给创建事务回滚 */ throw new Error('resident-restrict-failed') }
   }
+  // 子会话血统:parent 层级 +1(ParentAgent 面无 header,取不到则按 0 算,不拦创建)。
+  const parentDepthRaw = (parent as { session?: { header?: { delegationDepth?: unknown } } })?.session?.header?.delegationDepth
+  const parentDepth = typeof parentDepthRaw === 'number' && Number.isSafeInteger(parentDepthRaw) && parentDepthRaw >= 0 ? parentDepthRaw : 0
   const mkOne = async (role: 'builder' | 'challenger', route: { provider: string; model: string }): Promise<{ agent: ResidentAgent; dispose: () => Promise<void> }> => {
     const handle = await agents.create({
       sessionId: `debate-${debateId}-${role}`,
       parentAgent: parent,
       meta: {
         cwd,
+        parentSession: parent.session.id,
+        isSeeded: false,
+        origin: 'subagent',
+        delegationDepth: parentDepth + 1,
         ...(presetId !== null && presetId !== '' ? { agentPreset: presetId } : {}),
       },
       agentOptions: { provider: route.provider, model: route.model },

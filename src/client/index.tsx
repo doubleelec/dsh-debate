@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import styles from './panel.module.css'
 import pkg from '../../package.json'
 import { splitSections } from './sections'
+import { resolveSessionId } from './session'
 
 const C = (k: string): string => styles[k] ?? k
 
@@ -127,6 +128,7 @@ let prefillQuestion = ''
 // 当前会话 id(input.right 是 session scope,标准 props 自带 sessionId,入口每次渲染更新)。
 let currentSid = ''
 interface InputActs { setDraft(d: string): void; submit?(): void }
+
 // 建单成功后清空输入框的回调(InputEntry 注册,DebateDialog 建单成功后调用)。
 let clearDraftOnStart: (() => void) | null = null
 // 输入桥:保留给回填地图用(触发语链已删除,v0.3 host 直驱)。
@@ -528,7 +530,8 @@ function InputButton(props: { useInput?: (s: unknown) => unknown; inputActions?:
 /** 输入桥:捕获 sessionId + inputActions(建单直驱 + 建单后清空输入框);同时渲染输入框内小按钮。 */
 function InputEntry(props: { useInput?: (s: unknown) => unknown; inputActions?: InputActs; sessionId?: unknown }): React.ReactNode {
   const actions = props.inputActions
-  if (typeof props.sessionId === 'string' && props.sessionId !== '') currentSid = props.sessionId
+  const scopedSid = resolveSessionId(props.sessionId)
+  if (scopedSid !== '') currentSid = scopedSid
   useEffect(() => {
     if (actions && typeof actions.setDraft === 'function') {
       bridgeInsert = (text: string) => {
@@ -558,7 +561,13 @@ function SettingsView(): React.ReactNode {
 
 interface SlotsLike {
   inject(name: string, fn: () => unknown): void
-  register(options: { name: string; id: string; order?: number; label?: string | (() => string) }, component: (props: never) => React.ReactNode): unknown
+  register(options: {
+    name: string
+    id: string
+    order?: number
+    label?: string | (() => string)
+    inject?: (sessionId?: string) => Record<string, unknown>
+  }, component: (props: never) => React.ReactNode): unknown
 }
 // 模块级会话 cwd 缓存:ctx.inject(['sessions']) 服务线直读(0.2.0 slot 传的 useSessions 已无 current)。
 // 面板 start() 用它当 cwd,不再靠 overlay 快照。
@@ -593,7 +602,16 @@ export function apply(ctx: CtxLike): void {
     (props: never) => <DebateRoot {...(props as { useSessions?: (s: unknown) => unknown })} />,
   ))
   slots.inject('conversation.input.right', () => slots.register(
-    { name: 'conversation.input.right', id: 'debate-entry', order: 100, label: () => '⚔ 双视角辩论' },
+    {
+      name: 'conversation.input.right',
+      id: 'debate-entry',
+      order: 100,
+      label: () => '⚔ 双视角辩论',
+      // Session scope invokes this with the current session ID. The slot's
+      // renderSlot call intentionally has no owner props, so props.sessionId
+      // is not populated unless we use the registration injection contract.
+      inject: (sessionId) => ({ sessionId }),
+    },
     (props: never) => <InputEntry {...(props as { useInput?: (s: unknown) => unknown; inputActions?: { setDraft(d: string): void }; sessionId?: unknown })} />,
   ))
   slots.inject('settings.section', () => slots.register(

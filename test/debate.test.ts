@@ -24,7 +24,7 @@ import {
   type DebateRound,
   type TranscriptEntry,
 } from '../src/debate'
-import { normalizeConfig, extractModelEcho, isRouteIneffective, resolveAuto, stepOpen, stepRound, stepSynthesize, sessions, extractHandoffConclusion, heartbeatOf, epochStopReason, epochStopDetail, stepOpenResident, stepRoundResident, turnVerdict, isRetriableTurnError, recordRoundAndJudge, driveResidentTurn, STEP_STALL_MS, STEP_HARD_CAP_MS } from '../src/index'
+import { normalizeConfig, extractModelEcho, isRouteIneffective, resolveAuto, stepOpen, stepRound, stepSynthesize, sessions, extractHandoffConclusion, heartbeatOf, epochStopReason, epochStopDetail, stepOpenResident, stepRoundResident, turnVerdict, isRetriableTurnError, recordRoundAndJudge, driveResidentTurn, createResidentPair, STEP_STALL_MS, STEP_HARD_CAP_MS } from '../src/index'
 import { defaultLensIds, findLens, LENS_TEMPLATES } from '../src/lenses'
 import { splitSections } from '../src/client/sections'
 
@@ -578,6 +578,45 @@ describe('resident relay', () => {
     expect(round).toBe(1)
     expect(s.transcript.length).toBe(4)
     expect(s.transcript.map((e: { role: string }) => e.role)).toEqual(['builder', 'challenger', 'builder', 'challenger'])
+  })
+  it('常驻建对:子会话带 subagent 血统(侧边栏隐藏,不堆未分组)', async () => {
+    const created: Array<{ sessionId: string; meta?: Record<string, unknown> }> = []
+    const fakeAgents = {
+      get: () => undefined,
+      list: () => [],
+      create: async (options: { sessionId: string; meta?: Record<string, unknown> }) => {
+        created.push({ sessionId: options.sessionId, meta: options.meta })
+        return {
+          agent: {
+            session: { id: options.sessionId, snapshotEvents: () => [] },
+            followup: () => {},
+            whenIdle: async () => {},
+          },
+          dispose: async () => {},
+        }
+      },
+    }
+    const parent = { session: { id: 'parent-1', snapshotEvents: () => [] } }
+    const pair = await createResidentPair(
+      { get: () => undefined } as never,
+      fakeAgents as never,
+      parent as never,
+      'debate-x',
+      { provider: 'p', model: 'b' },
+      { provider: 'p', model: 'c' },
+      new AbortController().signal,
+      '/tmp/ws',
+    )
+    await pair.dispose()
+    expect(created.map((c) => c.sessionId)).toEqual(['debate-debate-x-builder', 'debate-debate-x-challenger'])
+    for (const c of created) {
+      // 子会话血统:origin=subagent 让侧边栏隐藏(parent 目录见 subagentCatalog,不进未分组);
+      // isSeeded=false 保证互盲(不继承 parent 历史)。
+      expect(c.meta?.origin).toBe('subagent')
+      expect(c.meta?.parentSession).toBe('parent-1')
+      expect(c.meta?.isSeeded).toBe(false)
+      expect(typeof c.meta?.delegationDepth).toBe('number')
+    }
   })
   it('常驻一方挂了独立结算,错误带双方状态', async () => {
     const s = makeSession()
