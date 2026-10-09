@@ -1,0 +1,83 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+  Install this repo into the prod web profile (3080) in one elevation.
+
+.DESCRIPTION
+  Run in an elevated PowerShell (right-click -> Run as administrator).
+  Everything needing elevation happens inside this one session:
+    1. npm run build (lib/ is what DSH actually loads).
+    2. Install the local repo into the web profile as a decoupled copy.
+  The dev profile (3090) is intentionally NOT touched: it is a symlink to
+  this repo, so `npm run build` + refresh 3090 is all dev needs — no
+  install step, no elevation.
+
+.EXAMPLE
+  powershell -ExecutionPolicy Bypass -File scripts/setup.ps1
+.EXAMPLE
+  powershell -ExecutionPolicy Bypass -File scripts/setup.ps1 -SkipBuild
+#>
+[CmdletBinding()]
+param(
+  [switch]$SkipBuild
+)
+
+$ErrorActionPreference = 'Stop'
+$Repo = Split-Path -Parent $PSScriptRoot
+
+# 0) Preflight: repo sanity
+$pkgJson = Join-Path $Repo 'package.json'
+if (-not (Test-Path $pkgJson)) { throw "package.json not found in $Repo — run this script from the repo's scripts/ folder." }
+
+Write-Host "`n== build (lib/ is what DSH loads) ==" -ForegroundColor Cyan
+if ($SkipBuild) { Write-Host 'skipped (--SkipBuild).' }
+else {
+  Push-Location $Repo
+  try { npm run build } finally { Pop-Location }
+}
+
+Write-Host "`n== web profile (3080): local file: install (decoupled copy) ==" -ForegroundColor Cyan
+$webCopy = Join-Path $env:USERPROFILE '.dsh\profiles\web\node_modules\@doubleelec\dsh-debate'
+$backup = "$webCopy.bak"
+if (Test-Path $backup) { Remove-Item -Recurse -Force $backup }
+if (Test-Path $webCopy) {
+  Write-Host "backing up current copy: $webCopy -> $backup"
+  Move-Item -Force $webCopy $backup
+}
+$installFailed = $true
+try {
+  Push-Location $Repo
+  try {
+    # forward slashes: file: deps must not use backslashes
+    $uri = 'file://' + ($Repo -replace '\\', '/')
+    dsh plugin --profile web add -w $uri
+    if ($LASTEXITCODE -ne 0) { throw "dsh plugin add failed (exit $LASTEXITCODE)." }
+    dsh plugin --profile web install
+    if ($LASTEXITCODE -ne 0) { throw "dsh plugin install failed (exit $LASTEXITCODE)." }
+  } finally { Pop-Location }
+  $webBundle = Join-Path $webCopy 'lib\client.js'
+  if (-not (Test-Path $webBundle)) { throw "install failed: $webBundle missing after install." }
+  $probe = Select-String -Path $webBundle -Pattern 'dshd-overlay' -SimpleMatch | Select-Object -First 1
+  if (-not $probe) {
+    throw 'install verification failed: new bundle marker (dshd-overlay) not found in web copy — refusing to declare success.'
+  }
+  Write-Host "verified: new bundle present in web copy ($($probe.LineNumber))." -ForegroundColor Green
+  $installFailed = $false
+} finally {
+  if ($installFailed) {
+    Write-Warning 'install failed — restoring previous version.'
+    if (Test-Path $webCopy) { Remove-Item -Recurse -Force $webCopy }
+    if (Test-Path $backup) { Move-Item -Force $backup $webCopy; Write-Host "restored: $webCopy (previous version back in place)." -ForegroundColor Yellow }
+    throw 'aborted: web profile left untouched (previous version restored).'
+  }
+  if (Test-Path $backup) { Remove-Item -Recurse -Force $backup }
+}
+
+Write-Host @'
+
+Done. Verify:
+  client-only change (src/client/*): refresh http://127.0.0.1:3080
+  host change (src/index.ts, e.g. debate loop): RESTART `dsh web`
+    (the old host stays in memory across page refreshes — refresh alone
+    will keep showing stale behavior)
+'@ -ForegroundColor Green

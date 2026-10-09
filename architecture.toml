@@ -1,0 +1,14 @@
+# dsh-debate architecture.toml
+# Top-level Architecture-as-Code manifest (arch retrofit baseline).
+# Single governed tree: src (host + protocol) with nested src/client (browser bundle).
+# test/ (vitest) and scripts/ stay outside governance for now; tests/ (plural)
+# holds the vendored governance suite + per-module invariant mirrors.
+
+submodules = [
+    "src",
+]
+
+[module.src]
+description = "Debate host + protocol + live page."
+external_depends = []
+internal_depends = []

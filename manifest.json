@@ -1,0 +1,31 @@
+{
+  "id": "elec-debate",
+  "name": "双视角辩论 (Debate Map)",
+  "version": "0.1.0",
+  "description": "为开放性论证题跑建构/挑战/制图三角色,产出五件套成果地图,而非单一结论",
+  "kind": "dynamic-cordis-plugin",
+  "platforms": {
+    "host": "src/index.ts",
+    "client": "src/client/index.tsx"
+  },
+  "host": {
+    "handlers": [
+      "debate.start",
+      "debate.state",
+      "debate.stop"
+    ],
+    "services": []
+  },
+  "client": {
+    "slots": [
+      "shell.overlay",
+      "conversation.input.right",
+      "settings.section"
+    ],
+    "services": [
+      "slots",
+      "layout"
+    ]
+  },
+  "license": "MIT"
+}

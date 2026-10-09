@@ -1,0 +1,12 @@
+# src/client/module.toml
+# Nested governed module: browser bundle (React panel + CSS).
+# TS sources are not counted by vendored orphan checks (only .py/.ps1 + dirs).
+
+[module]
+name = "src/client"
+description = "Browser debate panel: overlay dialog, foldable transcript, session wiring."
+submodules = []
+
+[public_api]
+exposed = []
+reason = "No facade: bundled via lib/client.js and slot registration in apply()."

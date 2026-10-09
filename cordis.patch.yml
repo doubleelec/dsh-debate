@@ -1,0 +1,9 @@
+# 组合补丁:安装后把插件行插入 profile 组合 / Composition patch applied on `dsh plugin add`.
+#
+# 包为原生单包 —— Host 半区(lib/index.js,webServer /dsh-debate/api/* JSON 路由 + debate_run 工具)
+# + 浏览器 bundle(lib/client.js,经 dsh.client 声明)。
+#
+# 注意:作用域包名必须加引号(YAML 中 @ 不能作为裸标量起始字符,否则 dsh web 启动解析补丁直接失败)。
+- insert:
+    - id: elec-debate
+      name: '@doubleelec/dsh-debate'

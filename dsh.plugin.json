@@ -1,0 +1,21 @@
+{
+  "id": "dsh-external/elec-debate",
+  "version": "0.1.0",
+  "main": "./lib/index.js",
+  "description": "双视角辩论 Map:为开放性论证题跑建构/挑战/制图三角色,产出五件套成果地图,而非单一结论。",
+  "engines": {
+    "dsh": ">=0.1.1"
+  },
+  "contributes": {
+    "tools": [
+      "debate_open",
+      "debate_round",
+      "debate_synthesize",
+      "debate_run"
+    ],
+    "skills": []
+  },
+  "client": {
+    "main": "./lib/client.js"
+  }
+}

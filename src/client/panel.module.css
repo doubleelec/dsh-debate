@@ -1,0 +1,371 @@
+/* dsh-debate 对话框样式:token 系对标 explorer(bg-layer/label/border-l2),深浅色自适应。 */
+.dshd-overlay {
+  position: fixed;
+  top: 48px;
+  right: 24px;
+  width: min(720px, calc(100vw - 48px));
+  max-height: calc(100vh - 120px);
+  display: flex;
+  flex-direction: column;
+  background: var(--dsw-alias-bg-layer-2, #262626);
+  border: 1px solid var(--dsw-alias-border-inverted, rgba(128,128,128,.28));
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+  border-radius: 16px;
+  box-shadow: var(--dsw-alias-shadow-lv3, 0 12px 40px rgba(0, 0, 0, 0.18));
+  z-index: 60;
+  overflow: hidden;
+}
+
+.dshd-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--dsw-alias-border-l3, rgba(128,128,128,.2));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+}
+
+.dshd-header .spacer {
+  flex: 1;
+}
+
+.dshd-close {
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #9a9a9a);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+
+.dshd-close:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.14));
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+}
+
+.dshd-body {
+  padding: 12px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dshd-note {
+  font-size: 12px;
+  color: var(--dsw-alias-label-caption, #8a8a8a);
+}
+
+.dshd-resolved {
+  border: 1px solid var(--dsw-alias-border-l3, rgba(128,128,128,.2));
+  background: var(--dsw-alias-bg-layer-1, #222);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary, #9a9a9a);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  word-break: break-word;
+}
+
+.dshd-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+}
+
+.dshd-field > span {
+  font-weight: 600;
+}
+
+.dshd-field textarea,
+.dshd-field input,
+.dshd-field select {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.35));
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.dshd-field option {
+  background: var(--dsw-alias-bg-layer-2, #262626);
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+}
+
+.dshd-row {
+  display: flex;
+  gap: 8px;
+}
+
+.dshd-row .dshd-field {
+  flex: 1;
+}
+
+.dshd-lensgrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dshd-lens {
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.35));
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #9a9a9a);
+}
+
+.dshd-lens:hover {
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+  background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12));
+}
+
+.dshd-lens.on {
+  background: var(--dsw-alias-state-business-primary, #4176e6);
+  border-color: var(--dsw-alias-state-business-primary, #4176e6);
+  color: #fff;
+}
+
+.dshd-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.dshd-start {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 10px;
+  background: var(--dsw-alias-state-business-primary, #4176e6);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.dshd-start:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.dshd-stop {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.35));
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #9a9a9a);
+  cursor: pointer;
+}
+
+.dshd-stop:hover {
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+  background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12));
+}
+
+.dshd-status {
+  font-size: 12px;
+  color: var(--dsw-alias-label-caption, #8a8a8a);
+}
+
+.dshd-error {
+  font-size: 13px;
+  color: var(--dsw-alias-danger, #c00);
+  white-space: pre-wrap;
+}
+
+.dshd-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+}
+
+/* 实况进度条:置顶,running 时绿灯呼吸,结束变灰 */
+.dshd-livebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--dsw-alias-border-l3, rgba(128,128,128,.2));
+  background: var(--dsw-alias-bg-layer-1, #222);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dot-live {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #3fb950;
+  flex: none;
+  animation: dshd-pulse 1.2s ease-in-out infinite;
+}
+
+.dot-done {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #8a8a8a;
+  flex: none;
+}
+
+@keyframes dshd-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* 实录滚动区:独立滚动,新条目自动跟到底(用户上翻后不抢) */
+.dshd-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+  max-height: calc(100vh - 420px);
+  min-height: 120px;
+  overflow-y: auto;
+}
+
+.dshd-turn {
+  border: 1px solid var(--dsw-alias-border-l3, rgba(128,128,128,.2));
+  background: var(--dsw-alias-bg-layer-1, #222);
+  border-radius: 10px;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dshd-turn .who {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+/* 分段折叠:摘要默认展开,详细论证折叠 */
+.dshd-summary {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 6px;
+}
+
+.dshd-delta {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary, #9a9a9a);
+  margin-bottom: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dshd-delta-full {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary, #9a9a9a);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: 6px;
+}
+
+.dshd-foldbtn {
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.35));
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #9a9a9a);
+  border-radius: 999px;
+  padding: 2px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 20px;
+  margin-bottom: 4px;
+}
+
+.dshd-foldbtn:hover {
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+  background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12));
+}
+
+.dshd-dockbtn {
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.35));
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #9a9a9a);
+  border-radius: 999px;
+  padding: 2px 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  flex: none;
+}
+
+.dshd-dockbtn:hover {
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+  background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12));
+}
+
+.dshd-dockbtn-off {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 会话 id 行:裸 id + 复制按钮,小字灰色不抢戏。 */
+.dshd-sid {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary, #9a9a9a);
+  word-break: break-all;
+}
+
+.dshd-copybtn {
+  margin-left: 8px;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.45));
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.dshd-copybtn:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12));
+}
+
+/* 实时流卡片:虚线边框区别于已落地的正式 TurnCard,光标闪烁表正在写。 */
+.dshd-turn-stream {
+  border: 1px dashed var(--dsw-alias-border-l2, rgba(128,128,128,.45));
+  background: transparent;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.dshd-turn-stream .who {
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: var(--dsw-alias-state-business-primary, #4176e6);
+}
+
+.dshd-turn-stream .caret {
+  display: inline-block;
+  margin-left: 2px;
+  animation: dshd-blink 1s steps(2, start) infinite;
+  color: var(--dsw-alias-state-business-primary, #4176e6);
+}
+
+@keyframes dshd-blink {
+  to { visibility: hidden; }
+}

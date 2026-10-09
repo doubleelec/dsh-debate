@@ -1,0 +1,97 @@
+{
+  "name": "@doubleelec/dsh-debate",
+  "version": "0.1.0",
+  "description": "DSH native plugin that debates open-ended questions via builder/challenger/synthesizer roles and returns a structured, chat-readable argument map. | 双视角辩论(原生插件):为开放性论证题跑建构/挑战/制图三角色,产出结构化、可直接在对话里读的论证地图,而非单一结论。",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/doubleelec/dsh-debate.git"
+  },
+  "homepage": "https://github.com/doubleelec/dsh-debate",
+  "keywords": [
+    "deepseek-harness",
+    "cordis",
+    "plugin",
+    "debate",
+    "deliberation",
+    "ai-tools"
+  ],
+  "files": [
+    "lib",
+    "dsh.plugin.json",
+    "cordis.patch.yml",
+    "scripts",
+    "README.md",
+    "LICENSE",
+    "manifest.json"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    },
+    "plugin": {
+      "id": "elec-debate",
+      "kind": "native",
+      "host": "lib/index.js",
+      "client": "lib/client.js",
+      "hostHandler": "debate.start",
+      "clientSlots": [
+        "shell.overlay",
+        "conversation.input.right",
+        "settings.section"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsdown && tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-client-locale": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-invariants": "^0.1.1-rc.2",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.1",
+    "cordis": "^4.0.0-rc.7",
+    "lightningcss": "^1.33.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "tsdown": "^0.22.14",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.11"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "react": "^18.2.0"
+  }
+}
