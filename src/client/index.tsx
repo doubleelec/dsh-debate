@@ -11,6 +11,7 @@ import styles from './panel.module.css'
 import pkg from '../../package.json'
 import { splitSections } from './sections'
 import { resolveSessionId } from './session'
+import { roleName, roundLabel, roundSummary } from './labels'
 import {
   DIALOG_DEFAULT_H, DIALOG_DEFAULT_W,
   clampDialogHeight, clampDialogWidth, clampStoredHeight, clampStoredWidth,
@@ -57,6 +58,19 @@ const DICTS: Record<string, Record<string, string>> = {
     'btn.fullscreen': '全屏', 'btn.unfullscreen': '退出全屏', 'btn.minimize': '最小化',
     'btn.restore': '恢复', 'resize.tip': '右下角拖拽调整大小,双击恢复默认',
     'minimized.running': '辩论进行中…', 'minimized.done': '辩论已结束',
+    'role.builder': '建构方', 'role.challenger': '挑战方', 'role.synthesizer': '制图员',
+    'round.opening': '开题', 'round.map': '成果地图', 'round.n': '第{n}轮',
+    'stream.writing': '正在写…', 'stream.tools': '正在调工具…',
+    'audit.quoted.tip': '本轮引用对方原文的行数 / 可引用的行数',
+    'audit.relay.tip': '建构方给挑战方的交棒摘要长度',
+    'audit.new': '有新料', 'audit.nonew': '本轮没新料',
+    'summary.title': '轮次小结',
+    'summary.agreeBoth': '双方达成一致「{answer}」',
+    'summary.builderAccepts': '建构方接受了挑战方的「{answer}」',
+    'summary.challengerAccepts': '挑战方接受了建构方的「{answer}」',
+    'summary.standoff': '建构方坚持「{b}」,挑战方坚持「{c}」',
+    'summary.opening': '开题:建构方摆出「{b}」,挑战方摆出「{c}」',
+    'summary.quoted': '引用对方{q}/{t}行',
   },
   en: {
     'panel.title': 'Two-lens debate', 'tip': 'Builder / challenger / synthesizer map for open questions',
@@ -83,6 +97,19 @@ const DICTS: Record<string, Record<string, string>> = {
     'btn.fullscreen': 'Fullscreen', 'btn.unfullscreen': 'Exit fullscreen', 'btn.minimize': 'Minimize',
     'btn.restore': 'Restore', 'resize.tip': 'Drag from the corner to resize, double-click to reset',
     'minimized.running': 'Debate running…', 'minimized.done': 'Debate finished',
+    'role.builder': 'Builder', 'role.challenger': 'Challenger', 'role.synthesizer': 'Synthesizer',
+    'round.opening': 'Opening', 'round.map': 'Result map', 'round.n': 'Round {n}',
+    'stream.writing': 'writing…', 'stream.tools': 'calling tools…',
+    'audit.quoted.tip': 'Quoted lines from the other side / quotable lines',
+    'audit.relay.tip': 'Handoff summary length from builder to challenger',
+    'audit.new': 'new info', 'audit.nonew': 'no new info this round',
+    'summary.title': 'Round summaries',
+    'summary.agreeBoth': 'Both sides agree on "{answer}"',
+    'summary.builderAccepts': 'Builder accepts challenger\'s "{answer}"',
+    'summary.challengerAccepts': 'Challenger accepts builder\'s "{answer}"',
+    'summary.standoff': 'Builder holds "{b}", challenger holds "{c}"',
+    'summary.opening': 'Opening: builder argues "{b}", challenger argues "{c}"',
+    'summary.quoted': 'quoted {q}/{t} lines',
   },
 }
 
@@ -157,9 +184,12 @@ function routeLabel(r: { provider: string; model: string }): string {
   return `${r.provider}/${r.model}`
 }
 
-// ---------- 全屏测量:只罩会话消息区(照抄 explorer measureFullscreen) ----------
+// 人话标签见 ./labels(纯函数,单测不拖 React/CSS)。
+
+// ---------- 全屏测量:罩会话列整列(与 explorer 不同,纵向盖住输入框) ----------
 // 左边界顺输入框向上冒泡找会话列容器;右 = details 栏左 edge - 8;
-// 上 = 固定 0(顶满视口);下 = 视口底往上预留 132(输入框恒露出来)。
+// 上下各留 16px 边距,纵向盖住输入框(辩论框全屏只看实况,不需拖拽进输入框;
+// 复制地图走剪贴板/输入桥)。Esc 或标题栏按钮退出全屏。
 const viewportHeight = (): number => Math.min(window.innerHeight, window.visualViewport?.height ?? window.innerHeight)
 const rectOf = (el: Element | null): DOMRect | null =>
   el instanceof HTMLElement ? el.getBoundingClientRect() : null
@@ -214,12 +244,11 @@ const measureFullscreen = (): { top: number; left: number; width: number; height
   }
   const left = colRect ? Math.round(colRect.left) + 8 : colLeft !== null ? Math.round(colLeft) + 8 : 16
   const right = isVisibleRect(dtRect) && dtRect.left > left ? Math.round(dtRect.left) - 8 : vw - 16
-  const top = 0
-  let bottomLimit = vh - 132
-  if (isVisibleRect(composerRect)) {
-    const measured = Math.round(composerRect.top) - 8
-    if (measured < bottomLimit) bottomLimit = measured
-  }
+  // 纵向盖住输入框:上下只留 16px 边距。composerRect 不再参与测量
+  // (explorer 要拖文件进输入框才露出来,辩论框不需要)。
+  void composerRect
+  const top = 16
+  const bottomLimit = vh - 16
   return {
     top,
     left,
@@ -590,14 +619,18 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
             </div>
           </div>
         )}
-        {/* 停机审计:stopReason + 每轮 agree/answer/引用命中/交棒字数,不再只看结论(QAS-2/B5/B6)。 */}
+        {/* 停机审计:stopReason + 每轮人话小结(判定数据翻译,不调模型)。 */}
         {(stopReason !== null || roundAudits.length > 0) && (status === 'done' || status === 'running') && (
           <div className={C('dshd-resolved')}>
             <div><b>{tr('audit.title')}</b>{stopReason !== null ? tr(`stop.${stopReason}`) : tr('stop.pending')}{mode !== '' && mode !== 'resident' ? ` · ${mode}` : ''}</div>
+            {roundAudits.length > 0 && (
+              <div><b>{tr('summary.title')}</b></div>
+            )}
             {roundAudits.map((r) => (
-              <div key={r.round}>
-                R{r.round} B:{r.builderAgree ? '✓' : '✗'}{r.builderAnswer !== '' ? `「${r.builderAnswer.slice(0, 18)}」` : ''} C:{r.challengerAgree ? '✓' : '✗'}{r.challengerAnswer !== '' ? `「${r.challengerAnswer.slice(0, 18)}」` : ''} {r.hasNewInfo ? '' : '·无新增'}
-                {tr('audit.quoted')}{r.quoteAudit.hitRate === null ? '—' : `${r.quoteAudit.quotedLines}/${r.quoteAudit.quotableLines}`} · {tr('audit.relay')}{r.builderRelayChars}字
+              <div key={r.round} title={
+                `${tr('audit.quoted.tip')} · ${tr('audit.relay.tip')}: ${r.builderRelayChars}`
+              }>
+                {r.round <= 0 ? tr('round.opening') : tr('round.n', { n: r.round })}: {roundSummary(r, tr)}
               </div>
             ))}
           </div>
@@ -640,11 +673,13 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
 
 /** 流式卡片:复用同一套分段折叠,但标实时身份,且只展示末尾一段(避免长文刷屏)。 */
 function StreamCard(props: { role: string; round: number; kind: 'text' | 'tools'; text: string }): React.ReactNode {
+  const tr = useTr()
+  const who = `${roundLabel(props.round, props.role, tr)} · ${roleName(props.role, tr)}`
   // 工具心跳是单行状态,不走三段分段,直接渲染。
   if (props.kind === 'tools') {
     return (
       <div className={C('dshd-turn-stream')}>
-        <div className={C('who')}>[R{props.round} {props.role} 调工具中]</div>
+        <div className={C('who')}>{who}{tr('stream.tools')}</div>
         <div>{props.text}<span className={C('caret')}>▍</span></div>
       </div>
     )
@@ -656,7 +691,7 @@ function StreamCard(props: { role: string; round: number; kind: 'text' | 'tools'
   }
   return (
     <div className={C('dshd-turn-stream')}>
-      <div className={C('who')}>[R{props.round} ✍ {props.role} 实时]</div>
+      <div className={C('who')}>{who}{tr('stream.writing')}</div>
       {rest !== '' ? <div>{tail(rest)}<span className={C('caret')}>▍</span></div> : (
         <>
           {summary !== '' && <div className={C('dshd-summary')}>{tail(summary)}<span className={C('caret')}>▍</span></div>}
@@ -670,12 +705,13 @@ function StreamCard(props: { role: string; round: number; kind: 'text' | 'tools'
 
 function TurnCard(props: { turn: Turn }): React.ReactNode {
   const t = props.turn
+  const tr = useTr()
   const [open, setOpen] = useState(false)
   const { summary, detail, delta, rest } = splitSections(t.text)
   const segmented = rest === ''
   return (
     <div className={C('dshd-turn')}>
-      <div className={C('who')}>[R{t.round} #{t.seq} {t.role}]</div>
+      <div className={C('who')}>{roundLabel(t.round, t.role, tr)} · {roleName(t.role, tr)}</div>
       {!segmented && <div>{t.text}</div>}
       {segmented && (
         <>
