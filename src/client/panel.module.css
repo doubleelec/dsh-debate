@@ -110,6 +110,33 @@
 }
 
 /*
+ * 版本告警(v0.4):后台不是最新代码时明确提示,别让徽标骗人。
+ * 用告警色而非中性色,因为"面板是新的、后台是旧的"是个会让人误判的行为陷阱。
+ */
+.dshd-verwarn {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid var(--dsw-alias-border-danger, rgba(224,120,80,.5));
+  border-left: 3px solid var(--dsw-alias-danger, #e0784f);
+  background: var(--dsw-alias-bg-layer-1, #222);
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+}
+
+.dshd-verwarn > b {
+  color: var(--dsw-alias-danger, #e0784f);
+}
+
+.dshd-version-warn {
+  color: var(--dsw-alias-danger, #e0784f);
+  font-weight: 600;
+}
+
+/*
  * 收尾陈述(v4):辩论结束后置顶的决策摘要块。
  * 比一般说明块更显眼(左侧高亮边 + 可滚动上限),因为它就是用户要读的那一段。
  */

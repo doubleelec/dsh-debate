@@ -116,6 +116,12 @@ _Avoid_: 总结，摘要，结论
 对话区是读结论的地方，逐字直播归面板。
 _Avoid_: 直播文本，同步内容
 
+**版本真值（version_truth）**:
+印在面板徽标上的版本必须等于**正在跑的代码版本**，不是磁盘版本。由构建期内联的
+`BUILD_VERSION`（host/client 各一份）+ `assessVersions` 三方对账（内联版本 / 磁盘
+manifest / bundle mtime 与进程启动时刻）保证；后台版本取不到时显示 `v?`，不冒充新版本。
+_Avoid_: 版本号，build 号，缓存版本
+
 **钢人化复述（steelmanning）**:
 挑战者开火前先复述对方最强版本的义务，复述不对本轮无效。
 _Avoid_: 复述，换位思考，同理心

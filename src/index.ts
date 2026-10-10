@@ -32,6 +32,7 @@ export interface TextContentBlock {
 }
 import type { DebateConfig, DebateMap, DebateRound, DebateStatus, TranscriptEntry } from './debate'
 import { DEFAULT_CONFIG, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscript, toDebateRound, roundConverged, isSaturated, slimHandoff, formatPendingFocus, sectionText, parseAnswer, extractDecisionSummary, buildFallbackSummary, DECISION_SECTION } from './debate'
+import { BUILD_VERSION, assessVersions, type VersionFacts } from './version'
 import { findLens, type LensTemplate } from './lenses'
 
 /** 请求面(结构子集,镜像 explorer)。 */
@@ -136,6 +137,31 @@ function mirror(parent: ParentAgent, session: DebateSession, text: string): void
 function setProgress(session: DebateSession, progress: string): void {
   session.progress = progress
   session.updatedAt = Date.now()
+}
+
+/**
+ * 收集版本对账事实(磁盘探针失败一律降级为 null,不抛:版本显示不该拖垮面板)。
+ * `running` 来自构建期内联常量——**这是本进程真正在跑的代码版本**,不是磁盘现在的版本。
+ * @internal 导出供版本真值集成测试用(直接打真实构建产物 + 真实磁盘 manifest)。
+ */
+export async function versionFacts(): Promise<VersionFacts> {
+  const startedAtMs = Date.now() - Math.round(process.uptime() * 1000)
+  let disk: string | null = null
+  let bundleMtimeMs: number | null = null
+  try {
+    const fs = await import('node:fs') as unknown as {
+      readFileSync(p: string | URL, enc: string): string
+      statSync(p: string | URL): { mtimeMs: number }
+    }
+    try {
+      const manifest = JSON.parse(fs.readFileSync(new URL('../dsh.plugin.json', import.meta.url), 'utf-8')) as { version?: unknown }
+      disk = typeof manifest.version === 'string' ? manifest.version : null
+    } catch { /* 读不到就不对比版本号,只看 mtime */ }
+    try {
+      bundleMtimeMs = fs.statSync(new URL('./index.js', import.meta.url)).mtimeMs
+    } catch { /* vitest 从源码直跑时没有 lib/index.js */ }
+  } catch { /* fs 不可用:只报 running,面板退化为"无对账" */ }
+  return { running: BUILD_VERSION, disk, bundleMtimeMs, startedAtMs }
 }
 
 /**
@@ -1498,6 +1524,17 @@ export default {
           controllers.set(session.id, ctl)
           void runHostDebate(ctx, session, hint, sid, ctl.signal)
           return writeJson(res, { ok: true, id: session.id })
+        },
+      },
+      {
+        kind: 'exact',
+        path: '/dsh-debate/api/version',
+        handler: async (_req, res) => {
+          // 版本真值:面板拿 running 显示徽标,拿 stale/reason 提示"需重启宿主"。
+          // 旧进程没有这条路由(404),面板据此也能判定"后台是旧的"。
+          const facts = await versionFacts()
+          const verdict = assessVersions(facts)
+          return writeJson(res, { ok: true, ...facts, ...verdict })
         },
       },
       {

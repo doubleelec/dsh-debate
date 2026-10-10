@@ -8,7 +8,16 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import styles from './panel.module.css'
-import pkg from '../../package.json'
+import { BUILD_VERSION, isClientStale } from '../version'
+
+/** /api/version 响应:host 报的"我真正在跑的版本" + 与磁盘的对账结论。 */
+interface VersionResp {
+  ok?: boolean
+  running?: string
+  disk?: string | null
+  stale?: boolean
+  reason?: string | null
+}
 import { splitSections } from './sections'
 import { resolveSessionId } from './session'
 import { roleName, roundLabel, roundSummary } from './labels'
@@ -74,6 +83,12 @@ const DICTS: Record<string, Record<string, string>> = {
     'decision.title': '辩论结论(可直接回填到输入框)',
     'decision.copy': '回填到输入框',
     'summary.pending': '未决{n}条',
+    'ver.tip': '后台(实际在跑)v{host} · 界面 v{client} · 磁盘 v{disk}',
+    'ver.warnTitle': '版本不一致',
+    'ver.unknown': '取不到后台版本:这个宿主没有版本接口(通常是改完代码没重启宿主)。徽标显示 v? 而不是假装是新版本。重启宿主后此处会显示真实版本。',
+    'ver.unknownTip': '后台版本未知(宿主未重启或接口不可用)',
+    'ver.hostStale': '{reason}',
+    'ver.clientStale': '浏览器还在用旧界面(v{client}),后台已经是 v{host}:强制刷新页面(Ctrl+Shift+R)即可,不用重启宿主。',
   },
   en: {
     'panel.title': 'Two-lens debate', 'tip': 'Builder / challenger / synthesizer map for open questions',
@@ -116,6 +131,12 @@ const DICTS: Record<string, Record<string, string>> = {
     'decision.title': 'Debate conclusion (paste-ready)',
     'decision.copy': 'Send to composer',
     'summary.pending': '{n} open',
+    'ver.tip': 'backend (running) v{host} · UI v{client} · disk v{disk}',
+    'ver.warnTitle': 'Version mismatch',
+    'ver.unknown': 'Cannot read the backend version: this host has no version endpoint, which usually means the code was rebuilt but the host was not restarted. The badge shows v? instead of pretending to be current; restart the host to see the real version.',
+    'ver.unknownTip': 'Backend version unknown (host not restarted, or endpoint unavailable)',
+    'ver.hostStale': '{reason}',
+    'ver.clientStale': 'The browser still runs the old UI (v{client}) while the backend is v{host}: hard-refresh (Ctrl+Shift+R); no host restart needed.',
   },
 }
 
@@ -289,6 +310,12 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
   const [mirrorError, setMirrorError] = useState<string | null>(null)
   // 收尾陈述(v4):host 在辩论结束后拼好的决策摘要,面板置顶展示 + 一键回填输入框。
   const [decision, setDecision] = useState<string | null>(null)
+  /**
+   * 版本对账(v0.4):徽标显示**后台真正在跑的版本**(host 内联常量),不是磁盘版本。
+   * null = 还没拿到;verMissing = 后台没这条路由(旧宿主)或取数失败。
+   */
+  const [ver, setVer] = useState<VersionResp | null>(null)
+  const [verMissing, setVerMissing] = useState(false)
   // 实时流:host 把常驻 turn 的流式累计文本推到 state.streaming,面板即见打字机效果。
   const [streams, setStreams] = useState<Record<string, { round: number; kind: 'text' | 'tools'; text: string }>>({})
   // 秒级进度(host 每方开写/写完都更新,面板 2s 轮询即见,不用等模型输出)。
@@ -426,9 +453,39 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
     }
   }, [])
 
-  useEffect(() => () => {
-    if (timer.current !== null) window.clearInterval(timer.current)
+  /**
+   * 版本对账取数(15s 一次,开销 = 一次 stat + 读一个小 JSON)。
+   * 只在面板打开期间跑:重建 bundle 后无需重启宿主就能看到"需重启宿主"提示——
+   * 这正是此前"徽标说 v0.3.0、后台跑 v0.2.0"的盲区。
+   */
+  useEffect(() => {
+    let alive = true
+    const fetchVersion = async (): Promise<void> => {
+      try {
+        // 不用共享 api():那条路假设响应一定是 JSON。这里非 2xx(旧宿主没这条路由,
+        // 实测返回 405)必须当成"后台版本未知",不能静默当成成功。
+        const res = await fetch('/dsh-debate/api/version', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: '{}',
+        })
+        if (!res.ok) { if (alive) setVerMissing(true); return }
+        const v = await res.json() as VersionResp
+        if (!alive) return
+        if (v.ok !== true || typeof v.running !== 'string') { setVerMissing(true); return }
+        setVerMissing(false)
+        setVer(v)
+      } catch {
+        if (alive) setVerMissing(true)
+      }
+    }
+    void fetchVersion()
+    const t = window.setInterval(() => { void fetchVersion() }, 15000)
+    return () => { alive = false; window.clearInterval(t) }
   }, [])
+
+  useEffect(() => () => {
+    if (timer.current !== null) window.clearInterval(timer.current)  }, [])
 
   const start = async (): Promise<void> => {
     setError(null); setTurns([]); setCopied(false); setResolved(null); setProgress('')
@@ -537,6 +594,24 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
     return false
   }
 
+  // ---------- 版本真值(v0.4):徽标必须等于"后台真正在跑的版本" ----------
+  // 取不到后台版本时显示 v? 并说明原因——绝不回落成本 bundle 的版本冒充后台版本,
+  // 那正是"徽标 v0.3.0、后台跑 v0.2.0"这个谎的来源。
+  const hostUnknown = verMissing || (ver !== null && typeof ver.running !== 'string')
+  const runningVersion = ver?.running ?? ''
+  const clientStale = runningVersion !== '' && isClientStale(BUILD_VERSION, runningVersion)
+  const versionText = hostUnknown ? 'v?' : `v${runningVersion}`
+  const versionTip = hostUnknown
+    ? tr('ver.unknownTip')
+    : tr('ver.tip', { host: runningVersion, client: BUILD_VERSION, disk: ver?.disk ?? '?' })
+  const versionWarn = hostUnknown
+    ? tr('ver.unknown')
+    : ver?.stale === true
+      ? tr('ver.hostStale', { reason: ver.reason ?? '' })
+      : clientStale
+        ? tr('ver.clientStale', { client: BUILD_VERSION, host: runningVersion })
+        : null
+
   // 最小化胶囊:只占右下角一条,轮询不停,点恢复回到完整窗口。
   if (minimized) {
     const miniLabel = status === 'running' ? tr('minimized.running') : status === 'done' ? tr('minimized.done') : tr(`st.${status}`)
@@ -544,7 +619,7 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
       <button className={C('dshd-mini')} onClick={() => setMinimized(false)} title={tr('btn.restore')} aria-label={tr('btn.restore')}>
         <span className={C(status === 'running' ? 'dot-live' : 'dot-done')} />
         <span>⚔ {miniLabel}</span>
-        <span className={C('dshd-version')} title={pkg.version}>v{pkg.version}</span>
+        <span className={C('dshd-version') + (versionWarn !== null ? ` ${C('dshd-version-warn')}` : '')} title={versionTip}>{versionText}{versionWarn !== null ? ' ⚠' : ''}</span>
       </button>
     )
   }
@@ -562,7 +637,7 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
     >
       <div className={C('dshd-header')}>
         <span>⚔ {tr('panel.title')}</span>
-        <span className={C('dshd-version')} title={pkg.version}>v{pkg.version}</span>
+        <span className={C('dshd-version') + (versionWarn !== null ? ` ${C('dshd-version-warn')}` : '')} title={versionTip}>{versionText}{versionWarn !== null ? ' ⚠' : ''}</span>
         <span className={C('spacer')} />
         <button className={C('dshd-hbtn')} onClick={toggleFullscreen} title={fullscreen ? tr('btn.unfullscreen') : tr('btn.fullscreen')} aria-label={fullscreen ? tr('btn.unfullscreen') : tr('btn.fullscreen')}>{fullscreen ? '⤢' : '⛶'}</button>
         <button className={C('dshd-hbtn')} onClick={() => setMinimized(true)} title={tr('btn.minimize')} aria-label={tr('btn.minimize')}>—</button>
@@ -570,6 +645,13 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
       </div>
       <div className={C('dshd-body')}>
         <div className={C('dshd-note')}>{tr('auto.note')}</div>
+        {/* 版本告警(v0.4):后台不是最新代码时明确说清楚,别让徽标骗人。 */}
+        {versionWarn !== null && (
+          <div className={C('dshd-verwarn')} role="alert">
+            <b>{tr('ver.warnTitle')}</b>
+            <span>{versionWarn}</span>
+          </div>
+        )}
         {/* 实况进度置顶:谁在写一眼可见 */}
         {progress !== '' && (status === 'running' || status === 'done') && (
           <div className={C('dshd-livebar')}>
@@ -832,7 +914,7 @@ function SettingsView(): React.ReactNode {
     <div>
       <h3>⚔ {tr('panel.title')}</h3>
       <p>{tr('settings.note')}</p>
-      <p>{tr('version', { ver: pkg.version })}</p>
+      <p>{tr('version', { ver: BUILD_VERSION })}</p>
     </div>
   )
 }

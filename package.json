@@ -1,6 +1,6 @@
 {
   "name": "@doubleelec/dsh-debate",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "DSH native plugin that debates open-ended questions via builder/challenger/synthesizer roles and returns a structured, chat-readable argument map. | 双视角辩论(原生插件):为开放性论证题跑建构/挑战/制图三角色,产出结构化、可直接在对话里读的论证地图,而非单一结论。",
   "license": "MIT",
   "type": "module",

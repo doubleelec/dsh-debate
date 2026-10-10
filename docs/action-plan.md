@@ -1,7 +1,9 @@
 # dsh-debate Action Plan
 
-> Resume point: S7 (协议 v4 聚焦与收尾) 实现完成并本地验证通过——协议层直跑断言 39/39、`tsc --noEmit` / `npm run build` 绿、pytest 治理门 15 passed。
-> 仍未做的是**真跑复验**：新协议下跑一局真辩论，核对 (a) 轮数是否真的下降、(b) 挑战者是否守约输出 `待决清单=` 行、(c) 对话区字数与收尾陈述是否可读。决策依据与预期读数见 ADR-0017。
+> Resume point: S7（协议 v4 聚焦与收尾）+ S8（版本真值）实现完成并本地验证通过——协议层直跑断言 39/39、版本真值集成断言 8/8（打真实构建产物）、`tsc --noEmit` / `npm run build` 绿、pytest 治理门 15 passed。
+> **迁到 v0.4.0 必须先重启宿主进程**：`lib/index.js` 只在宿主启动时加载，DSH 无插件热重载（ADR-0018）。
+> 重启前面板徽标显示 `v?` + 告警（旧宿主没有 `/api/version`，实测 POST 返回 405），这是设计行为不是故障。
+> 重启后徽标应显示 `v0.4.0` 且无告警；随后跑一局真辩论复验 S7：(a) 轮数是否真的下降、(b) 挑战者是否守约输出 `待决清单=` 行、(c) 对话区字数与收尾陈述是否可读。
 
 ## Waves
 
@@ -46,3 +48,4 @@
 | S5 | 目标工作区(targetCwd):评审别家工程 + 实况 API 基址推导 + sessionId 露出 | done (2026-09-30) | vitest **56/56** + verify12 ai_proxy 联调(挑战者读到 architecture-auto.md) + 全门禁绿 |
 | S6 | 面板可读性:重开版本号徽标 + 可缩放/全屏(纵向覆盖输入框)/最小化 + 人话轮次标签与轮次小结 + 删独立实况页 + 纯函数抽取(`labels.ts`/`dialogLayout.ts`) | done (2026-10-01) | tsc/build 绿 + 纯函数直跑断言(labels 10/10、dialogLayout 14/14) + 生产 3080 目视 |
 | S7 | 协议 v4 聚焦与收尾:未决清单焦点账本 + 新增判定只看变化段 + 篇幅预算 + 对话区镜像摘要 + 收尾陈述(决策摘要/兜底)+ 面板收尾块 | done (2026-10-01) | 协议层直跑断言 **39/39** + vitest 用例已补 + tsc/build 绿 + pytest 治理门 15 passed |
+| S8 | 版本真值:构建期内联 `BUILD_VERSION` + `/api/version` 三方对账(内联/磁盘/mtime vs 启动时刻)+ 徽标显示正在跑的版本(取不到显示 `v?`)+ 重启宿主/刷新页面两类提示 | done (2026-10-01) | 真实构建产物集成断言 **8/8**(running==disk、mtime 可读、stale=false、反事实判 stale)+ tsc/build 绿 + pytest 治理门绿 |
