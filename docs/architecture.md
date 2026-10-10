@@ -63,12 +63,10 @@ flowchart TD
     index["src/index.ts<br/>(host: 路由/循环/工具笼/超时)"]
     debate["src/debate.ts<br/>(协议: 分类/背景/prompt/判定)"]
     lenses["src/lenses.ts<br/>(视角模板库 v0.1)"]
-    live["src/live.ts<br/>(实况页直出)"]
     client["src/client<br/>(overlay 对话框/折叠实录)"]
 
     index -->|"classify/extract/build*"| debate
     index -->|"findLens"| lenses
-    index -->|"renderLivePage"| live
     client -->|"POST start/state/stop"| index
 ```
 
@@ -79,8 +77,7 @@ flowchart TD
     - **共用**：`runHostDebate`（后台直驱 open→round×N→synthesize + 停机三条件）、`createFullParent`（webhook 样板挂 preset）、`mirror`（`user/message` + `surfaceOp:'append'`）。
   - `src/debate.ts`: `classifyQuestion`（关键词启发式）、`extractSessionContext`（4000 字截断）、`buildBuilderPrompt/buildBuilderRoundPrompt/buildChallengerPrompt/buildSynthesizerPrompt`（三段式：结论摘要/详细论证/本轮变化）、`parseAgree/parseAnswer/detectNewInfo/isConverged`（停机协议）、`isSaturated/normalizeAnswer/containsBannedPhrase`、`STOP_PROTOCOL_VERSION`（B5 解析版本位）、`auditQuotes/QUOTE_FRAG_LEN/QUOTE_HIT_ALERT`（B6 片段级引用审计）。
   - `src/lenses.ts`: 四类题型种子模板（selection/review/tradeoff/causal）。
-  - `src/live.ts`: `/dsh-debate/live` 静态实况页（无 React 依赖），meta 区接停机审计（stopReason + 每轮 agree/引用/交棒字数）与镜像状态。
-  - `src/client`: 停机审计块 + 镜像状态行（state 早有字段，S3 才接上）；`sections.ts` 纯分段函数（`splitSections` 从 index.tsx 抽出，可单测不拖 React/CSS）。
+  - `src/client`: 停机审计块 + 镜像状态行（state 早有字段，S3 才接上）；`sections.ts` 纯分段函数（`splitSections` 从 index.tsx 抽出，可单测不拖 React/CSS）。实况只在辩论框内看（2s 轮询 `TurnCard/StreamCard`），独立实况页已删除（生产环境反向代理下基址推导打偏，只会“连接中…”）。
   - `src/client`: `DebateDialog`（2s 轮询 + 分段折叠 `TurnCard`）、`InputEntry`（草稿门控）、`useSessions.current` 透传（修 `input.right` 空 props 的根子）。
 
 ### 4.3 Module Documentation Map

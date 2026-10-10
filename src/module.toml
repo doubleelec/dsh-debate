@@ -6,7 +6,7 @@
 
 [module]
 name = "src"
-description = "Debate host, protocol, lenses, live page, and browser bundle."
+description = "Debate host, protocol, lenses, and browser bundle."
 submodules = [
     "client",
 ]

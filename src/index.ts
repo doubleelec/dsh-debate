@@ -33,7 +33,6 @@ export interface TextContentBlock {
 import type { DebateConfig, DebateMap, DebateRound, DebateStatus, TranscriptEntry } from './debate'
 import { DEFAULT_CONFIG, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscript, toDebateRound, roundConverged, isSaturated, slimHandoff } from './debate'
 import { findLens, type LensTemplate } from './lenses'
-import { renderLivePage } from './live'
 
 /** 请求面(结构子集,镜像 explorer)。 */
 export interface DebateHttpRequest {
@@ -1486,24 +1485,6 @@ export default {
       },
       {
         kind: 'exact',
-        path: '/dsh-debate/live',
-        handler: async (req, res) => {
-          // 实况页:host 直出独立 HTML,window.open 新窗口打开,不经 React/slot/CSS 缓存。
-          // id 从 query 取(?id=xxx);未知 id 也照常出页,页内轮询会报 unknown-id。
-          try {
-            const raw = typeof req.url === 'string' ? req.url : '/dsh-debate/live'
-            const id = new URL(raw, 'http://x').searchParams.get('id') ?? ''
-            const html = renderLivePage(id)
-            res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' })
-            res.end(html)
-          } catch {
-            res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' })
-            res.end('bad live page request')
-          }
-        },
-      },
-      {
-        kind: 'exact',
         path: '/dsh-debate/api/debug-child-tools',
         handler: async (req, res) => {
           // 真探针:起一个一次性子 agent,让它自己报手里有什么工具。
@@ -1849,7 +1830,7 @@ export default {
           void runHostDebate(ctxLike, session, hint, '', ctl.signal, parent)
           return (
             `⚔ 辩论已开(会话 ${session.id},工作区 ${parsed.config.targetCwd ?? '默认'}):后台直驱中,` +
-            `面板输入此 id 跟局,或点面板"在独立实况页打开"。进度与实录会同步进本会话。`
+            `面板输入此 id 跟局看实况。进度与实录会同步进本会话。`
           )
         },
       })

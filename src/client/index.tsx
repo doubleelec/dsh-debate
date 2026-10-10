@@ -11,6 +11,11 @@ import styles from './panel.module.css'
 import pkg from '../../package.json'
 import { splitSections } from './sections'
 import { resolveSessionId } from './session'
+import {
+  DIALOG_DEFAULT_H, DIALOG_DEFAULT_W,
+  clampDialogHeight, clampDialogWidth, clampStoredHeight, clampStoredWidth,
+  loadManualHeight, loadManualWidth, saveManualHeight, saveManualWidth,
+} from './dialogLayout'
 
 const C = (k: string): string => styles[k] ?? k
 
@@ -49,6 +54,9 @@ const DICTS: Record<string, Record<string, string>> = {
     'map.disputes': '分歧地图', 'map.gaps': '缺口清单',
     'settings.nav': '辩论', 'settings.note': '默认模型与轮数(面板每次可改)。',
     'version': '版本 v{ver}',
+    'btn.fullscreen': '全屏', 'btn.unfullscreen': '退出全屏', 'btn.minimize': '最小化',
+    'btn.restore': '恢复', 'resize.tip': '右下角拖拽调整大小,双击恢复默认',
+    'minimized.running': '辩论进行中…', 'minimized.done': '辩论已结束',
   },
   en: {
     'panel.title': 'Two-lens debate', 'tip': 'Builder / challenger / synthesizer map for open questions',
@@ -72,6 +80,9 @@ const DICTS: Record<string, Record<string, string>> = {
     'map.disputes': 'Disputes', 'map.gaps': 'Gaps',
     'settings.nav': 'Debate', 'settings.note': 'Default models and rounds (overridable per run).',
     'version': 'Version v{ver}',
+    'btn.fullscreen': 'Fullscreen', 'btn.unfullscreen': 'Exit fullscreen', 'btn.minimize': 'Minimize',
+    'btn.restore': 'Restore', 'resize.tip': 'Drag from the corner to resize, double-click to reset',
+    'minimized.running': 'Debate running…', 'minimized.done': 'Debate finished',
   },
 }
 
@@ -146,6 +157,77 @@ function routeLabel(r: { provider: string; model: string }): string {
   return `${r.provider}/${r.model}`
 }
 
+// ---------- 全屏测量:只罩会话消息区(照抄 explorer measureFullscreen) ----------
+// 左边界顺输入框向上冒泡找会话列容器;右 = details 栏左 edge - 8;
+// 上 = 固定 0(顶满视口);下 = 视口底往上预留 132(输入框恒露出来)。
+const viewportHeight = (): number => Math.min(window.innerHeight, window.visualViewport?.height ?? window.innerHeight)
+const rectOf = (el: Element | null): DOMRect | null =>
+  el instanceof HTMLElement ? el.getBoundingClientRect() : null
+const isVisibleRect = (r: DOMRect | null): r is DOMRect =>
+  !!r && r.width > 0 && r.height > 0
+function pickVisible(sel: string): Element | null {
+  const all = Array.from(document.querySelectorAll(sel))
+  let best: Element | null = null
+  let bestArea = 0
+  for (const el of all) {
+    const r = rectOf(el)
+    if (!isVisibleRect(r)) continue
+    const area = r.width * r.height
+    if (area > bestArea) { bestArea = area; best = el }
+  }
+  return best
+}
+const queryComposer = (): Element | null =>
+  pickVisible('[data-slot="conversation.composer.bar"], [data-slot="conversation.composer"], [data-composer-card]')
+const queryConvCol = (header: Element | null): Element | null => {
+  const viaHeader = header instanceof HTMLElement ? header.closest('[data-slot="conversation"]') : null
+  if (viaHeader instanceof HTMLElement && isVisibleRect(rectOf(viaHeader))) return viaHeader
+  return pickVisible('[data-slot="conversation"]')
+}
+const queryHeader = (): Element | null =>
+  pickVisible('[data-slot="conversation.session.header"]')
+const measureFullscreen = (): { top: number; left: number; width: number; height: number } => {
+  const vh = viewportHeight()
+  const vw = window.innerWidth
+  const header = queryHeader()
+  const composer = queryComposer()
+  const details = pickVisible('[data-slot="details"]')
+  const composerRect = rectOf(composer)
+  const dtRect = rectOf(details)
+  let colRect: DOMRect | null = null
+  let colLeft: number | null = null
+  if (composer instanceof HTMLElement && isVisibleRect(composerRect)) {
+    let p: HTMLElement | null = composer.parentElement
+    while (p && p !== document.body) {
+      const r = rectOf(p)
+      if (isVisibleRect(r) && r.width >= composerRect.width + 40) {
+        if (colLeft === null) colLeft = r.left
+        if (r.top <= composerRect.top - 100) { colRect = r; break }
+      }
+      p = p.parentElement
+    }
+  }
+  if (!colRect) {
+    const col = queryConvCol(header)
+    const r = rectOf(col)
+    if (isVisibleRect(r)) colRect = r
+  }
+  const left = colRect ? Math.round(colRect.left) + 8 : colLeft !== null ? Math.round(colLeft) + 8 : 16
+  const right = isVisibleRect(dtRect) && dtRect.left > left ? Math.round(dtRect.left) - 8 : vw - 16
+  const top = 0
+  let bottomLimit = vh - 132
+  if (isVisibleRect(composerRect)) {
+    const measured = Math.round(composerRect.top) - 8
+    if (measured < bottomLimit) bottomLimit = measured
+  }
+  return {
+    top,
+    left,
+    width: Math.max(320, right - left),
+    height: Math.max(320, bottomLimit - top),
+  }
+}
+
 function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) => unknown }): React.ReactNode {
   const tr = useTr()
   const [builder, setBuilder] = useState(0)
@@ -161,8 +243,6 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
   const [turns, setTurns] = useState<Turn[]>([])
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
-  // 实况链接复制反馈(与地图复制共用一套超时清零节奏,独立状态)。
-  const [copiedLive, setCopiedLive] = useState(false)
   // 停机审计:host 早就经 /state 返回 stopReason + rounds[],之前面板没接,现在接上(QAS-2)。
   const [stopReason, setStopReason] = useState<string | null>(null)
   const [roundAudits, setRoundAudits] = useState<RoundAudit[]>([])
@@ -173,7 +253,100 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
   const [streams, setStreams] = useState<Record<string, { round: number; kind: 'text' | 'tools'; text: string }>>({})
   // 秒级进度(host 每方开写/写完都更新,面板 2s 轮询即见,不用等模型输出)。
   const [progress, setProgress] = useState('')
+  // 窗口态:全屏罩会话区 / 最小化缩成胶囊(轮询不停,恢复即见最新实况)。
+  const [fullscreen, setFullscreen] = useState(false)
+  const [minimized, setMinimized] = useState(false)
+  const [fullRect, setFullRect] = useState({ top: 0, left: 16, width: 640, height: 480 })
+  // 手动尺寸:localStorage 持久化,双击拉手恢复默认。
+  const [manualH, setManualH] = useState<number | null>(() => loadManualHeight())
+  const [manualW, setManualW] = useState<number | null>(() => loadManualWidth())
   const timer = useRef<number | null>(null)
+  const toggleFullscreen = (): void => {
+    if (!fullscreen) {
+      try { setFullRect(measureFullscreen()) } catch { /* 测量失败用旧矩形 */ }
+    }
+    setFullscreen((v) => !v)
+  }
+  // Esc:全屏时先退全屏,再按才关;最小化时先恢复。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      let handled = false
+      setFullscreen((v) => { if (v) { handled = true; return false } return v })
+      if (handled) return
+      setMinimized((v) => { if (v) { handled = true; return false } return v })
+      if (!handled) props.onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  // 全屏时跟随窗口/布局重测矩形。
+  useEffect(() => {
+    if (!fullscreen) return
+    const update = (): void => { try { setFullRect(measureFullscreen()) } catch { /* 保持旧矩形 */ } }
+    window.addEventListener('resize', update)
+    window.visualViewport?.addEventListener('resize', update)
+    return () => { window.removeEventListener('resize', update); window.visualViewport?.removeEventListener('resize', update) }
+  }, [fullscreen])
+  // 右下角拉手:右拉变宽/下拉变高,松开即存 localStorage;双击恢复默认。
+  // 全屏时拉手仍可见,第一次拖动即退出全屏(从当前视觉尺寸连续收缩,不跳变)。
+  const resizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number; curW: number; curH: number; moved: boolean; wasFullscreen: boolean } | null>(null)
+  const fullscreenRef = useRef(fullscreen)
+  fullscreenRef.current = fullscreen
+  const fullRectRef = useRef(fullRect)
+  fullRectRef.current = fullRect
+  const applyResizeDelta = (clientX: number, clientY: number): void => {
+    const st = resizeRef.current
+    if (!st) return
+    if (!st.moved) {
+      st.moved = true
+      if (st.wasFullscreen) setFullscreen(false)
+    }
+    const h = clampDialogHeight(st.startH + (clientY - st.startY), 48, viewportHeight())
+    const w = clampDialogWidth(st.startW + (clientX - st.startX), window.innerWidth)
+    st.curW = w
+    st.curH = h
+    setManualW(w)
+    setManualH(h)
+  }
+  const endResize = (): void => {
+    // 点按无移动直接丢弃(全屏下点一下不应把全屏尺寸存成手动尺寸)。
+    if (resizeRef.current?.moved) { saveManualWidth(resizeRef.current.curW); saveManualHeight(resizeRef.current.curH) }
+    resizeRef.current = null
+    document.removeEventListener('mousemove', onResizeMove)
+    document.removeEventListener('mouseup', endResize)
+    document.removeEventListener('touchmove', onResizeTouchMove)
+    document.removeEventListener('touchend', endResize)
+  }
+  const onResizeMove = (ev: MouseEvent): void => applyResizeDelta(ev.clientX, ev.clientY)
+  const onResizeTouchMove = (ev: TouchEvent): void => {
+    if (ev.touches.length > 0) applyResizeDelta(ev.touches[0].clientX, ev.touches[0].clientY)
+  }
+  const onResizeDown = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    const wasFullscreen = fullscreenRef.current
+    const fr = fullRectRef.current
+    const startW = wasFullscreen ? fr.width : manualW ?? DIALOG_DEFAULT_W
+    const startH = wasFullscreen ? fr.height : manualH ?? DIALOG_DEFAULT_H
+    resizeRef.current = { startX: e.clientX, startY: e.clientY, startW, startH, curW: startW, curH: startH, moved: false, wasFullscreen }
+    document.addEventListener('mousemove', onResizeMove)
+    document.addEventListener('mouseup', endResize)
+  }
+  const onResizeTouchStart = (e: React.TouchEvent): void => {
+    if (e.touches.length === 0) return
+    const wasFullscreen = fullscreenRef.current
+    const fr = fullRectRef.current
+    const startW = wasFullscreen ? fr.width : manualW ?? DIALOG_DEFAULT_W
+    const startH = wasFullscreen ? fr.height : manualH ?? DIALOG_DEFAULT_H
+    resizeRef.current = { startX: e.touches[0].clientX, startY: e.touches[0].clientY, startW, startH, curW: startW, curH: startH, moved: false, wasFullscreen }
+    document.addEventListener('touchmove', onResizeTouchMove, { passive: false })
+    document.addEventListener('touchend', endResize)
+  }
+  const onResizeReset = (): void => {
+    if (fullscreenRef.current) setFullscreen(false)
+    setManualH(null); saveManualHeight(null); setManualW(null); saveManualWidth(null)
+  }
   // 当前会话 id + cwd:服务线 sessionCwd 优先(0.2.0 官方线),overlay 快照只做回退。
   let liveSid = currentSid
   let liveCwd: string | null = sessionCwd
@@ -307,12 +480,35 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
     return false
   }
 
+  // 最小化胶囊:只占右下角一条,轮询不停,点恢复回到完整窗口。
+  if (minimized) {
+    const miniLabel = status === 'running' ? tr('minimized.running') : status === 'done' ? tr('minimized.done') : tr(`st.${status}`)
+    return (
+      <button className={C('dshd-mini')} onClick={() => setMinimized(false)} title={tr('btn.restore')} aria-label={tr('btn.restore')}>
+        <span className={C(status === 'running' ? 'dot-live' : 'dot-done')} />
+        <span>⚔ {miniLabel}</span>
+        <span className={C('dshd-version')} title={pkg.version}>v{pkg.version}</span>
+      </button>
+    )
+  }
+  const overlayStyle: React.CSSProperties = fullscreen
+    ? { top: fullRect.top, left: fullRect.left, width: fullRect.width, height: fullRect.height, maxHeight: 'none' }
+    : {
+        width: clampStoredWidth(manualW, typeof window === 'undefined' ? 1280 : window.innerWidth) ?? DIALOG_DEFAULT_W,
+        height: clampStoredHeight(manualH, 48, typeof window === 'undefined' ? 800 : viewportHeight()) ?? DIALOG_DEFAULT_H,
+      }
   return (
-    <div className={C('dshd-overlay')} role="dialog" aria-label={tr('panel.title')}>
+    <div
+      className={C('dshd-overlay') + (fullscreen ? ` ${C('dshd-overlay-full')}` : '')}
+      role="dialog" aria-label={tr('panel.title')}
+      style={overlayStyle}
+    >
       <div className={C('dshd-header')}>
         <span>⚔ {tr('panel.title')}</span>
         <span className={C('dshd-version')} title={pkg.version}>v{pkg.version}</span>
         <span className={C('spacer')} />
+        <button className={C('dshd-hbtn')} onClick={toggleFullscreen} title={fullscreen ? tr('btn.unfullscreen') : tr('btn.fullscreen')} aria-label={fullscreen ? tr('btn.unfullscreen') : tr('btn.fullscreen')}>{fullscreen ? '⤢' : '⛶'}</button>
+        <button className={C('dshd-hbtn')} onClick={() => setMinimized(true)} title={tr('btn.minimize')} aria-label={tr('btn.minimize')}>—</button>
         <button className={C('dshd-close')} onClick={props.onClose} aria-label={tr('btn.close')}>✕</button>
       </div>
       <div className={C('dshd-body')}>
@@ -383,8 +579,7 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
         )}
         {sessionId !== null && status === 'running' && (
           <div className={C('dshd-note')}>
-            <a href={`/dsh-debate/live?id=${encodeURIComponent(sessionId)}`} target="_blank" rel="noreferrer">在独立实况页打开(本机直连时用)</a>
-            <div className={C('dshd-sid')}>会话 {sessionId} <button className={C('dshd-copybtn')} onClick={() => { try { void navigator.clipboard?.writeText(`${window.location.origin}/dsh-debate/live?id=${sessionId}`); setCopiedLive(true); window.setTimeout(() => setCopiedLive(false), 1500) } catch { /* 剪贴板不可用时忽略 */ } }}>{copiedLive ? '已复制✓' : '复制实况链接'}</button></div>
+            <div className={C('dshd-sid')}>会话 {sessionId}</div>
           </div>
         )}
         {sessionId !== null && status === 'done' && turns.length > 0 && (
@@ -429,6 +624,14 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
           </div>
         )}
       </div>
+      {/* 右下角拉手:拖拽调尺寸(宽高同时),双击恢复默认;全屏时拖动即退全屏 */}
+      {!minimized && (
+        <div
+          className={C('dshd-resize-corner')}
+          onMouseDown={onResizeDown} onTouchStart={onResizeTouchStart} onDoubleClick={onResizeReset}
+          title={tr('resize.tip')} role="separator" aria-orientation="horizontal" aria-label={tr('resize.tip')}
+        ><span className={C('dshd-resize-corner-bar')} /></div>
+      )}
     </div>
   )
 }
