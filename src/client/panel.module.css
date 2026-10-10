@@ -109,15 +109,45 @@
   word-break: break-word;
 }
 
+/*
+ * 收尾陈述(v4):辩论结束后置顶的决策摘要块。
+ * 比一般说明块更显眼(左侧高亮边 + 可滚动上限),因为它就是用户要读的那一段。
+ */
+.dshd-decision {
+  border: 1px solid var(--dsw-alias-border-l3, rgba(128,128,128,.3));
+  border-left: 3px solid var(--dsw-alias-brand-primary, #4c8dff);
+  background: var(--dsw-alias-bg-layer-1, #222);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+}
+
+.dshd-decision-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary, #9a9a9a);
+}
+
+.dshd-decision-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  max-height: 32vh;
+  overflow: auto;
+}
+
 .dshd-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
   font-size: 13px;
   color: var(--dsw-alias-label-primary, #e8e8e8);
-}
-
-.dshd-field > span {
+}.dshd-field > span {
   font-weight: 600;
 }
 

@@ -31,7 +31,7 @@ export interface TextContentBlock {
   [key: string]: unknown
 }
 import type { DebateConfig, DebateMap, DebateRound, DebateStatus, TranscriptEntry } from './debate'
-import { DEFAULT_CONFIG, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscript, toDebateRound, roundConverged, isSaturated, slimHandoff } from './debate'
+import { DEFAULT_CONFIG, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscript, toDebateRound, roundConverged, isSaturated, slimHandoff, formatPendingFocus, sectionText, parseAnswer, extractDecisionSummary, buildFallbackSummary, DECISION_SECTION } from './debate'
 import { findLens, type LensTemplate } from './lenses'
 
 /** 请求面(结构子集,镜像 explorer)。 */
@@ -96,6 +96,11 @@ interface DebateSession {
    * kind=text 是 assistant 文本增量;kind=tools 是工具心跳(读文件阶段文本还没出来时)。
    */
   streaming: Record<string, { round: number; kind: 'text' | 'tools'; text: string }>
+  /**
+   * 收尾陈述(v4):辩论结束后贴进对话区的那段决策摘要,用户据此定下一步。
+   * 优先取制图输出的「决策摘要」段;制图员漏写时用判定数据兜底(见 buildFallbackSummary)。
+   */
+  decisionSummary: string | null
 }
 
 /**
@@ -131,6 +136,52 @@ function mirror(parent: ParentAgent, session: DebateSession, text: string): void
 function setProgress(session: DebateSession, progress: string): void {
   session.progress = progress
   session.updatedAt = Date.now()
+}
+
+/**
+ * 本轮焦点块(v4 焦点账本):把上一轮挑战者自报的未决清单原样带进下一轮 prompt。
+ * 清单为空 / 上一轮没提供(null)时不加约束——没有账本就别硬编一句空话。
+ */
+export function focusBlockOf(session: DebateSession): string {
+  const last = session.rounds[session.rounds.length - 1]
+  const items = last?.pendingItems
+  if (!items || items.length === 0) return ''
+  return formatPendingFocus(items)
+}
+
+/**
+ * 对话区镜像摘要(v4)。
+ *
+ * 实测动机(2026-10 跑局):旧行为把每一步全文原样 append 进用户会话,10 轮灌进
+ * 10.9 万字(挑战者单轮 8000 字),对话区不可读、上下文被吃光。全文仍在 transcript
+ * (面板逐段折叠看),镜像只留「结论摘要」前几行 + answer,够判断局势即可。
+ */
+export function chatDigest(text: string, maxLines = 3): string {
+  const summary = sectionText(text, '结论摘要')
+  const body = summary !== '' ? summary : text
+  const lines = body.split('\n').map((l) => l.trim()).filter((l) => l !== '')
+  const head = lines.slice(0, maxLines).join('\n')
+  const answer = parseAnswer(text)
+  const tail = answer !== '' ? `\n→ 当前答案:${answer}` : ''
+  return `${head}${tail}`
+}
+
+/**
+ * 收尾陈述包装(v4):辩论结束后贴进对话区的最终消息。
+ * 自足可读:不依赖面板也能看懂结论/分歧/下一步;完整地图指向面板,不再灌一遍。
+ */
+export function finalStatement(question: string, decision: string): string {
+  const body = decision.startsWith('##') ? decision : `## ${DECISION_SECTION}\n${decision}`
+  return [
+    `⚔ 辩论结束 · 结论`,
+    ``,
+    `问题:${question}`,
+    ``,
+    body,
+    ``,
+    `---`,
+    `完整成果地图(五件套:视角/论证/依据/分歧/缺口)在辩论面板里看;需要贴给别人时点面板里的「复制成果地图」。`,
+  ].join('\n')
 }
 
 /** @internal 内存单表(供单元测试调整),不构成公开 API。 */
@@ -433,7 +484,9 @@ export async function runHostDebate(
       },
       onSide: (who: string, title: string, text: string): void => {
         setProgress(session, `${title}已出,面板/对话区同步`)
-        mirror(parent, session, `## ${title}\n\n${text}`)
+        // v4:只镜像「结论摘要」前几行 + answer,不再把全文灌进对话区
+        // (旧行为 10 轮灌 10.9 万字,对话区不可读);全文仍在 transcript,面板可看。
+        mirror(parent, session, `**${title}**\n${chatDigest(text)}`)
       },
     }
     // S1:常驻优先——建对成功则开题+交锋全走交棒(handoff),记忆留在常驻会话里;
@@ -519,8 +572,11 @@ export async function runHostDebate(
       }
       if (verdict === 'saturation') {
         stop = 'saturation'
-        setProgress(session, `第 ${r}/${session.config.maxRounds} 轮无新增信息,覆盖饱和停机`)
-        mirror(parent, session, `🛑 覆盖饱和:第 ${r} 轮无新增视角/缺口/状态变化,交锋提前结束,进入制图。`)
+        const stalled = session.rounds[session.rounds.length - 1]?.pendingItems
+        setProgress(session, `第 ${r}/${session.config.maxRounds} 轮焦点停滞/无新增,提前停机`)
+        mirror(parent, session, stalled && stalled.length > 0
+          ? `🛑 焦点停滞:第 ${r} 轮起未决清单连续两轮没变(仍是 ${stalled.length} 条),再谈也不会推进,提前收尾进入制图。`
+          : `🛑 覆盖饱和:第 ${r} 轮无新增视角/缺口/状态变化,交锋提前结束,进入制图。`)
         break
       }
       if (r < session.config.maxRounds) setProgress(session, `第 ${r}/${session.config.maxRounds} 轮完成,进入第 ${r + 1} 轮`)
@@ -530,7 +586,14 @@ export async function runHostDebate(
     setProgress(session, '交锋完成,制图员写地图中…')
     await stepSynthesize(subagents, parent, session, signal, {
       onStart: () => live.onStart('制图员写地图中…'),
-      onSide: (_role, text) => live.onSide('synthesizer', '成果地图', text),
+      onSide: (_role, text) => {
+        setProgress(session, '成果地图已出')
+        // v4 收尾陈述:制图员的「决策摘要」优先;漏写则用判定数据兜底。
+        // 这段是用户决定下一步的唯一依据,所以单独发一条,不跟地图混在一起。
+        const decision = extractDecisionSummary(text)
+        session.decisionSummary = decision !== '' ? `## ${DECISION_SECTION}\n${decision}` : buildFallbackSummary(auto.question, session.rounds, session.stopReason)
+        mirror(parent, session, finalStatement(auto.question, session.decisionSummary))
+      },
     })
     setProgress(session, '已完成')
     session.status = 'done'
@@ -1218,15 +1281,17 @@ export async function stepRoundResident(
   // 交棒载荷(ADR-0015):对方文本首次进入本方视野传全文,此后跨轮传瘦身;全文留 transcript。
   const brief = prevRound === 0 ? { text: builderPrevRaw, briefChars: builderPrevRaw.length } : slimHandoff(builderPrevRaw)
   const builderPrev = brief.text
+  // v4 焦点账本:上一轮挑战者的未决清单原样带进本轮,只谈这些。
+  const focus = focusBlockOf(session)
   live?.onStart?.('builder')
-  const bOut = await driveResidentTurn(pair.builder, buildBuilderRoundPrompt(auto.question, builderPrev, next, cfg.maxRounds, ctxText), 'builder', signal,
+  const bOut = await driveResidentTurn(pair.builder, buildBuilderRoundPrompt(auto.question, builderPrev, next, cfg.maxRounds, ctxText, focus), 'builder', signal,
     (p) => { session.streaming.builder = { round: next, kind: p.kind, text: p.text } })
   delete session.streaming.builder
   pushEntry(session, 'builder', next, bOut)
   live?.onSide?.('builder', bOut)
   live?.onStart?.('challenger')
   // 同轮内仍传对方全文:挑战者必须能逐条引用原文(否则钢人化复述无从谈起)。
-  const cOut = await driveResidentTurn(pair.challenger, buildChallengerPrompt(auto.question, bOut, '', next, cfg.maxRounds, ctxText), 'challenger', signal,
+  const cOut = await driveResidentTurn(pair.challenger, buildChallengerPrompt(auto.question, bOut, '', next, cfg.maxRounds, ctxText, focus), 'challenger', signal,
     (p) => { session.streaming.challenger = { round: next, kind: p.kind, text: p.text } })
   delete session.streaming.challenger
   pushEntry(session, 'challenger', next, cOut)
@@ -1289,12 +1354,14 @@ export async function stepRound(
   // 与常驻路径同一条交棒规则(ADR-0015):首次全文,此后跨轮瘦身,保证两条驱动方式行为一致。
   const brief = prevRound === 0 ? { text: builderPrevRaw, briefChars: builderPrevRaw.length } : slimHandoff(builderPrevRaw)
   const builderPrev = brief.text
+  // v4 焦点账本:上一轮挑战者的未决清单原样带进本轮,只谈这些。
+  const focus = focusBlockOf(session)
   live?.onStart?.('builder')
-  const bOut = await askSubagent(subagents, parent, session.id, 'builder', buildBuilderRoundPrompt(auto.question, builderPrev, next, cfg.maxRounds, ctxText), cfg.builder, signal)
+  const bOut = await askSubagent(subagents, parent, session.id, 'builder', buildBuilderRoundPrompt(auto.question, builderPrev, next, cfg.maxRounds, ctxText, focus), cfg.builder, signal)
   pushEntry(session, 'builder', next, bOut)
   live?.onSide?.('builder', bOut)
   live?.onStart?.('challenger')
-  const cOut = await askSubagent(subagents, parent, session.id, 'challenger', buildChallengerPrompt(auto.question, bOut, '', next, cfg.maxRounds, ctxText), cfg.challenger, signal)
+  const cOut = await askSubagent(subagents, parent, session.id, 'challenger', buildChallengerPrompt(auto.question, bOut, '', next, cfg.maxRounds, ctxText, focus), cfg.challenger, signal)
   pushEntry(session, 'challenger', next, cOut)
   live?.onSide?.('challenger', cOut)
   session.round = next
@@ -1407,6 +1474,7 @@ export default {
             mode: 'oneShot',
             residentError: 'not-attempted',
             streaming: {},
+            decisionSummary: null,
           }
           // targetCwd 存在性 fail fast:用户填错路径不等开题才挂,建单即报。
           // fs 探针用动态 import(宿主 node 直跑;vitest 下 import 失败则跳过校验,覆盖逻辑由单测保证)。
@@ -1464,6 +1532,7 @@ export default {
             mode: session.mode,
             residentError: session.residentError,
             streaming: session.streaming,
+            decisionSummary: session.decisionSummary,
           })
         },
       },
@@ -1821,6 +1890,7 @@ export default {
             mode: 'oneShot',
             residentError: 'not-attempted',
             streaming: {},
+            decisionSummary: null,
           }
           sessions.set(session.id, session)
           const hint = typeof a.hint === 'string' ? a.hint : ''

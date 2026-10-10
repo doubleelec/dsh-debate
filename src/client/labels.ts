@@ -31,6 +31,8 @@ export interface RoundVerdict {
   challengerAnswer: string
   challengerAgree: boolean
   hasNewInfo: boolean
+  /** v4 焦点账本:本轮挑战者自报的未决条件(null=没提供)。 */
+  pendingItems?: string[] | null
   quoteAudit: { quotedLines: number; quotableLines: number }
 }
 
@@ -51,6 +53,9 @@ export function roundSummary(r: RoundVerdict, tr: TrFn): string {
     verdict = tr('summary.standoff', { b, c })
   }
   const tail: string[] = [r.hasNewInfo ? tr('audit.new') : tr('audit.nonew')]
+  // v4:未决条数是"还要谈几件事"的直接读数,列出来比一串判定标记好懂。
+  const n = r.pendingItems?.length ?? 0
+  if (n > 0) tail.push(tr('summary.pending', { n }))
   if (r.quoteAudit.quotableLines > 0) tail.push(tr('summary.quoted', { q: r.quoteAudit.quotedLines, t: r.quoteAudit.quotableLines }))
   return `${verdict};${tail.join(' · ')}`
 }

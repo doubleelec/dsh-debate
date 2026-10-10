@@ -21,6 +21,17 @@ import {
   detectNewInfo,
   hasNewInfoSignal,
   slimHandoff,
+  parsePendingItems,
+  normalizePending,
+  pendingStalled,
+  formatPendingFocus,
+  changesOf,
+  buildFallbackSummary,
+  extractDecisionSummary,
+  stripDecisionSummary,
+  buildSynthesizerPrompt,
+  DECISION_SECTION,
+  PENDING_MAX_ITEMS,
   type DebateRound,
   type TranscriptEntry,
 } from '../src/debate'
@@ -70,7 +81,7 @@ describe('isSaturated', () => {
   const round = (hasNewInfo: boolean): DebateRound => ({
     round: 1, builderAnswer: 'a', builderAgree: false,
     challengerAnswer: 'b', challengerAgree: false, hasNewInfo, builderRelayChars: 0,
-    protoVersion: STOP_PROTOCOL_VERSION,
+    protoVersion: STOP_PROTOCOL_VERSION, pendingItems: null,
     quoteAudit: { quotableLines: 0, quotedLines: 0, hitLines: [], hitRate: null },
   })
   it('空轮次不饱和', () => {
@@ -317,7 +328,7 @@ describe('stop protocol', () => {
     expect(auditQuotes(builderOut, '我觉得你的成本论证有问题。').quotedLines).toBe(0)
   })
   it('饱和判定走 isSaturated(主循环与协议层同源,不再有死代码)', () => {
-    const r: DebateRound = { round: 1, builderAnswer: 'a', builderAgree: false, challengerAnswer: 'b', challengerAgree: false, hasNewInfo: false, builderRelayChars: 0, protoVersion: STOP_PROTOCOL_VERSION, quoteAudit: { quotableLines: 0, quotedLines: 0, hitLines: [], hitRate: null } }
+    const r: DebateRound = { round: 1, builderAnswer: 'a', builderAgree: false, challengerAnswer: 'b', challengerAgree: false, hasNewInfo: false, builderRelayChars: 0, protoVersion: STOP_PROTOCOL_VERSION, pendingItems: null, quoteAudit: { quotableLines: 0, quotedLines: 0, hitLines: [], hitRate: null } }
     expect(isSaturated([r])).toBe(true)
     expect(isSaturated([])).toBe(false)
   })
@@ -407,7 +418,7 @@ describe('stepwise loop', () => {
       id: 't', config: r.config, status: 'running' as const, round: -1,
       transcript: [] as TranscriptEntry[], map: null, mapText: null, error: null, mirrorToChat: false,
       progress: '', mirrorCount: 0, mirrorError: null, parentSid: null, stopReason: null, rounds: [] as DebateRound[],
-      mode: 'oneShot' as const, residentError: null, streaming: {},
+      mode: 'oneShot' as const, residentError: null, streaming: {}, decisionSummary: null,
       createdAt: 0, updatedAt: 0,
     }
   }
@@ -444,7 +455,7 @@ describe('resident relay', () => {
       id: 't', config: r.config, status: 'running' as const, round: -1,
       transcript: [] as TranscriptEntry[], map: null, mapText: null, error: null, mirrorToChat: false,
       progress: '', mirrorCount: 0, mirrorError: null, parentSid: null, stopReason: null, rounds: [] as DebateRound[],
-      mode: 'oneShot' as const, residentError: null, streaming: {},
+      mode: 'oneShot' as const, residentError: null, streaming: {}, decisionSummary: null,
       createdAt: 0, updatedAt: 0,
     }
   }
@@ -628,5 +639,148 @@ describe('resident relay', () => {
     }
     const pair = { builder: bad, challenger: fakeResident(['MODEL:local-proxy/a']), dispose: async () => {} } as never
     await expect(stepOpenResident(pair, s, signal)).rejects.toThrow('open-failed: builder=')
+  })
+})
+
+// v4 焦点账本 + 收敛/停滞判据 + 收尾陈述(实测 2026-10 跑局:10 轮全 hasNewInfo=true,饱和成死代码)
+describe('v4 pending ledger', () => {
+  const mkRound = (over: Partial<DebateRound> = {}): DebateRound => ({
+    round: 1, builderAnswer: 'a', builderAgree: false,
+    challengerAnswer: 'b', challengerAgree: false, hasNewInfo: true, builderRelayChars: 0,
+    protoVersion: STOP_PROTOCOL_VERSION, pendingItems: null,
+    quoteAudit: { quotableLines: 0, quotedLines: 0, hitLines: [], hitRate: null },
+    ...over,
+  })
+
+  it('parsePendingItems:分号/顿号/竖线都分隔,编号前缀剥掉', () => {
+    expect(parsePendingItems('待决清单=载体需补第四类;C_new 阈值不得借用旧口径'))
+      .toEqual(['载体需补第四类', 'C_new 阈值不得借用旧口径'])
+    expect(parsePendingItems('待决清单: 1) 甲、2) 乙')).toEqual(['甲', '乙'])
+    expect(parsePendingItems('待决清单=甲|乙')).toEqual(['甲', '乙'])
+  })
+
+  it('parsePendingItems:清零与未提供必须区分', () => {
+    // 明确清零 → [](可以收敛)
+    expect(parsePendingItems('待决清单=无')).toEqual([])
+    expect(parsePendingItems('待决清单=0')).toEqual([])
+    expect(parsePendingItems('待决清单=')).toEqual([])
+    // 没这一行 → null(回落旧行为,不能当成"谈完了")
+    expect(parsePendingItems('agree=false\nanswer=上 K8s')).toBeNull()
+  })
+
+  it('parsePendingItems:条数与单条长度都封顶', () => {
+    const many = Array.from({ length: 20 }, (_, i) => `条件${i}`).join(';')
+    expect(parsePendingItems(`待决清单=${many}`)?.length).toBe(PENDING_MAX_ITEMS)
+    const long = parsePendingItems(`待决清单=${'长'.repeat(200)}`)
+    expect(long?.[0].length).toBe(60)
+  })
+
+  it('pendingStalled:连续两轮清单逐条相同才算停滞(顺序无关)', () => {
+    const a = mkRound({ round: 1, pendingItems: ['载体需补第四类', 'C_new 阈值'] })
+    const b = mkRound({ round: 2, pendingItems: ['C_new 阈值', '载体需补第四类'] })
+    expect(pendingStalled([a, b])).toBe(true)
+    // 清单变了 → 还在推进,不停
+    expect(pendingStalled([a, mkRound({ round: 2, pendingItems: ['只有一条'] })])).toBe(false)
+    // 清零 → 不算停滞(该走收敛判定)
+    expect(pendingStalled([a, mkRound({ round: 2, pendingItems: [] })])).toBe(false)
+    // 没提供 → 不算停滞(没有账本不能当作谈不动)
+    expect(pendingStalled([a, mkRound({ round: 2, pendingItems: null })])).toBe(false)
+    expect(pendingStalled([a])).toBe(false)
+  })
+
+  it('isSaturated 收纳焦点停滞(不再只靠信号词)', () => {
+    const frozen = ['甲条件', '乙条件']
+    const r1 = mkRound({ round: 1, hasNewInfo: true, pendingItems: frozen })
+    const r2 = mkRound({ round: 2, hasNewInfo: true, pendingItems: frozen })
+    expect(isSaturated([r1, r2])).toBe(true)
+    // 清单在收敛 → 不饱和
+    expect(isSaturated([r1, mkRound({ round: 2, hasNewInfo: true, pendingItems: ['只剩甲条件'] })])).toBe(false)
+  })
+
+  it('normalizePending 忽略空白标点与排序', () => {
+    expect(normalizePending(['C_new 阈值', ' 载体 需补 '])).toEqual(normalizePending(['载体需补', 'C_new阈值']))
+  })
+
+  it('formatPendingFocus:空清单不加约束,非空给编号与只谈清单的规则', () => {
+    expect(formatPendingFocus([])).toBe('')
+    const f = formatPendingFocus(['甲', '乙'])
+    expect(f).toContain('1. 甲')
+    expect(f).toContain('2. 乙')
+    expect(f).toContain('只处理清单内条目')
+    expect(f).toContain('不得重开清单外已结事项')
+  })
+
+  it('changesOf:只取「本轮变化」段,整篇信号词不再污染判定', () => {
+    const text = '## 结论摘要\n这里提到缺口和补充\n## 详细论证\n又一处新增\n## 本轮变化\n无'
+    expect(changesOf(text)).toBe('无')
+    // 端到端:正文满篇"缺口/补充",但变化段写"无" → 判定无新增(旧口径会永远 true)
+    const long = `## 结论摘要\n结论\n## 详细论证\n${'缺口与补充和新增。'.repeat(200)}\n## 本轮变化\n无\nagree=false\nanswer=x`
+    const rec = toDebateRound(2, long, long, long)
+    expect(rec.hasNewInfo).toBe(false)
+  })
+
+  it('toDebateRound 带上挑战者未决清单', () => {
+    const rec = toDebateRound(2, 'agree=false\nanswer=甲', 'agree=false\nanswer=乙\n待决清单=丙;丁', '旧')
+    expect(rec.pendingItems).toEqual(['丙', '丁'])
+    expect(rec.protoVersion).toBe(4)
+  })
+
+  it('缺「本轮变化」段时回落整篇比对(旧格式不破)', () => {
+    const rec = toDebateRound(2, 'agree=true\nanswer=上 K8s', 'agree=true\nanswer=上K8s。', '旧文本')
+    expect(rec.hasNewInfo).toBe(true)
+  })
+})
+
+describe('v4 decision summary', () => {
+  const mkRound = (over: Partial<DebateRound> = {}): DebateRound => ({
+    round: 1, builderAnswer: '甲', builderAgree: false,
+    challengerAnswer: '乙', challengerAgree: false, hasNewInfo: true, builderRelayChars: 0,
+    protoVersion: STOP_PROTOCOL_VERSION, pendingItems: null,
+    quoteAudit: { quotableLines: 0, quotedLines: 0, hitLines: [], hitRate: null },
+    ...over,
+  })
+
+  it('制图 prompt 要求先出决策摘要再出五件套', () => {
+    const p = buildSynthesizerPrompt('上不上 K8s?', '实录')
+    expect(p).toContain(`## ${DECISION_SECTION}`)
+    // 比段标题的顺序(角色描述里也出现了"成果地图"四个字,不能拿裸词比)。
+    expect(p.indexOf(`## ${DECISION_SECTION}`)).toBeLessThan(p.indexOf('## 成果地图'))
+    expect(p).toContain('建议下一步')
+  })
+
+  it('extractDecisionSummary / stripDecisionSummary 各取所需', () => {
+    const t = `## ${DECISION_SECTION}\n- 结论:上。\n\n## 成果地图\n1. 视角清单\n- 甲`
+    expect(extractDecisionSummary(t)).toBe('- 结论:上。')
+    expect(stripDecisionSummary(t)).toBe('## 成果地图\n1. 视角清单\n- 甲')
+    expect(extractDecisionSummary('没有这一段')).toBe('')
+  })
+
+  it('兜底收尾:收敛时说清收敛并给下一步', () => {
+    const r = [mkRound({ round: 1, builderAgree: true, challengerAgree: true, builderAnswer: '上 K8s', challengerAnswer: '上 K8s' })]
+    const s = buildFallbackSummary('上不上 K8s?', r, 'convergence')
+    expect(s).toContain('## 决策摘要')
+    expect(s).toContain('上 K8s')
+    expect(s).toContain('共识收敛')
+    expect(s).toContain('建议下一步')
+    expect(s).not.toContain('未决清单')
+  })
+
+  it('兜底收尾:未收敛时给双方立场 + 未决清单', () => {
+    const r = [
+      mkRound({ round: 1, builderAnswer: '甲', challengerAnswer: '乙' }),
+      mkRound({ round: 2, builderAnswer: '甲', challengerAnswer: '乙', pendingItems: ['查清峰值口径'] }),
+    ]
+    const s = buildFallbackSummary('选甲还是乙?', r, 'saturation')
+    expect(s).toContain('未收敛')
+    expect(s).toContain('甲')
+    expect(s).toContain('焦点停滞')
+    expect(s).toContain('未决清单(1 条):查清峰值口径')
+    expect(s).toContain('落成待办')
+  })
+
+  it('兜底收尾:空轮次不炸', () => {
+    const s = buildFallbackSummary('问题', [], null)
+    expect(s).toContain('## 决策摘要')
+    expect(s).toContain('未形成明确答案')
   })
 })

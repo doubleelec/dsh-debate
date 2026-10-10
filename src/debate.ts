@@ -42,9 +42,11 @@ export function isConverged(aAgree: boolean, bAgree: boolean, aAnswer: string, b
  * 旧局靠 DebateRound.protoVersion 追溯当时用哪套解析。
  * v1: agree=/answer= 行 + 结论摘要回落;
  * v2: + 对方原文引用用【引R{轮}】…【/引】包裹(供引用审计,B6);
- * v3: + 归一化标点表补 ASCII 全套(半角逗号/句点曾漏判,共识召回补漏,只加不减)。
+ * v3: + 归一化标点表补 ASCII 全套(半角逗号/句点曾漏判,共识召回补漏,只加不减);
+ * v4: + `待决清单:` 行(焦点账本:挑战者列未决条件,逐轮只谈这些,清了才能收敛)
+ *      + 新增判定只看「本轮变化」段(整篇找信号词会永远命中,饱和停机形同死代码)。
  */
-export const STOP_PROTOCOL_VERSION = 3
+export const STOP_PROTOCOL_VERSION = 4
 
 /**
  * agree 自报解析:只认显式接受(大小写/全角/中文容忍)。
@@ -63,6 +65,70 @@ export function parseAnswer(text: string): string {
   if (m) return m[2].trim()
   const sec = text.match(/##\s*结论摘要\s*([\s\S]*?)(?=\n##\s*|$)/)
   return sec ? sec[1].trim().slice(0, 500) : ''
+}
+
+/** 未决清单单项上限(超长截断,防单条吃掉整个 prompt 预算)。 */
+export const PENDING_ITEM_MAX_LEN = 60
+/** 未决清单条数上限(超出丢弃:账本要短才好读,长清单本身就是失焦信号)。 */
+export const PENDING_MAX_ITEMS = 6
+
+/** 未决清单行的 prompt 规格(改措辞必须同步 parsePendingItems 的正则)。 */
+export const PENDING_LINE_SPEC =
+  '待决清单=<你仍要求对方补齐的条件,用分号分隔、每条一句话;已全部解决就写 无>'
+
+/**
+ * 未决清单解析(焦点账本,B7):挑战者本轮仍要求对方补齐的条件,逐条带进下一轮。
+ *
+ * 实测动机(2026-10 跑局):挑战者每轮都在说"接受①②但须补三处",10 轮里有 8 轮在
+ * 逐条吸收上一轮新提的条件——因为没有账本,条件只能靠正文重述,既啰嗦又反复。
+ * 只认固定行 `待决清单: A;B;C`(分号/竖线/顿号分隔);`无`/`0`/空 表示已清空。
+ * 返回 null 表示**本轮没提供清单**(回落旧行为),与 [] (明确清零) 区分开。
+ */
+export function parsePendingItems(text: string): string[] | null {
+  const m = text.match(/(^|\n)\s*待决清单\s*[=:：]\s*([^\n]*)/)
+  if (!m) return null
+  const raw = m[2].trim()
+  if (raw === '' || /^(无|none|0|没有|已清空|空|null)$/i.test(raw)) return []
+  const items = raw
+    .split(/[；;|]/)
+    .flatMap((s) => s.split('、'))
+    .map((s) => s.replace(/^\s*[-*\d]+\s*[)）.、:：]?\s*/, '').trim())
+    .filter((s) => s !== '' && !/^(无|none)$/i.test(s))
+    .map((s) => s.slice(0, PENDING_ITEM_MAX_LEN))
+  return items.slice(0, PENDING_MAX_ITEMS)
+}
+
+/** 未决清单归一化(比停滞用):去空白标点,排序,便于逐条比对)。 */
+export function normalizePending(items: string[]): string[] {
+  return items.map((s) => normalizeAnswer(s)).filter((s) => s !== '').sort()
+}
+
+/**
+ * 焦点停滞判定(B7):连续 window 轮未决清单**逐条相同**且都不为空 → 谈不动了,停机。
+ * 比原来的信号词口径精确得多:清单是模型自己列的编号条目,不是满篇找"缺口"两个字。
+ */
+export function pendingStalled(rounds: DebateRound[], window = 2): boolean {
+  if (rounds.length < window) return false
+  const tail = rounds.slice(-window)
+  const keys = tail.map((r) => normalizePending(r.pendingItems ?? []).join('|'))
+  if (keys.some((k) => k === '')) return false
+  return keys.every((k) => k === keys[0])
+}
+
+/**
+ * 未决清单注入块:下一轮只谈这些,已结项不得重开。
+ * 空清单返回 ''(没有账本就不加约束,不硬编一句空话)。
+ */
+export function formatPendingFocus(items: string[]): string {
+  if (items.length === 0) return ''
+  const list = items.map((s, i) => `${i + 1}. ${s}`).join('\n')
+  return [
+    `待决清单(本轮焦点,共 ${items.length} 条):`,
+    list,
+    `本轮规则:只处理清单内条目,逐条给「接受/守住/部分接受」+ 依据;`,
+    `不得重开清单外已结事项;确实发现致命新问题最多新增 1 条,并在清单里写明。`,
+    `结束时同步更新清单:已解决的不再列入,仍未解决的照抄原文(便于 host 比对是否停滞)。`,
+  ].join('\n')
 }
 
 /**
@@ -128,6 +194,20 @@ export interface HandoffBrief {
   truncated: boolean
 }
 
+/**
+ * 取「本轮变化」段(v4 新增判定只看这一段)。
+ * 整篇找信号词的问题:挑战者单轮 6000~8000 字,几乎必然出现"缺口/补充"这类词,
+ * 于是 hasNewInfo 永远为真、饱和停机形同死代码(2026-10 实测:10 轮全 true,只能跑满)。
+ */
+export function changesOf(text: string): string {
+  return sectionOf(text, '本轮变化')
+}
+
+/** 取三段之一(导出:host 做对话区镜像摘要时只取「结论摘要」)。 */
+export function sectionText(text: string, name: string): string {
+  return sectionOf(text, name)
+}
+
 /** 取三段中的一段(标题行原样,内容到下一个 ## 为止)。 */
 function sectionOf(text: string, name: string): string {
   const re = new RegExp(`##\\s*${name}\\s*([\\s\\S]*?)(?=\\n##\\s|$)`)
@@ -180,6 +260,8 @@ export interface DebateRound {
   builderRelayChars: number
   /** 构造本记录时用的停机信号解析协议版本(协议一改就 +1,B5/S3)。 */
   protoVersion: number
+  /** 挑战者本轮自报的未决条件清单(B7 焦点账本;null=本轮没提供,[]=明确清零)。 */
+  pendingItems: string[] | null
   /** 挑战者本轮引用建构者原文的命中统计(B6/S3,见 auditQuotes)。 */
   quoteAudit: QuoteAudit
 }
@@ -270,15 +352,23 @@ export function toDebateRound(
   builderRelayChars = 0,
 ): DebateRound {
   const currCombined = [builderOut, challengerOut].join('\n\n')
+  // v4:新增判定优先只看双方「本轮变化」段(整篇找信号词永远命中)。
+  // 任一方缺这一段(旧格式/模型漏写)才回落整篇比对,保持向后兼容。
+  const prevChanges = changesOf(prevCombined)
+  const currChanges = changesOf(currCombined)
+  const hasNewInfo = prevChanges !== '' && currChanges !== ''
+    ? detectNewInfo(prevChanges, currChanges)
+    : detectNewInfo(prevCombined, currCombined)
   return {
     round,
     builderAnswer: parseAnswer(builderOut),
     builderAgree: parseAgree(builderOut),
     challengerAnswer: parseAnswer(challengerOut),
     challengerAgree: parseAgree(challengerOut),
-    hasNewInfo: detectNewInfo(prevCombined, currCombined),
+    hasNewInfo,
     builderRelayChars,
     protoVersion: STOP_PROTOCOL_VERSION,
+    pendingItems: parsePendingItems(challengerOut),
     quoteAudit: auditQuotes(builderOut, challengerOut),
   }
 }
@@ -290,12 +380,14 @@ export function roundConverged(r: DebateRound): boolean {
 
 /**
  * 覆盖饱和判定(ADR-0004):一整轮无新增信息即停。
+ * v4 追加焦点停滞:未决清单连续两轮逐条相同 → 谈不动了,同样停机。
  * 调用方每轮结束后传入本轮记录;返回 true 表示已饱和应当停机。
  */
 export function isSaturated(rounds: DebateRound[]): boolean {
   if (rounds.length === 0) return false
   const last = rounds[rounds.length - 1]
-  return last.hasNewInfo === false
+  if (last.hasNewInfo === false) return true
+  return pendingStalled(rounds)
 }
 
 /** 辩论单状态机。 */
@@ -334,6 +426,24 @@ export const CONTEXT_MAX_LEN = 4000
 
 /** 跨轮交棒载荷上限:只传对方结论摘要 + 本轮变化,详细论证按此上限头尾截断(B4/S2)。 */
 export const HANDOFF_MAX_CHARS = 2400
+
+/**
+ * 单轮「详细论证」篇幅预算(v4 聚焦)。实测 2026-10 跑局:10 轮共 10.9 万字,
+ * 挑战者单轮 4000~8157 字,其中大半是重述上一轮已结项 + 复述对方原文。
+ * 望文生义的"写全"不等于论证质量,砍掉重述反而更容易读懂。
+ */
+export const ROUND_DETAIL_MAX_CHARS = 1800
+
+/** 篇幅预算要求(建构者/挑战者共用,措辞一致才不会被选择性执行)。 */
+function budgetLines(): string[] {
+  return [
+    `篇幅预算(硬约束,超了就删重述,不要删结论):`,
+    `   ## 结论摘要:≤5 行;`,
+    `   ## 详细论证:≤${ROUND_DETAIL_MAX_CHARS} 字;`,
+    `   ## 本轮变化:≤3 行。`,
+    `   不要复述对方原文超过两句,不要重抄上一轮已结项的内容;引用只需给短语 + 轮次。`,
+  ]
+}
 
 /** 默认配置(v0.2:只留三模型+轮数,问题/题型/lens/背景全自动;v0.3 挑战者默认 flash)。 */
 export const DEFAULT_CONFIG = {
@@ -461,17 +571,18 @@ export function buildBuilderPrompt(question: string, lenses: LensTemplate[], que
     `要求:`,
     `1. 列出候选主张(允许多个并列),每个配支撑理由与置信度(0~1)。`,
     `2. 每条关键断言先分类型:事实(可外部检验)/推理(链条)/价值判断(偏好,只记录归属)。`,
-    `3. 事实必须带出处指针(如"需求 §3.2");没有出处的"能"一律标为缺失,不许写成"能"。`,
-    `4. 禁用黑话:大概能、基本满足、总体可行、原则上可以、差不多、应该没问题。`,
-    `5. 同时自报你的模型身份,格式:MODEL:<provider>/<model>。你没有环境查询工具,如实填你被配置的模型名;不知道就写 MODEL:unknown,不许编造。`,
-    `6. 停机信号:本段固定两行,单独成段放在最后,不要写进三段正文里(host 解析用):`,
+    `4. 事实必须带出处指针(如"需求 §3.2");没有出处的"能"一律标为缺失,不许写成"能"。`,
+    `5. 禁用黑话:大概能、基本满足、总体可行、原则上可以、差不多、应该没问题。`,
+    ...budgetLines(),
+    `6. 同时自报你的模型身份,格式:MODEL:<provider>/<model>。你没有环境查询工具,如实填你被配置的模型名;不知道就写 MODEL:unknown,不许编造。`,
+    `7. 停机信号:本段固定两行,单独成段放在最后,不要写进三段正文里(host 解析用):`,
     `   agree=false`,
     `   answer=<你的当前答案,一句话>`,
-    `7. 输出必须分三段,段标题原样保留(面板按段折叠渲染):`,
+    `8. 输出必须分三段,段标题原样保留(面板按段折叠渲染):`,
     `   ## 结论摘要`,
     `   ## 详细论证`,
     `   ## 本轮变化`,
-    `8. 各段内容:结论摘要=5 行内本轮立场 + 最关键的一条支撑/缺失;详细论证=候选主张与表格全放这里;本轮变化=开题轮只写一行「首轮,无对比」,不要照抄本条要求。`,
+    `9. 各段内容:结论摘要=5 行内本轮立场 + 最关键的一条支撑/缺失;详细论证=候选主张与表格全放这里;本轮变化=相对上一轮**只写**新增/让步/新缺口各一条,没有就写"无"——这段是 host 判定饱和的唯一依据,写成套话会让辩论空转。`,
   ].join('\n')
 }
 
@@ -486,8 +597,10 @@ export function buildBuilderRoundPrompt(
   round: number,
   maxRounds: number,
   context = '',
+  focus = '',
 ): string {
   const ctxBlock = context.trim() !== '' ? `\n背景(前面会话已定:已验证的不再争,术语沿用,已决边界不重开):\n${context.trim()}\n` : ''
+  const focusBlock = focus.trim() !== '' ? `\n${focus.trim()}\n` : ''
   return [
     `你是建构者(builder)。这是第 ${round}/${maxRounds} 轮交锋——挑战者刚给了你上一轮的挑战,你要回应它。`,
     `边界:你是被辩论链路调用的子 agent,首要产出是文本论证。不要调用任何 debate_* 工具;但你手里的文件读取/检索/网络工具该用就用:守不住的事实断言要用工具查证后再守,查不到就承认并改成缺失。`,
@@ -495,12 +608,14 @@ export function buildBuilderRoundPrompt(
     ``,
     `问题: ${question}`,
     ctxBlock,
+    focusBlock,
     `挑战者本轮输出:`,
     `${challengerOutput}`,
     ``,
     `要求:`,
-    `1. 逐条回应挑战:每条要么接受并修正你的主张(写清改成了什么),要么守住并给出证据指针;不许含糊带过。`,
+    `1. 逐条回应挑战:有编号清单时**按编号**逐条给结论(接受并说明改成什么 / 守住并给证据指针 / 部分接受并划清边界),不许含糊带过,不许跳号。`,
     `2. 事实必须带出处指针;没有出处的"能"一律标为缺失。禁用黑话:大概能、基本满足、总体可行、原则上可以、差不多、应该没问题。`,
+    ...budgetLines(),
     `3. 自报模型身份,格式:MODEL:<provider>/<model>;不知道就写 MODEL:unknown,不许编造。`,
     `4. 停机信号:本段固定两行,单独成段放在最后,不要写进三段正文里(host 解析用):`,
     `   agree=true/false(完全接受挑战者当前答案时才是 true)`,
@@ -509,7 +624,7 @@ export function buildBuilderRoundPrompt(
     `   ## 结论摘要`,
     `   ## 详细论证`,
     `   ## 本轮变化`,
-    `6. 各段内容:结论摘要=5 行内本轮立场 + 最关键的一条支撑/缺失;详细论证=逐条回应与修正后的主张全放这里;本轮变化=相对上一轮新增/让步/新缺口各一条,不要照抄本条要求。`,
+    `6. 各段内容:结论摘要=5 行内本轮立场 + 最关键的一条支撑/缺失;详细论证=逐条回应与修正后的主张全放这里;本轮变化=相对上一轮**只写**新增/让步/新缺口各一条,没有就写"无"——这段是 host 判定饱和的唯一依据,写成套话会让辩论空转。`,
   ].join('\n')
 }
 
@@ -521,8 +636,10 @@ export function buildChallengerPrompt(
   round: number,
   maxRounds: number,
   context = '',
+  focus = '',
 ): string {
   const ctxBlock = context.trim() !== '' ? `\n背景(前面会话已定:已验证的不再挑战,已决边界不重开;挑战须引用对方本场原文):\n${context.trim()}\n` : ''
+  const focusBlock = focus.trim() !== '' ? `\n${focus.trim()}\n` : ''
   return [
     `你是挑战者(challenger)。任务:打穿建构者的对照,专找四类洞:`,
     `1) 没覆盖的维度 2) 没覆盖的场景(常态/峰值/异常/增长) 3) 没证据的断言 4) 自相矛盾的推理。`,
@@ -531,25 +648,31 @@ export function buildChallengerPrompt(
     ``,
     `问题: ${question}`,
     ctxBlock,
+    focusBlock,
     `当前第 ${round}/${maxRounds} 轮。`,
     history !== '' ? `此前历史摘要:\n${history}\n` : ``,
     `建构者上一轮输出:\n${builderOutput}`,
     ``,
     `要求:`,
-    `1. 先钢人化复述:用自己的话复述对方最强的版本,复述不对本轮无效。`,
-    `2. 每条挑战必须引用对方原文(标轮次),承认有道理的部分写进 concession。`,
+    `1. 先钢人化复述:用自己的话复述对方最强的版本(≤3 句),复述不对本轮无效。`,
+    `2. 每条挑战必须引用对方原文(给短语 + 轮次),承认有道理的部分写进 concession。`,
     `3. 只接受对方当前答案时才置 agree=true;agree=true 却写新答案视为无效。`,
     `4. 禁用黑话(同建构者)。同时自报模型身份,格式:MODEL:<provider>/<model>;没有环境查询工具,不知道就写 MODEL:unknown,不许编造。`,
-    `5. 停机信号:本段固定两行,单独成段放在最后,不要写进三段正文里(host 解析用,漏写会导致共识停机失效):`,
+    ...budgetLines(),
+    `5. 停机信号:本段固定三行,单独成段放在最后,不要写进三段正文里(host 解析用,漏写会让收敛与停滞停机都失效):`,
     `   agree=true/false`,
     `   answer=<你的当前答案,一句话;接受对方时填对方答案原文>`,
+    `   ${PENDING_LINE_SPEC}`,
     `6. 输出必须分三段,段标题原样保留(面板按段折叠渲染):`,
     `   ## 结论摘要`,
     `   ## 详细论证`,
     `   ## 本轮变化`,
-    `7. 各段内容:结论摘要=5 行内打掉/保住了哪几条 + 本轮是否让步;详细论证=钢人化复述 + 逐条挑战 + concession 全放这里;本轮变化=相对上一轮新增挑战/收回挑战/新缺口各一条,不要照抄本条要求。`,
+    `7. 各段内容:结论摘要=5 行内打掉/保住了哪几条 + 本轮是否让步;详细论证=钢人化复述 + 逐条挑战 + concession 全放这里;本轮变化=相对上一轮**只写**新增挑战/收回挑战/新缺口各一条,没有就写"无"——这段是 host 判定饱和的唯一依据,写成套话会让辩论空转。`,
   ].join('\n')
 }
+
+/** 决策摘要段落标题(会话区收尾陈述从制图输出里抽这一段)。 */
+export const DECISION_SECTION = '决策摘要'
 
 /** 组装制图员 prompt:只读实录,不参辩(ADR-0002/0006)。 */
 export function buildSynthesizerPrompt(question: string, transcript: string): string {
@@ -562,7 +685,17 @@ export function buildSynthesizerPrompt(question: string, transcript: string): st
     `辩论实录:`,
     `${transcript}`,
     ``,
-    `输出五件套(严格按此结构,先引用原话再写归纳,每个归纳必须带[轮次引用],没有出处的格子填"缺失"):`,
+    `输出分两大部分,顺序不能颠倒:`,
+    ``,
+    `## ${DECISION_SECTION}(放在最前面,给决策者看的一段话,总长 ≤500 字)`,
+    `用下面四小段,每段短行,不要用表格:`,
+    `- 结论:一句话回答原问题;双方是否收敛,没收敛就写清各自最后站哪。`,
+    `- 关键分歧:没谈拢的点,每条一句话(价值排序不同还是事实没查清,写明)。`,
+    `- 主要依据:支撑结论最硬的 2~3 条(带[轮次引用])。`,
+    `- 建议下一步:2~3 条可执行动作(查什么/试什么/找谁确认),附一条最大风险。`,
+    `这段会原样贴进用户对话区,是用户决定下一步的依据,所以必须自足:不依赖下面的地图也读得懂,不许出现"见上文""如上"这类指代。`,
+    ``,
+    `## 成果地图(五件套,放在决策摘要之后)`,
     `格式铁律:一律用分级列表(数字/短横缩进短行),不许用 Markdown 表格——成果会原样贴进对话区,对话区不渲染表格,竖线只会糊成一坨。`,
     `1. 视角清单:每行"lens 名:核心主张"。`,
     `2. 论证:每条主张分四行——主张 / 支撑理由 / 反例 / 置信度。`,
@@ -570,6 +703,71 @@ export function buildSynthesizerPrompt(question: string, transcript: string): st
     `4. 分歧:先列已一致(短行),再列真不一致,每条注明事实分歧还是价值排序分歧。`,
     `5. 缺口:每行"缺什么 + 建议补法(查文档/跑测试/压测/找人确认)"。`,
   ].join('\n')
+}
+
+/** 从制图输出里抽决策摘要段(缺失返回 '',调用方用 buildFallbackSummary 兜底)。 */
+export function extractDecisionSummary(synthText: string): string {
+  return sectionOf(synthText, DECISION_SECTION)
+}
+
+/** 从制图输出里剥掉决策摘要段,只留五件套(面板展示用,避免会话/面板重复一遍)。 */
+export function stripDecisionSummary(synthText: string): string {
+  const re = new RegExp(`##\\s*${DECISION_SECTION}\\s*[\\s\\S]*?(?=\\n##\\s|$)`)
+  return synthText.replace(re, '').trim()
+}
+
+/** 停机原因的人话(收尾陈述用)。 */
+function stopReasonText(stopReason: string | null, rounds: number): string {
+  if (stopReason === 'convergence') return `第 ${rounds} 轮双方接受同一答案,共识收敛`
+  if (stopReason === 'saturation') return `${rounds} 轮后焦点停滞(未决清单连续两轮没变),提前收尾`
+  if (stopReason === 'manual') return `跑到第 ${rounds} 轮手动收尾`
+  return `跑满 ${rounds} 轮上限收尾`
+}
+
+/**
+ * 兜底收尾陈述:制图员没吐出决策摘要段时,用判定数据拼一段自足的总结。
+ * 只写有据可查的东西(双方最后答案/收敛与否/未决清单/引用统计),不替模型编结论。
+ */
+export function buildFallbackSummary(
+  question: string,
+  rounds: DebateRound[],
+  stopReason: string | null,
+): string {
+  const last = rounds[rounds.length - 1]
+  const n = rounds.length
+  const b = last?.builderAnswer ?? ''
+  const c = last?.challengerAnswer ?? ''
+  const converged = last !== undefined && roundConverged(last)
+  const lines: string[] = [`## ${DECISION_SECTION}`]
+  lines.push(`- 问题:${question}`)
+  if (converged) {
+    lines.push(`- 结论:双方收敛于「${b}」(${stopReasonText(stopReason, n)})。`)
+  } else if (b !== '' || c !== '') {
+    lines.push(`- 结论:未收敛。建构方最后站「${b || '未给出'}」,挑战方最后站「${c || '未给出'}」(${stopReasonText(stopReason, n)})。`)
+  } else {
+    lines.push(`- 结论:未形成明确答案(${stopReasonText(stopReason, n)})。`)
+  }
+  if (!converged && b !== '' && c !== '') {
+    lines.push(`- 关键分歧:双方最终答案不一致;属于事实没查清还是价值排序不同,需看成果地图「分歧」节。`)
+  } else if (converged) {
+    lines.push(`- 关键分歧:已无未决分歧;此前各轮争点见成果地图「分歧」节(保留历史争点)。`)
+  }
+  const quoted = rounds.reduce((a, r) => a + (r.quoteAudit?.quotedLines ?? 0), 0)
+  lines.push(`- 主要依据:${n} 轮交锋支撑,挑战方累计引用建构方原文 ${quoted} 处;逐条依据与出处见成果地图「依据」节。`)
+  const pending = last?.pendingItems ?? null
+  if (pending !== null && pending.length > 0) {
+    lines.push(`- 未决清单(${pending.length} 条):${pending.join(';')}`)
+  }
+  lines.push(`- 建议下一步:`)
+  if (converged) {
+    lines.push(`  1. 按结论推进;先补齐成果地图「缺口」节里标缺失的项再动手。`)
+    lines.push(`  2. 结论里的置信度低项,落地前用一次实测或文档核对收口。`)
+  } else {
+    lines.push(`  1. 把上面的未决清单逐条落成待办,查清后再重开一局,别在措辞上继续磨。`)
+    lines.push(`  2. 若分歧其实来自目标不同,先定判据(谁的收益优先)再辩,能一轮收敛。`)
+  }
+  lines.push(`  风险:结论只在本轮参与论证的范围内成立;会话背景之外的约束未参与论证。`)
+  return lines.join('\n')
 }
 
 /** transcript 拼装(供制图员输入)。 */

@@ -71,6 +71,9 @@ const DICTS: Record<string, Record<string, string>> = {
     'summary.standoff': '建构方坚持「{b}」,挑战方坚持「{c}」',
     'summary.opening': '开题:建构方摆出「{b}」,挑战方摆出「{c}」',
     'summary.quoted': '引用对方{q}/{t}行',
+    'decision.title': '辩论结论(可直接回填到输入框)',
+    'decision.copy': '回填到输入框',
+    'summary.pending': '未决{n}条',
   },
   en: {
     'panel.title': 'Two-lens debate', 'tip': 'Builder / challenger / synthesizer map for open questions',
@@ -110,6 +113,9 @@ const DICTS: Record<string, Record<string, string>> = {
     'summary.standoff': 'Builder holds "{b}", challenger holds "{c}"',
     'summary.opening': 'Opening: builder argues "{b}", challenger argues "{c}"',
     'summary.quoted': 'quoted {q}/{t} lines',
+    'decision.title': 'Debate conclusion (paste-ready)',
+    'decision.copy': 'Send to composer',
+    'summary.pending': '{n} open',
   },
 }
 
@@ -133,6 +139,8 @@ interface RoundAudit {
   hasNewInfo: boolean
   builderRelayChars: number
   protoVersion: number
+  /** v4 焦点账本:挑战者本轮自报的未决条件(null=没提供,[]=已清零)。 */
+  pendingItems?: string[] | null
   quoteAudit: { quotableLines: number; quotedLines: number; hitLines: number[]; hitRate: number | null }
 }
 interface AutoResolved { question: string; questionType: string; lenses: number; contextChars: number; targetCwd?: string | null }
@@ -155,6 +163,7 @@ interface StateResp {
   mode?: string
   residentError?: string | null
   streaming?: Record<string, { round: number; kind: 'text' | 'tools'; text: string }>
+  decisionSummary?: string | null
 }
 
 let openPanel: (() => void) | null = null
@@ -278,6 +287,8 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
   const [mode, setMode] = useState('')
   const [mirrorCount, setMirrorCount] = useState(0)
   const [mirrorError, setMirrorError] = useState<string | null>(null)
+  // 收尾陈述(v4):host 在辩论结束后拼好的决策摘要,面板置顶展示 + 一键回填输入框。
+  const [decision, setDecision] = useState<string | null>(null)
   // 实时流:host 把常驻 turn 的流式累计文本推到 state.streaming,面板即见打字机效果。
   const [streams, setStreams] = useState<Record<string, { round: number; kind: 'text' | 'tools'; text: string }>>({})
   // 秒级进度(host 每方开写/写完都更新,面板 2s 轮询即见,不用等模型输出)。
@@ -405,6 +416,7 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
       if (typeof s.mirrorCount === 'number') setMirrorCount(s.mirrorCount)
       if (s.mirrorError !== undefined) setMirrorError(s.mirrorError)
       if (s.streaming !== undefined) setStreams(s.streaming)
+      if (s.decisionSummary !== undefined) setDecision(s.decisionSummary)
       if (s.status === 'done' || s.status === 'failed' || s.status === 'stopped') {
         if (timer.current !== null) { window.clearInterval(timer.current); timer.current = null }
         if (s.status === 'failed') setError(s.error ?? 'failed')
@@ -420,7 +432,7 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
 
   const start = async (): Promise<void> => {
     setError(null); setTurns([]); setCopied(false); setResolved(null); setProgress('')
-    setStopReason(null); setRoundAudits([]); setMode(''); setMirrorCount(0); setMirrorError(null); setStreams({})
+    setStopReason(null); setRoundAudits([]); setMode(''); setMirrorCount(0); setMirrorError(null); setStreams({}); setDecision(null)
     stickRef.current = true
     // 硬触发:按钮直调 HTTP 建单即直驱,不经模型转述。hint=输入框问题快照,
     // cwd=当前会话工作区(面板从 useSessions 读,host 侧 Web 会话不可见,只能面板传),
@@ -454,7 +466,7 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
     const sid = id.trim()
     if (sid === '') return
     setError(null); setTurns([]); setCopied(false); setResolved(null); setProgress('')
-    setStopReason(null); setRoundAudits([]); setMode(''); setMirrorCount(0); setMirrorError(null); setStreams({})
+    setStopReason(null); setRoundAudits([]); setMode(''); setMirrorCount(0); setMirrorError(null); setStreams({}); setDecision(null)
     stickRef.current = true
     setSessionId(sid)
     setStatus('running')
@@ -483,6 +495,22 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
       setCopied(true)
     } else if (navigator.clipboard) {
       void navigator.clipboard.writeText(last).then(() => setCopied(true))
+    }
+  }
+
+  /**
+   * 收尾陈述一键回填:有 bridgeInsert(输入框注入桥)就填进输入框,否则退剪贴板。
+   * 用户看完决策摘要通常紧接着就要接着干活,所以优先回填输入框而不是只复制。
+   */
+  const copyDecision = async (): Promise<void> => {
+    const text = decision ?? ''
+    if (text.trim() === '') return
+    if (bridgeInsert) {
+      bridgeInsert(text)
+      setCopied(true)
+    } else if (navigator.clipboard) {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
     }
   }
 
@@ -588,6 +616,16 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
           <div className={C('dshd-resolved')}>
             <div><b>{tr('auto.question')}</b>{resolved.question}</div>
             <div><b>{tr('auto.type')}</b>{tr(`type.${resolved.questionType}`) ?? resolved.questionType} · {resolved.lenses}{tr('auto.lensesUnit')} · {tr('auto.ctx')}{resolved.contextChars}{tr('auto.charsUnit')}{resolved.targetCwd ? ` · 目标:${resolved.targetCwd}` : ''}</div>
+          </div>
+        )}
+        {/* 收尾陈述(v4):辩论一结束就置顶。这是用户决定下一步的依据,所以单独一块、可一键复制。 */}
+        {decision !== null && decision.trim() !== '' && (
+          <div className={C('dshd-decision')}>
+            <div className={C('dshd-decision-head')}>
+              <span>{tr('decision.title')}</span>
+              <button className={C('dshd-copybtn')} onClick={() => { void copyDecision() }}>{copied ? tr('trigger.copied') : tr('decision.copy')}</button>
+            </div>
+            <div className={C('dshd-decision-body')}>{decision.replace(/^##\s*[^\n]*\n?/, '').trim()}</div>
           </div>
         )}
         <div className={C('dshd-actions')}>

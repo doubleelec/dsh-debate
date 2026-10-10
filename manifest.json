@@ -1,7 +1,7 @@
 {
   "id": "elec-debate",
   "name": "双视角辩论 (Debate Map)",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "为开放性论证题跑建构/挑战/制图三角色,产出五件套成果地图,而非单一结论",
   "kind": "dynamic-cordis-plugin",
   "platforms": {

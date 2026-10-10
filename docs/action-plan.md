@@ -1,6 +1,7 @@
 # dsh-debate Action Plan
 
-> Resume point: S6 extraction implementation and regression suite complete (61 tests, typecheck, build pass); live end-to-end validation remains pending because the only active 3090 session contains just “hi”. Use a populated real chat to verify the context reaches both debaters.
+> Resume point: S7 (协议 v4 聚焦与收尾) 实现完成并本地验证通过——协议层直跑断言 39/39、`tsc --noEmit` / `npm run build` 绿、pytest 治理门 15 passed。
+> 仍未做的是**真跑复验**：新协议下跑一局真辩论，核对 (a) 轮数是否真的下降、(b) 挑战者是否守约输出 `待决清单=` 行、(c) 对话区字数与收尾陈述是否可读。决策依据与预期读数见 ADR-0017。
 
 ## Waves
 
@@ -8,6 +9,7 @@
 - **Wave 1 (Resident debater)**: 常驻辩手核心——host 起两个常驻辩手会话，`followup` 交棒、`whenIdle` 等 turn、自有事件后缀取交棒结论；开题互盲、交锋串行、制图只读实录；停机三条件（ADR-0014）+ `mode`/`residentError`/`stopReason`/`rounds[]` 可观测；建对失败回退一次性并记原因；进度感知超时（4min stalled / 20min 硬顶）+ provider `error` 有界重投。退出条件：真 1 轮辩论端到端跑通，transcript 结构与交棒链不断。
 - **Wave 2 (Context budget)**: 交棒载荷瘦身（ADR-0015：首见全文、此后跨轮传摘要+本轮变化、详细论证头尾截断，实测 -87%）+ `builderRelayChars` 可观测 + 饱和启发式否定关（B1）+ 跨入口判定同源（B2）+ 清死配置（B3）。退出条件：多轮 prompt 不爆，饱和可测。
 - **Final Wave (Integration & System testing)**: 跨 host+client 联调（面板停机审计块 + 对话区镜像状态 + 实况页同款 + `splitSections` 抽纯文件可测）与全门回归 + B5/B6（ADR-0016）。退出条件：治理门 + vitest 全绿，一局可读的真辩论。
+- **Wave 3 (Focus & legibility)**: 复盘一局真跑 10 轮（10.9 万字、饱和 10/10 误判、对话区灌 10.9 万字、7,015 字地图无决策陈述）后的协议 v4——未决清单焦点账本（`待决清单=` + `pendingStalled`）、新增判定只看「本轮变化」段、篇幅预算（1800 字）、对话区镜像摘要（`chatDigest`）、收尾陈述（制图「决策摘要」+ `buildFallbackSummary` 兜底）+ 面板收尾陈述块（ADR-0017）。退出条件：聚焦/有效/易懂三项各有实测读数支撑，一局跑完对话区直接给出下一步。
 
 ## Serial constraints
 
@@ -28,6 +30,9 @@
 | B5 | `agree`/`answer` 解析无版本位，协议一改无法追溯旧局 | **done (S3)**：`STOP_PROTOCOL_VERSION=2`，`rounds[].protoVersion` 落盘 |
 | B6 | 无"引用命中率 / 被裁区间"地面真值，瘦身是否砍掉关键证据无量化 | **done (S3)**：`auditQuotes` 片段级（12 字窗）+ `QUOTE_HIT_ALERT=0.3`；verify9 重算 R1 14/43、R2 37/67 |
 | B7 | 防呆把双方 `MODEL:unknown` 误判成"路由没生效"整场毙掉 | **done (S3)**：`isRouteIneffective`，unknown/null 不参与判定 |
+| B8 | `detectNewInfo` 在整篇 6000~8000 字里找信号词 → 10/10 轮误判"有新料"，饱和停机成死代码 | **done (S7)**：新增判定只看「本轮变化」段 + 未决清单焦点停滞（ADR-0017） |
+| B9 | 挑战者每轮"接受①②但须补三处"，新条件散在正文无编号 → 逐轮重述、10 轮才收敛 | **done (S7)**：`待决清单=` 焦点账本逐条带进下一轮，已结项不得重开 |
+| B10 | 对话区被逐字镜像灌入 10.9 万字；产物是 7,015 字地图，读完不知道下一步 | **done (S7)**：`chatDigest` 只镜像结论摘要 + 制图「决策摘要」段单独收尾 |
 
 ## Progress
 
@@ -39,3 +44,5 @@
 | S3 | Final integration & system testing: 联调 + 全门回归 + B5/B6/B7 | done (2026-09-30) | vitest **53/53** + S3 真跑 20/20 + 联调 2 轮 tr=7 + tsc/pytest/arch 全绿 |
 | S4 | 实时流(A):常驻 turn 流式文本 + 工具心跳 + 开题统一清流 | done (2026-09-30) | vitest **55/55** + verify10/11 联调(stream/text/tools 均见) + 全门禁绿 |
 | S5 | 目标工作区(targetCwd):评审别家工程 + 实况 API 基址推导 + sessionId 露出 | done (2026-09-30) | vitest **56/56** + verify12 ai_proxy 联调(挑战者读到 architecture-auto.md) + 全门禁绿 |
+| S6 | 面板可读性:重开版本号徽标 + 可缩放/全屏(纵向覆盖输入框)/最小化 + 人话轮次标签与轮次小结 + 删独立实况页 + 纯函数抽取(`labels.ts`/`dialogLayout.ts`) | done (2026-10-01) | tsc/build 绿 + 纯函数直跑断言(labels 10/10、dialogLayout 14/14) + 生产 3080 目视 |
+| S7 | 协议 v4 聚焦与收尾:未决清单焦点账本 + 新增判定只看变化段 + 篇幅预算 + 对话区镜像摘要 + 收尾陈述(决策摘要/兜底)+ 面板收尾块 | done (2026-10-01) | 协议层直跑断言 **39/39** + vitest 用例已补 + tsc/build 绿 + pytest 治理门 15 passed |
