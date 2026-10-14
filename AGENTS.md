@@ -10,7 +10,7 @@ Examples: `fix(session): preserve earlier context` or `docs: clarify install ste
 
 ## Git remotes
 
-Two remotes: `origin` (https://github.com/doubleelec/dsh-debate.git, public) and `wechat` (git@git.weixin.qq.com:doubleelec/dsh-debate.git, cold backup). Push to both remotes every time: `origin` first, then `git push wechat main`. In the Windows sandbox, plain HTTPS push fails on schannel TLS state, so push via the `push-from-sandbox` skill.
+Two remotes: `origin` (https://github.com/doubleelec/dsh-debate.git, public) and `wechat` (git@git.weixin.qq.com:doubleelec/dsh-debate.git, cold backup). Push to both remotes every time: `origin` first, then `git push wechat main`.
 
 ## Agent skills
 
