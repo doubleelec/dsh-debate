@@ -10,7 +10,7 @@ Examples: `fix(session): preserve earlier context` or `docs: clarify install ste
 
 ## Git remotes
 
-Two remotes: `origin` (https://github.com/doubleelec/dsh-debate.git, public) and `wechat` (git@git.weixin.qq.com:doubleelec/dsh-debate.git, cold backup). Push to both remotes every time: `origin` first, then `git push wechat main`.
+Two remotes: `origin` (git@github.com:doubleelec/dsh-debate.git, public) and `wechat` (git@git.weixin.qq.com:doubleelec/dsh-debate.git, cold backup). Push to both remotes every time: `origin` first, then `git push wechat main`.
 
 ## Agent skills
 
