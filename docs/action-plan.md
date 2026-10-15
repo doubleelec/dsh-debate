@@ -1,9 +1,10 @@
 # dsh-debate Action Plan
 
-> Resume point: S7（协议 v4 聚焦与收尾）+ S8（版本真值）实现完成并本地验证通过——协议层直跑断言 39/39、版本真值集成断言 8/8（打真实构建产物）、`tsc --noEmit` / `npm run build` 绿、pytest 治理门 15 passed。
-> **迁到 v0.4.0 必须先重启宿主进程**：`lib/index.js` 只在宿主启动时加载，DSH 无插件热重载（ADR-0018）。
+> Resume point: S7（协议 v4 聚焦与收尾）+ S8（版本真值）+ S9（结论落盘）实现完成并本地验证通过——`npm run test:sandbox` 跑真实 vitest 套件 **139/139 全绿、6 个测试文件 0 跳过**、真实构建产物集成断言 11/11、`tsc --noEmit` / `npm run build` 绿、pytest 治理门 15 passed。
+> **迁到 v0.5.0 必须先重启宿主进程**：`lib/index.js` 只在宿主启动时加载。准确说不是 DSH 没有热重载，而是本 profile 没开**模块监听**（`dsh-base` 里 `hmr` 的 `root: []`，注释"module roots are opt-in"；ADR-0018 同日更正）。
 > 重启前面板徽标显示 `v?` + 告警（旧宿主没有 `/api/version`，实测 POST 返回 405），这是设计行为不是故障。
-> 重启后徽标应显示 `v0.4.0` 且无告警；随后跑一局真辩论复验 S7：(a) 轮数是否真的下降、(b) 挑战者是否守约输出 `待决清单=` 行、(c) 对话区字数与收尾陈述是否可读。
+> 重启后徽标应显示 `v0.5.0` 且无告警；随后跑一局真辩论复验两件事：S7（(a) 轮数是否真的下降、(b) 挑战者是否守约输出 `待决清单=` 行、(c) 对话区字数与收尾陈述是否可读）与 S9（(d) `<工作区>/docs/debates/` 下是否真出现结论文档、(e) 再重启一次后粘旧 id 是否仍能取到结论与全文）。
+> 沙箱里 `npm test` 起不来（Vite 解析配置 `exec("net use")` → `spawn EPERM`），用 `npm run test:sandbox`：它编译并执行**同一份**测试文件，垫片遇到未实现的 matcher 会抛错而非静默通过。
 
 ## Waves
 
@@ -12,6 +13,7 @@
 - **Wave 2 (Context budget)**: 交棒载荷瘦身（ADR-0015：首见全文、此后跨轮传摘要+本轮变化、详细论证头尾截断，实测 -87%）+ `builderRelayChars` 可观测 + 饱和启发式否定关（B1）+ 跨入口判定同源（B2）+ 清死配置（B3）。退出条件：多轮 prompt 不爆，饱和可测。
 - **Final Wave (Integration & System testing)**: 跨 host+client 联调（面板停机审计块 + 对话区镜像状态 + 实况页同款 + `splitSections` 抽纯文件可测）与全门回归 + B5/B6（ADR-0016）。退出条件：治理门 + vitest 全绿，一局可读的真辩论。
 - **Wave 3 (Focus & legibility)**: 复盘一局真跑 10 轮（10.9 万字、饱和 10/10 误判、对话区灌 10.9 万字、7,015 字地图无决策陈述）后的协议 v4——未决清单焦点账本（`待决清单=` + `pendingStalled`）、新增判定只看「本轮变化」段、篇幅预算（1800 字）、对话区镜像摘要（`chatDigest`）、收尾陈述（制图「决策摘要」+ `buildFallbackSummary` 兜底）+ 面板收尾陈述块（ADR-0017）。退出条件：聚焦/有效/易懂三项各有实测读数支撑，一局跑完对话区直接给出下一步。
+- **Wave 4 (Durability & verification)**: 结论落盘（ADR-0019）——整局记录进 KV 单元 `dsh_debate`、启动恢复、结论文档写 `<工作区>/docs/debates/`、镜像报路径、面板可观测；外加把"从不运行的测试套件"救回来（`npm run test:sandbox`）。退出条件：重启后旧 id 仍能取到结论，且回归有可重复的入口而不是一次性脚本。
 
 ## Serial constraints
 
@@ -35,6 +37,8 @@
 | B8 | `detectNewInfo` 在整篇 6000~8000 字里找信号词 → 10/10 轮误判"有新料"，饱和停机成死代码 | **done (S7)**：新增判定只看「本轮变化」段 + 未决清单焦点停滞（ADR-0017） |
 | B9 | 挑战者每轮"接受①②但须补三处"，新条件散在正文无编号 → 逐轮重述、10 轮才收敛 | **done (S7)**：`待决清单=` 焦点账本逐条带进下一轮，已结项不得重开 |
 | B10 | 对话区被逐字镜像灌入 10.9 万字；产物是 7,015 字地图，读完不知道下一步 | **done (S7)**：`chatDigest` 只镜像结论摘要 + 制图「决策摘要」段单独收尾 |
+| B11 | 整个测试套件在本机沙箱里**从不运行**（vitest 解析配置 `exec("net use")` → `spawn EPERM`），验证退化成只剩类型检查；手写的一次性断言脚本还放在 `.tmp/`，而该目录约定"任何会话可随时清空"——工具和结论一起丢 | **done (S9)**：`npm run test:sandbox` 编译并执行**同一份**测试文件（不另写平行断言），垫片遇到未实现的 matcher 抛错而非静默通过；跑出 139/139 |
+| B12 | 结论只活在 host 内存 + 对话区镜像里：前者一重启就 `unknown-id`，后者正是上下文压缩要吃掉的东西 | **done (S9)**：整局记录进 KV（重启后旧 id 仍可用）+ 结论文档进工作区（压缩后 `read <路径>` 仍能拿回逐字原文，ADR-0019） |
 
 ## Progress
 
@@ -49,3 +53,4 @@
 | S6 | 面板可读性:重开版本号徽标 + 可缩放/全屏(纵向覆盖输入框)/最小化 + 人话轮次标签与轮次小结 + 删独立实况页 + 纯函数抽取(`labels.ts`/`dialogLayout.ts`) | done (2026-10-01) | tsc/build 绿 + 纯函数直跑断言(labels 10/10、dialogLayout 14/14) + 生产 3080 目视 |
 | S7 | 协议 v4 聚焦与收尾:未决清单焦点账本 + 新增判定只看变化段 + 篇幅预算 + 对话区镜像摘要 + 收尾陈述(决策摘要/兜底)+ 面板收尾块 | done (2026-10-01) | 协议层直跑断言 **39/39** + vitest 用例已补 + tsc/build 绿 + pytest 治理门 15 passed |
 | S8 | 版本真值:构建期内联 `BUILD_VERSION` + `/api/version` 三方对账(内联/磁盘/mtime vs 启动时刻)+ 徽标显示正在跑的版本(取不到显示 `v?`)+ 重启宿主/刷新页面两类提示 | done (2026-10-01) | 真实构建产物集成断言 **8/8**(running==disk、mtime 可读、stale=false、反事实判 stale)+ tsc/build 绿 + pytest 治理门绿 |
+| S9 | 结论落盘:整局记录进 KV 单元 `dsh_debate`(per-record,显式白名单)+ 启动恢复(半途的标已中断)+ 结论文档写 `<工作区>/docs/debates/`(日期-slug-id尾)+ 对话区镜像报路径 + `/api/history` + 面板显示路径/恢复标记/两类失败分开 | done (2026-10-01) | 真实 vitest 套件 **139/139**(新增 persist 35 条:白名单、宽容反序列化、文件名净化、markdown 结构)+ 真实构建产物集成断言 **11/11**(含 storage/history/docs-debates/ctx.effect 接线)+ tsc/build 绿 + pytest 治理门绿 |

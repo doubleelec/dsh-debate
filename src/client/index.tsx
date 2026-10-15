@@ -89,6 +89,13 @@ const DICTS: Record<string, Record<string, string>> = {
     'ver.unknownTip': '后台版本未知(宿主未重启或接口不可用)',
     'ver.hostStale': '{reason}',
     'ver.clientStale': '浏览器还在用旧界面(v{client}),后台已经是 v{host}:强制刷新页面(Ctrl+Shift+R)即可,不用重启宿主。',
+    'report.saved': '结论文档:',
+    'report.copy': '复制路径',
+    'report.warnTitle': '持久化异常',
+    'report.persistFail': '整局记录没能落盘({err}):宿主重启后这局的 id 会失效。',
+    'report.fileFail': '结论文档没能写入({err}):辩论结论本身没问题,完整记录仍在下方与整局记录里。',
+    'report.noCwd': '没有目标工作区,结论文档没地方落盘(整局记录仍在)。填「目标」或从会话工作区发起即可。',
+    'report.restored': '本局是从磁盘恢复的(宿主重启前的记录):结论可读,但不会再继续跑。',
   },
   en: {
     'panel.title': 'Two-lens debate', 'tip': 'Builder / challenger / synthesizer map for open questions',
@@ -137,6 +144,13 @@ const DICTS: Record<string, Record<string, string>> = {
     'ver.unknownTip': 'Backend version unknown (host not restarted, or endpoint unavailable)',
     'ver.hostStale': '{reason}',
     'ver.clientStale': 'The browser still runs the old UI (v{client}) while the backend is v{host}: hard-refresh (Ctrl+Shift+R); no host restart needed.',
+    'report.saved': 'Conclusion file:',
+    'report.copy': 'Copy path',
+    'report.warnTitle': 'Persistence problem',
+    'report.persistFail': 'The session record was not persisted ({err}): this id will not resolve after a host restart.',
+    'report.fileFail': 'The conclusion file was not written ({err}): the debate itself is fine, the full record stays below and in the session record.',
+    'report.noCwd': 'No target workspace, so the conclusion file has nowhere to land (the session record is still kept). Set a target or start from a session workspace.',
+    'report.restored': 'Restored from disk (recorded before the host restarted): the conclusion is readable, but this debate will not continue.',
   },
 }
 
@@ -185,6 +199,14 @@ interface StateResp {
   residentError?: string | null
   streaming?: Record<string, { round: number; kind: 'text' | 'tools'; text: string }>
   decisionSummary?: string | null
+  /** 结论文档(ADR-0019):相对工作区路径 + 绝对路径;null=没写(未指定工作区或写入失败)。 */
+  reportRel?: string | null
+  reportPath?: string | null
+  /** 落盘/落文件失败原因(null=正常)。两条独立,分开显示,因为修法不同。 */
+  persistError?: string | null
+  reportError?: string | null
+  /** 本局是从磁盘恢复的(宿主重启后仍打得开)。 */
+  restored?: boolean
 }
 
 let openPanel: (() => void) | null = null
@@ -302,6 +324,7 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
   const [turns, setTurns] = useState<Turn[]>([])
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [copiedPath, setCopiedPath] = useState(false)
   // 停机审计:host 早就经 /state 返回 stopReason + rounds[],之前面板没接,现在接上(QAS-2)。
   const [stopReason, setStopReason] = useState<string | null>(null)
   const [roundAudits, setRoundAudits] = useState<RoundAudit[]>([])
@@ -310,6 +333,16 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
   const [mirrorError, setMirrorError] = useState<string | null>(null)
   // 收尾陈述(v4):host 在辩论结束后拼好的决策摘要,面板置顶展示 + 一键回填输入框。
   const [decision, setDecision] = useState<string | null>(null)
+  /**
+   * 结论文档与持久化可观测性(ADR-0019)。
+   * reportPath=落盘的 md 绝对路径;两条失败原因分开存:落盘失败(整局记录)与
+   * 落文件失败是两件事,修法不同(前者看存储后端,后者看工作区权限),混成一句没法排查。
+   * restored=本局是从磁盘恢复的,不是本次进程新建的。
+   */
+  const [reportPath, setReportPath] = useState<string | null>(null)
+  const [persistError, setPersistError] = useState<string | null>(null)
+  const [reportError, setReportError] = useState<string | null>(null)
+  const [restored, setRestored] = useState(false)
   /**
    * 版本对账(v0.4):徽标显示**后台真正在跑的版本**(host 内联常量),不是磁盘版本。
    * null = 还没拿到;verMissing = 后台没这条路由(旧宿主)或取数失败。
@@ -444,6 +477,10 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
       if (s.mirrorError !== undefined) setMirrorError(s.mirrorError)
       if (s.streaming !== undefined) setStreams(s.streaming)
       if (s.decisionSummary !== undefined) setDecision(s.decisionSummary)
+      if (s.reportPath !== undefined) setReportPath(s.reportPath)
+      if (s.persistError !== undefined) setPersistError(s.persistError)
+      if (s.reportError !== undefined) setReportError(s.reportError)
+      if (s.restored !== undefined) setRestored(s.restored === true)
       if (s.status === 'done' || s.status === 'failed' || s.status === 'stopped') {
         if (timer.current !== null) { window.clearInterval(timer.current); timer.current = null }
         if (s.status === 'failed') setError(s.error ?? 'failed')
@@ -568,6 +605,18 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
     } else if (navigator.clipboard) {
       await navigator.clipboard.writeText(text)
       setCopied(true)
+    }
+  }
+
+  /**
+   * 复制结论文档路径。
+   * 回填输入框对路径没意义(用户要的是拿去 open/read),所以这里只进剪贴板不碰输入框。
+   */
+  const copyReportPath = async (): Promise<void> => {
+    if (reportPath === null) return
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(reportPath)
+      setCopiedPath(true)
     }
   }
 
@@ -710,13 +759,35 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
             <div className={C('dshd-decision-body')}>{decision.replace(/^##\s*[^\n]*\n?/, '').trim()}</div>
           </div>
         )}
+        {/* 结论文档(ADR-0019):把"有地址的产物"摆出来——路径不给,文件就等于不存在。 */}
+        {reportPath !== null && (
+          <div className={C('dshd-report')}>
+            <span>{tr('report.saved')}</span>
+            <code title={reportPath}>{reportPath}</code>
+            <button className={C('dshd-copybtn')} onClick={() => { void copyReportPath() }}>{copiedPath ? tr('trigger.copied') : tr('report.copy')}</button>
+          </div>
+        )}
+        {/* 两条失败原因分开显示:落盘失败查存储后端,落文件失败查工作区权限。 */}
+        {(persistError !== null || reportError !== null) && (
+          <div className={C('dshd-verwarn')} role="alert">
+            <b>{tr('report.warnTitle')}</b>
+            {persistError !== null && <span>{tr('report.persistFail', { err: persistError })}</span>}
+            {reportError !== null && reportError !== 'no-target-cwd' && <span>{tr('report.fileFail', { err: reportError })}</span>}
+            {reportError === 'no-target-cwd' && <span>{tr('report.noCwd')}</span>}
+          </div>
+        )}
+        {/* 恢复标记:宿主重启后旧局仍打得开,但要说清它是恢复的、且不会再跑。 */}
+        {restored && (
+          <div className={C('dshd-restored')}>{tr('report.restored')}</div>
+        )}
         <div className={C('dshd-actions')}>
           {status === 'running' || status === 'polling'
             ? <button className={C('dshd-stop')} onClick={() => { void stop() }} disabled={status === 'polling'} title={status === 'polling' ? '等模型开局:输入框回车后自动跟局' : undefined}>{tr('btn.stop')}</button>
             : <button className={C('dshd-start')} onClick={() => { void start() }}>{tr('btn.start')}</button>}
           <span className={C('dshd-status')}>{tr(`st.${status}`)}</span>
         </div>
-        {/* 跟局:本局 id(建单自动填);旧局 id 可手动粘贴回来重看(重启后旧局作废)。 */}
+        {/* 跟局:本局 id(建单自动填);旧局 id 可手动粘贴回来重看。宿主重启后旧局不再作废——
+            host 启动时会把磁盘上的整局记录装回内存(ADR-0019),所以粘贴旧 id 仍能取到结论。 */}
         {(status === 'idle' || status === 'polling' || status === 'stopped') && (
           <div className={C('dshd-field')}>
             <span>会话 id</span>

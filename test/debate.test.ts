@@ -419,6 +419,7 @@ describe('stepwise loop', () => {
       transcript: [] as TranscriptEntry[], map: null, mapText: null, error: null, mirrorToChat: false,
       progress: '', mirrorCount: 0, mirrorError: null, parentSid: null, stopReason: null, rounds: [] as DebateRound[],
       mode: 'oneShot' as const, residentError: null, streaming: {}, decisionSummary: null,
+      reportRel: null, persistError: null, reportError: null, restored: false,
       createdAt: 0, updatedAt: 0,
     }
   }
@@ -456,6 +457,7 @@ describe('resident relay', () => {
       transcript: [] as TranscriptEntry[], map: null, mapText: null, error: null, mirrorToChat: false,
       progress: '', mirrorCount: 0, mirrorError: null, parentSid: null, stopReason: null, rounds: [] as DebateRound[],
       mode: 'oneShot' as const, residentError: null, streaming: {}, decisionSummary: null,
+      reportRel: null, persistError: null, reportError: null, restored: false,
       createdAt: 0, updatedAt: 0,
     }
   }

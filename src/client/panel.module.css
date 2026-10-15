@@ -110,6 +110,42 @@
 }
 
 /*
+ * 结论文档条(ADR-0019):路径要能一眼看全、能复制,所以用等宽 + 溢出省略,
+ * 不做换行——路径换行后反而更难核对。
+ */
+.dshd-report {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--dsw-alias-border-secondary, #3a3a3a);
+  background: var(--dsw-alias-bg-layer-1, #222);
+  font-size: 12px;
+}
+
+.dshd-report > code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary, #bbb);
+}
+
+/* 恢复标记:中性色。这是提示不是告警——恢复是正常工作方式,不是故障。 */
+.dshd-restored {
+  padding: 5px 10px;
+  border-radius: 10px;
+  border-left: 3px solid var(--dsw-alias-brand-primary, #4a8cff);
+  background: var(--dsw-alias-bg-layer-1, #222);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary, #bbb);
+}
+
+/*
  * 版本告警(v0.4):后台不是最新代码时明确提示,别让徽标骗人。
  * 用告警色而非中性色,因为"面板是新的、后台是旧的"是个会让人误判的行为陷阱。
  */

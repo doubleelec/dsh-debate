@@ -33,6 +33,7 @@ export interface TextContentBlock {
 import type { DebateConfig, DebateMap, DebateRound, DebateStatus, TranscriptEntry } from './debate'
 import { DEFAULT_CONFIG, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscript, toDebateRound, roundConverged, isSaturated, slimHandoff, formatPendingFocus, sectionText, parseAnswer, extractDecisionSummary, buildFallbackSummary, DECISION_SECTION } from './debate'
 import { BUILD_VERSION, assessVersions, type VersionFacts } from './version'
+import { fromRecord, markInterrupted, renderReport, reportRelPath, STORAGE_TABLE, STORAGE_UNIT, toRecord } from './persist'
 import { findLens, type LensTemplate } from './lenses'
 
 /** 请求面(结构子集,镜像 explorer)。 */
@@ -102,6 +103,23 @@ interface DebateSession {
    * 优先取制图输出的「决策摘要」段;制图员漏写时用判定数据兜底(见 buildFallbackSummary)。
    */
   decisionSummary: string | null
+  /**
+   * 结论文档相对工作区的路径(写成功才有)。
+   * 只存相对路径:绝对路径由 targetCwd + 它拼出来,工作区搬家/换机器后仍然有效。
+   */
+  reportRel: string | null
+  /** 最近一次落盘失败原因(null=成功或还没试过)。持久化失败绝不静默,但也绝不许拖垮辩论。 */
+  persistError: string | null
+  /** 结论文档写入失败原因(null=成功或还没试过)。 */
+  reportError: string | null
+  /** 本局是从磁盘恢复的(宿主重启后仍打得开),不是本进程新建的。 */
+  restored: boolean
+  /**
+   * 落盘触发器(host 建单时注入)。
+   * pushEntry/setProgress 是同步的(model 事件回调里),不能 await,只能靠这个钩子把 ctx 带进来。
+   * 可选:纯函数单测环境没有它,所以缺了也必须一切照常。
+   */
+  flush?: () => void
 }
 
 /**
@@ -137,6 +155,7 @@ function mirror(parent: ParentAgent, session: DebateSession, text: string): void
 function setProgress(session: DebateSession, progress: string): void {
   session.progress = progress
   session.updatedAt = Date.now()
+  session.flush?.()
 }
 
 /**
@@ -217,6 +236,225 @@ let seq = 0
 function newId(): string {
   seq += 1
   return `debate-${Date.now().toString(36)}-${seq}`
+}
+
+// ───────────────────────── 持久化:整局记录 + 结论文档(ADR-0019) ─────────────────────────
+//
+// 两条独立的耐久化路径,各自的理由不同:
+// - 整局记录进 ctx.storage 的 KV 单元 → 宿主重启后旧局仍打得开(修 unknown-id);
+// - 结论文档写进工作区 docs/debates/ → 给人和未来的 agent 一个有地址的产物,压缩吃不掉它。
+//
+// **刻意不 import `@deepseek-ai/dsh-storage`**:插件自己 node_modules 里那份是 0.1.1-rc.2,
+// 宿主实际跑的是 0.2.0-rc.2(实测两版本并存)。拿旧包的类型去喂新实现是埋雷,所以只按
+// 文档化的成员做鸭子类型;少一个成员就整体降级为"不持久化",绝不让插件加载失败。
+
+/** KV 单元的最小结构面(见 dsh-storage 的 backend 约定)。 */
+interface KvUnitLike {
+  loadAll(): Promise<{ tables: Record<string, Record<string, unknown>>; global: unknown }>
+  putRecord(table: string, key: string, value: unknown): Promise<void>
+  close(): Promise<void>
+}
+
+/** 存储枢纽的最小结构面。 */
+interface StorageHubLike {
+  backend?: { get(name: string): { kv?: { open(descriptor: unknown): Promise<KvUnitLike> } } | undefined }
+}
+
+/** 后端注册名:base 组合包里 `storage-domain` 的 config 就是 `backend: json`。 */
+const STORAGE_BACKEND = 'json'
+
+let store: KvUnitLike | null = null
+/** 试过一次就不再重试:不可用是配置事实,不是瞬时故障,别让每轮都白等一次失败。 */
+let storeTried = false
+let storeError: string | null = null
+
+/**
+ * 懒开存储单元并缓存。
+ * 单元名用 `dsh_debate`(下划线)——`UNIT_NAME_RE` 是 `/^[a-z][a-z0-9_]*$/`,连字符非法(实测)。
+ * 用 `per-record` 布局:一局一条文档,每轮保存只重写这一局,不连带整表。
+ */
+async function openStore(ctx: Context): Promise<KvUnitLike | null> {
+  if (store !== null) return store
+  if (storeTried) return null
+  storeTried = true
+  try {
+    const hub = ctx.get('storage') as unknown as StorageHubLike | undefined
+    const kv = hub?.backend?.get(STORAGE_BACKEND)?.kv
+    if (!kv) { storeError = 'storage-unavailable'; return null }
+    store = await kv.open({
+      name: STORAGE_UNIT,
+      version: 1,
+      tables: [STORAGE_TABLE],
+      hasGlobal: false,
+      layout: 'per-record',
+    })
+    storeError = null
+    return store
+  } catch (e) {
+    storeError = e instanceof Error ? e.message : String(e)
+    return null
+  }
+}
+
+/**
+ * 落盘一局。**永不抛**:一局跑成功的辩论不能因为写盘失败变成失败。
+ * 但也绝不静默——原因记在 session.persistError 上,面板可观测(与 mirror 同一原则)。
+ */
+async function persist(ctx: Context, session: DebateSession): Promise<void> {
+  const unit = await openStore(ctx)
+  if (unit === null) { session.persistError = storeError ?? 'storage-unavailable'; return }
+  try {
+    await unit.putRecord(STORAGE_TABLE, session.id, toRecord(session))
+    session.persistError = null
+  } catch (e) {
+    session.persistError = e instanceof Error ? e.message : String(e)
+  }
+}
+
+/**
+ * 落盘调度:合并写入。
+ * pushEntry/setProgress 都在同步回调里,不能 await;同一局同时只允许一个写在飞,
+ * 期间的新请求只置脏标记,写完后若脏再写一次。落后最多一次写入,不会积压成队列。
+ */
+const persisting = new Map<string, boolean>()
+const persistDirty = new Map<string, boolean>()
+
+function schedulePersist(ctx: Context, session: DebateSession): void {
+  if (persisting.get(session.id) === true) { persistDirty.set(session.id, true); return }
+  persisting.set(session.id, true)
+  void (async () => {
+    try {
+      do {
+        persistDirty.set(session.id, false)
+        await persist(ctx, session)
+      } while (persistDirty.get(session.id) === true)
+    } finally {
+      persisting.delete(session.id)
+      persistDirty.delete(session.id)
+    }
+  })()
+}
+
+/**
+ * 把一台 KV 单元里的记录装回内存单表。
+ * 逐条独立:`fromRecord` 返回 null 的坏记录跳过,不拖垮整张表。
+ * 上次记 running 的,说明进程是半途消失的——标成 stopped 并说清原因,
+ * 因为"面板显示还在跑、实际永远不动"比"显示已中断"更糟。
+ * @returns 实际恢复的局数。
+ */
+async function loadPersisted(ctx: Context): Promise<number> {
+  const unit = await openStore(ctx)
+  if (unit === null) return 0
+  try {
+    const { tables } = await unit.loadAll()
+    const rows = tables[STORAGE_TABLE] ?? {}
+    let n = 0
+    for (const raw of Object.values(rows)) {
+      const rec = fromRecord(raw)
+      if (rec === null) continue
+      const fixed = markInterrupted(rec, '宿主重启,本局已中断(记录已从磁盘恢复,可查看结论)')
+      const restored: DebateSession = {
+        id: fixed.id,
+        config: fixed.config,
+        status: fixed.status,
+        round: fixed.round,
+        transcript: fixed.transcript,
+        map: fixed.map,
+        mapText: fixed.mapText,
+        error: fixed.error,
+        createdAt: fixed.createdAt,
+        updatedAt: fixed.updatedAt,
+        // 恢复的局没有活着的 parent,也没有在写的流:镜像/直播这两个进程内概念一律按关闭处理。
+        mirrorToChat: false,
+        progress: fixed.progress,
+        mirrorCount: fixed.mirrorCount,
+        mirrorError: fixed.mirrorError,
+        parentSid: fixed.parentSid,
+        stopReason: fixed.stopReason,
+        rounds: fixed.rounds,
+        mode: fixed.mode,
+        residentError: fixed.residentError,
+        streaming: {},
+        decisionSummary: fixed.decisionSummary,
+        reportRel: fixed.reportRel,
+        persistError: null,
+        reportError: null,
+        restored: true,
+      }
+      restored.flush = () => schedulePersist(ctx, restored)
+      sessions.set(restored.id, restored)
+      n += 1
+    }
+    return n
+  } catch (e) {
+    storeError = e instanceof Error ? e.message : String(e)
+    return 0
+  }
+}
+
+/**
+ * 停机原因的人话口径(结论文档用)。
+ * 与面板/对话区同一份说法——同一件事在三个地方出现三种措辞,读的人就要重新对一遍。
+ */
+export function stopReasonText(session: DebateSession): string {
+  const r = session.stopReason
+  const n = session.rounds.length
+  if (r === null) return session.status === 'done' ? '无(未记录)' : '未停机'
+  if (r === 'convergence') return `共识收敛(第 ${n} 轮双方 agree 同一答案)`
+  if (r === 'saturation') {
+    return (session.rounds[n - 1]?.pendingItems?.length ?? 0) > 0
+      ? `焦点停滞(第 ${n} 轮起未决清单连续两轮没变)`
+      : `覆盖饱和(第 ${n} 轮无新增视角/缺口/状态变化)`
+  }
+  if (r === 'maxRounds') return `跑满上限(${session.config.maxRounds} 轮)`
+  return `手动跳制图(第 ${n} 轮后)`
+}
+
+/**
+ * 写结论文档(ADR-0019)。**先落盘再报路径**——路径先说出口而文件没写成,比不报更糟。
+ * @returns 相对工作区的路径;失败返回 null 并把原因记在 session.reportError。
+ */
+async function writeReport(session: DebateSession): Promise<string | null> {
+  const cwd = session.config.targetCwd
+  if (cwd === undefined || cwd === '') { session.reportError = 'no-target-cwd'; return null }
+  try {
+    const fs = await import('node:fs') as unknown as {
+      mkdirSync(p: string, o: { recursive: boolean }): void
+      writeFileSync(p: string, data: string, enc: string): void
+    }
+    const path = await import('node:path') as unknown as { join(...p: string[]): string; dirname(p: string): string }
+    const auto = session.config.auto
+    const rel = reportRelPath(session.createdAt, auto?.question ?? '', session.id)
+    const abs = path.join(cwd, rel)
+    const text = renderReport({
+      id: session.id,
+      question: auto?.question ?? '',
+      questionType: auto?.questionType ?? '',
+      lenses: auto?.lenses ?? [],
+      targetCwd: cwd,
+      createdAt: session.createdAt,
+      finishedAt: Date.now(),
+      status: session.status,
+      error: session.error,
+      stopReason: session.stopReason,
+      maxRounds: session.config.maxRounds,
+      decisionSummary: session.decisionSummary,
+      mapText: session.mapText,
+      rounds: session.rounds,
+      transcript: session.transcript,
+      generator: `dsh-debate v${BUILD_VERSION}`,
+      stopText: stopReasonText(session),
+    })
+    // 目录可能还不存在(targetCwd 建单时只校验过存在性,docs/debates 未必有)。
+    fs.mkdirSync(path.dirname(abs), { recursive: true })
+    fs.writeFileSync(abs, text, 'utf-8')
+    session.reportRel = rel
+    session.reportError = null
+    return rel
+  } catch (e) {
+    session.reportError = e instanceof Error ? e.message : String(e)
+    return null
+  }
 }
 
 async function readJsonBody(req: DebateHttpRequest): Promise<Record<string, unknown>> {
@@ -623,6 +861,15 @@ export async function runHostDebate(
     })
     setProgress(session, '已完成')
     session.status = 'done'
+    // 结论文档(ADR-0019):先落盘再报路径。
+    // 顺序不能反——路径先说出口而文件其实没写成,比不报路径更糟。
+    const rel = await writeReport(session)
+    if (rel !== null) {
+      mirror(parent, session, `📄 结论文档已存:\`${rel}\`\n(工作区 ${session.config.targetCwd ?? '?'};对话区这条消息会被上下文压缩,文件不会——以后直接读这个文件就能拿回全文)`)
+    } else if (session.reportError !== null && session.reportError !== 'no-target-cwd') {
+      mirror(parent, session, `⚠️ 结论文档没能落盘(${session.reportError});完整记录仍在辩论面板里。`)
+    }
+    await persist(ctx, session)
     done()
   } catch (err) {
     if (signal.aborted || (err instanceof Error && err.message === 'aborted')) {
@@ -632,6 +879,8 @@ export async function runHostDebate(
       session.status = 'failed'
       session.error = err instanceof Error ? err.message : String(err)
     }
+    // 失败/中止也要落盘:面板重启后还能看到"这局挂在哪",否则只剩一个丢失的 id。
+    await persist(ctx, session)
     done()
   } finally {
     if (pair) {
@@ -1174,6 +1423,7 @@ function requireAuto(session: DebateSession): NonNullable<DebateConfig['auto']> 
 function pushEntry(session: DebateSession, role: TranscriptEntry['role'], round: number, text: string): void {
   session.transcript.push({ seq: session.transcript.length + 1, role, round, text })
   session.updatedAt = Date.now()
+  session.flush?.()
 }
 
 function lensObjsOf(session: DebateSession): LensTemplate[] {
@@ -1501,7 +1751,12 @@ export default {
             residentError: 'not-attempted',
             streaming: {},
             decisionSummary: null,
+            reportRel: null,
+            persistError: null,
+            reportError: null,
+            restored: false,
           }
+          session.flush = () => schedulePersist(ctx, session)
           // targetCwd 存在性 fail fast:用户填错路径不等开题才挂,建单即报。
           // fs 探针用动态 import(宿主 node 直跑;vitest 下 import 失败则跳过校验,覆盖逻辑由单测保证)。
           if (parsed.config.targetCwd) {
@@ -1570,7 +1825,38 @@ export default {
             residentError: session.residentError,
             streaming: session.streaming,
             decisionSummary: session.decisionSummary,
+            // 持久化可观测性:结论文档路径 + 两条独立的失败原因(null=没出问题)。
+            reportRel: session.reportRel,
+            reportPath: session.reportRel !== null && session.config.targetCwd
+              ? `${session.config.targetCwd.replace(/[\\/]+$/, '')}/${session.reportRel}`
+              : null,
+            persistError: session.persistError,
+            reportError: session.reportError,
+            restored: session.restored,
           })
+        },
+      },
+      {
+        kind: 'exact',
+        path: '/dsh-debate/api/history',
+        handler: async (_req, res) => {
+          // 历史局一览(含磁盘恢复的):id 能被面板重新打开,unknown-id 不再是终点。
+          const list = [...sessions.values()]
+            .sort((a, b) => b.createdAt - a.createdAt)
+            .slice(0, 50)
+            .map((s) => ({
+              id: s.id,
+              question: s.config.auto?.question ?? '',
+              status: s.status,
+              round: s.round,
+              stopReason: s.stopReason,
+              createdAt: s.createdAt,
+              restored: s.restored,
+              reportRel: s.reportRel,
+              targetCwd: s.config.targetCwd ?? null,
+              transcriptEntries: s.transcript.length,
+            }))
+          return writeJson(res, { ok: true, count: list.length, sessions: list })
         },
       },
       {
@@ -1747,6 +2033,10 @@ export default {
                 targetCwd: s.config.targetCwd ?? null,
                 createdAt: s.createdAt,
                 streaming: streams,
+                reportRel: s.reportRel,
+                persistError: s.persistError,
+                reportError: s.reportError,
+                restored: s.restored,
               })
             }
             return writeJson(res, { ok: true, count: list.length, sessions: list })
@@ -1758,6 +2048,19 @@ export default {
     ]
     // 真实 webServer.register 只接受单个 route(数组会被静默塞进前缀表导致路由失效,见 explorer 经验)
     for (const route of routes) ctx.webServer.register(route)
+
+    // 装载上一进程留下的局(ADR-0019)。后台做,不挡路由注册:
+    // 面板在装载完成前轮询旧 id 会拿到一次 unknown-id,那是可接受的过渡态。
+    void loadPersisted(ctx)
+    // HMR 重载插件时(profile 的模块监听是可选项)必须关掉 KV 单元:
+    // 同一个单元名未关就再开是调用方 bug,后端会直接 reject,那会让重载后的插件彻底没有持久化。
+    // 用 ctx.effect 而不是 ctx.on('dispose'):cordis 4 的清理钩子是 effect 返回的 disposer。
+    ctx.effect(() => () => {
+      const unit = store
+      store = null
+      storeTried = false
+      if (unit !== null) void unit.close().catch(() => { /* 关闭失败无补救,进程反正要走了 */ })
+    })
 
     // model 工具(v0.2 三步分调,每步结果自然进会话动态显示,面板照常轮询):
     // debate_open 建单自动判断+开题 → debate_round 逐轮交锋 → debate_synthesize 制图。
@@ -1928,7 +2231,12 @@ export default {
             residentError: 'not-attempted',
             streaming: {},
             decisionSummary: null,
+            reportRel: null,
+            persistError: null,
+            reportError: null,
+            restored: false,
           }
+          session.flush = () => schedulePersist(ctx, session)
           sessions.set(session.id, session)
           const hint = typeof a.hint === 'string' ? a.hint : ''
           const ctl = new AbortController()
