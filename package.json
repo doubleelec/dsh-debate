@@ -71,6 +71,7 @@
     "build": "tsdown && tsc -p tsconfig.build.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:sandbox": "node scripts/test-sandbox.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
