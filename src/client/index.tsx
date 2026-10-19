@@ -746,7 +746,7 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
         </div>
         <div className={C('dshd-field')}>
           <span>{tr('rounds.label')}</span>
-          <input type="number" min={1} max={10} value={rounds} onChange={(e) => setRounds(Number(e.target.value))} disabled={status === 'running'} />
+          <input type="number" min={1} max={20} value={rounds} onChange={(e) => setRounds(Number(e.target.value))} disabled={status === 'running'} />
         </div>
         <div className={C('dshd-note')}>输入框写问题 → 点开始辩论即开(工作区自动取当前会话,不用填)。实况在本面板看,跑完点"复制成果地图"并回对话。</div>
         {resolved !== null && (

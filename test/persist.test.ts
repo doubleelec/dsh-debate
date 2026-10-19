@@ -154,21 +154,31 @@ describe('文件名安全(slugify / reportRelPath)', () => {
   })
 
   it('空白折成单个连字符,首尾不留连字符/点/空格;问号是非法文件名字符,清掉而不是保留', () => {
-    const s = slugify('  该不该   上 K8s?  ')
-    expect(s).toBe('该不该-上-K8s')
+    const s = slugify('  多仓   上 K8s?  ')
+    expect(s).toBe('多仓-上-K8s')
     expect(s.startsWith('-')).toBe(false)
     expect(s.endsWith('-')).toBe(false)
     expect(slugify('...trailing...')).toBe('trailing')
   })
 
   it('中文保留(问题多半是中文,换成拼音只会更难认)', () => {
-    expect(slugify('该不该上 K8s')).toContain('该不该上')
+    expect(slugify('上K8s还是用ECS')).toContain('上K8s')
   })
 
   it('按码点截断:不把代理对劈成两半', () => {
     const s = slugify('🚀'.repeat(60))
-    expect(Array.from(s).length).toBe(40)
+    expect(Array.from(s).length).toBe(12)
     expect(s).not.toContain('\ufffd')
+  })
+
+  it('文件名精练:去语气词 + 12 码点,标题全文仍在文件内第一行', () => {
+    // 线上实测:40 字 slug 让 ls 糊成三行,文件名是索引不是复述。
+    const s = slugify('我现在想根据这个项目特点找到一个更好的工作方式,不要太受限于既有机制')
+    expect(Array.from(s).length).toBeLessThanOrEqual(12)
+    expect(s).not.toContain('我现在想')
+    // 实词保留,不是空壳。
+    expect(slugify('该不该上 K8s')).toContain('K8s')
+    expect(slugify('评估增加设施的意义')).toContain('评估')
   })
 
   it('清空或全非法字符时回落 debate,不产出空文件名', () => {
@@ -178,7 +188,7 @@ describe('文件名安全(slugify / reportRelPath)', () => {
   })
 
   it('路径形状固定:docs/debates/<日期>-<slug>-<id尾>.md', () => {
-    const p = reportRelPath(1_700_000_000_000, '该不该上 K8s?', 'debate-abc123-7')
+    const p = reportRelPath(1_700_000_000_000, '多仓上 K8s?', 'debate-abc123-7')
     expect(p.startsWith(`${REPORT_DIR}/`)).toBe(true)
     expect(p.endsWith('.md')).toBe(true)
     expect(p.split('/').length).toBe(3)

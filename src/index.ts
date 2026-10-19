@@ -519,6 +519,9 @@ function writeJson(res: DebateHttpResponse, value: unknown, status = 200): void 
   res.end(JSON.stringify(value))
 }
 
+/** 最大交锋轮数上限:10 轮题刚好压线(S10/S11 实测),超 20 未收敛多半真谈不拢。 */
+export const MAX_ROUNDS_CAP = 20
+
 /** 校验面板传来的配置(v0.2:只收三模型+轮数+裁判,问题/题型/lens/背景执行时自动)。 */
 export function normalizeConfig(body: Record<string, unknown>): { config: DebateConfig } | { error: string } {
   const str = (v: unknown, fb: string): string => (typeof v === 'string' && v.trim() !== '' ? v : fb)
@@ -530,7 +533,10 @@ export function normalizeConfig(body: Record<string, unknown>): { config: Debate
     return { ...fb }
   }
   const maxRoundsRaw = Number(body.maxRounds ?? DEFAULT_CONFIG.maxRounds)
-  const maxRounds = Number.isFinite(maxRoundsRaw) ? Math.min(10, Math.max(1, Math.floor(maxRoundsRaw))) : DEFAULT_CONFIG.maxRounds
+  const floored = Number.isFinite(maxRoundsRaw) ? Math.max(1, Math.floor(maxRoundsRaw)) : DEFAULT_CONFIG.maxRounds
+  // 钳制要留痕:用户填 30,面板不能一边显示 30 一边跑 20(线上实测:填 20 静默跑 10)。
+  const maxRounds = Math.min(MAX_ROUNDS_CAP, floored)
+  const note = floored > MAX_ROUNDS_CAP ? `轮数 ${floored} 已按上限 ${MAX_ROUNDS_CAP} 钳制(超 20 轮未收敛多半真谈不拢)` : undefined
   // 裁判已从 interface 移除(ADR-0002:默认关且无实现,留着就是死配置);面板也不传。
   // targetCwd:评审别家工程时填(空=沿用发起会话 cwd);建单即校验存在性,fail fast。
   const targetCwd = typeof body.targetCwd === 'string' ? body.targetCwd.trim() : ''
@@ -539,6 +545,7 @@ export function normalizeConfig(body: Record<string, unknown>): { config: Debate
     challenger: route(body.challenger, DEFAULT_CONFIG.challenger),
     synthesizer: route(body.synthesizer, DEFAULT_CONFIG.synthesizer),
     maxRounds,
+    ...(note !== undefined ? { note } : {}),
     ...(targetCwd !== '' ? { targetCwd } : {}),
   }
   return { config: cfg }
@@ -1823,6 +1830,10 @@ export default {
             } catch { /* 探针不可用时放行,运行时 cwd 缺失由 agent 侧报错 */ }
           }
           sessions.set(session.id, session)
+          // 钳制留痕:用户填的轮数被上限压过时,第一条 progress 就明说(静默丢配置比报错更糟)。
+          if (parsed.config.note !== undefined) {
+            session.progress = parsed.config.note
+          }
           // v0.3:建单即后台直驱,不再经过输入框触发语。hint=输入框问题快照,sid=当前会话 id。
           // cwd=面板从 useSessions 读来的会话工作区(host 侧 Web 会话不可见,只能面板传):
           // 最可信,直接定 targetCwd,辩手读得到本工程文件。
@@ -2252,7 +2263,7 @@ export default {
           type: 'object',
           properties: {
             hint: { type: 'string', description: '可选:要辩的问题(如输入框草稿)。为空则取最近一条 user 消息当问题。' },
-            maxRounds: { type: 'number', description: '可选:最大交锋轮数(1~10,默认 5)。' },
+            maxRounds: { type: 'number', description: '可选:最大交锋轮数(1~20,默认 5)。超上限按 20 跑并在进度里留痕。' },
           },
         },
         output: textOut,
@@ -2294,6 +2305,10 @@ export default {
           }
           session.flush = () => schedulePersist(ctx, session)
           sessions.set(session.id, session)
+          // 钳制留痕(agent 入口同理:runDebateLoop 的第一条 progress 会被覆盖,这里记 note 供 progress 拼接)。
+          if (parsed.config.note !== undefined) {
+            session.progress = parsed.config.note
+          }
           const hint = typeof a.hint === 'string' ? a.hint : ''
           const ctl = new AbortController()
           controllers.set(session.id, ctl)

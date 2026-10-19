@@ -599,8 +599,13 @@ export interface DebateConfig {
   challenger: { provider: string; model: string }
   /** 制图员路由,默认复用建构者(ADR-0006:新会话即算独立)。 */
   synthesizer: { provider: string; model: string }
-  /** 最大交锋轮数,默认 5。 */
+  /** 最大交锋轮数,默认 5,钳制上限见 host 的 MAX_ROUNDS_CAP。 */
   maxRounds: number
+  /**
+   * 建单时的钳制留痕(如实收 "30" 按上限 20 跑,静默丢配置比报错更糟)。
+   * 没被钳就不设,调用方用 undefined 区分"用户原意"与"被钳过"。
+   */
+  note?: string
   /**
    * 目标工作区:辩手读文件的根目录(评审别家工程时填,如 D:\...\ai_proxy;空=沿用发起会话 cwd)。
    * host 建单即校验存在性,不存在直接报错,不等开题才挂。
@@ -886,11 +891,19 @@ export function buildSynthesizerPrompt(question: string, transcript: string): st
     `输出分两大部分,顺序不能颠倒:`,
     ``,
     `## ${DECISION_SECTION}(放在最前面,给决策者看的一段话,总长 ≤500 字)`,
+    `这段的读者是没参辩的决策者,不是参辩的模型——写给人看,不是写备忘录。`,
+    `语言铁律三条(违反即不合格):`,
+    `1. 术语第一次出现必须展开:不许扔"Goal 编排层""branch-only 注入"这种缩写就走,`,
+    `   必须写成"Goal 编排层(跨会话的任务规划与分发)"——读者没读过实录,不展开就看不懂。`,
+    `2. 依据不许只甩编号:不许写"dsh-subagent README169权限…[R3#8]"就完事,`,
+    `   必须一句话说清内容("subagent 没有 workspace 参数,只能只读编排、写操作串行")——编号可留,但内容不能省。`,
+    `3. 下一步必须可执行:每条写清查什么(哪份文档哪一节)/跑什么(哪条命令)/找谁确认(哪个仓的 owner),`,
+    `   缺一不可;不许写"试点跑任务记耗时"这种没头没尾的话。`,
     `用下面四小段,每段短行,不要用表格:`,
     `- 结论:一句话回答原问题;双方是否收敛,没收敛就写清各自最后站哪。`,
     `- 关键分歧:没谈拢的点,每条一句话(价值排序不同还是事实没查清,写明)。`,
-    `- 主要依据:支撑结论最硬的 2~3 条(带[轮次引用])。`,
-    `- 建议下一步:2~3 条可执行动作(查什么/试什么/找谁确认),附一条最大风险。`,
+    `- 主要依据:支撑结论最硬的 2~3 条,每条一句话说清内容,可附[轮次引用]但不许只有编号。`,
+    `- 建议下一步:2~3 条可执行动作(查什么/跑什么/找谁确认,缺一不可),附一条最大风险。`,
     `这段会原样贴进用户对话区,是用户决定下一步的依据,所以必须自足:不依赖下面的地图也读得懂,不许出现"见上文""如上"这类指代。`,
     ``,
     `## 成果地图(五件套,放在决策摘要之后)`,
@@ -974,7 +987,8 @@ export function buildFallbackSummary(
   const quoted = rounds.reduce((a, r) => a + (r.quoteAudit?.quotedLines ?? 0), 0)
   const ptrTotal = rounds.reduce((a, r) => a + (r.pointerAudit?.total ?? 0), 0)
   const ptrMissing = rounds.flatMap((r) => r.pointerAudit?.missing ?? [])
-  lines.push(`- 主要依据:${n} 轮交锋支撑,挑战方累计引用建构方原文 ${quoted} 处;逐条依据与出处见成果地图「依据」节。`)
+  // 依据行说人话:兜底没有实录可读,写不出逐条内容,但至少不甩裸编号(编号没人记得住 R3#8 是什么)。
+  lines.push(`- 主要依据:${n} 轮交锋支撑,挑战方累计引用建构方原文 ${quoted} 处;逐条依据与出处见成果地图「依据」节(文件指针命中另见下一行)。`)
   // 出处指针审计:只报数(命中 x/y),不 gate。老局/没验的轮记 unknown,不混进分母。
   // 口径:命中与缺失都按轮次累加(含重复出现),展示时才去重——分母分子同一口径。
   const ptrAudited = rounds.filter((r) => hasPointerAudit(r))

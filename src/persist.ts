@@ -23,8 +23,11 @@ export const STORAGE_TABLE = 'sessions'
 /** 结论文档所在目录(相对工作区,posix 分隔符)。 */
 export const REPORT_DIR = 'docs/debates'
 
-/** slug 码点上限。按码点切,免得把代理对(emoji)劈成两半。 */
-export const SLUG_MAX_CODEPOINTS = 40
+/** slug 码点上限。文件名是索引不是复述:12 字 + 日期 + id 尾足够定位,标题全文在文件内第一行。 */
+export const SLUG_MAX_CODEPOINTS = 12
+
+/** 文件名里的语气词:占位置但不定位,去掉了不影响认出是哪一局。 */
+const SLUG_STOPWORDS = /我现在想|不要太|根据|这个|一个|更好|还是|是否|该不该|一下|这些|怎么|如何|什么|为什么|能不能|可以|进行/g
 
 /** 停机原因取值域(校验用,顺序即枚举)。 */
 const STOP_REASONS = ['convergence', 'saturation', 'maxRounds', 'manual'] as const
@@ -157,9 +160,12 @@ const UNSAFE = /[\\/:*?"<>|\u0000-\u001f\u007f]/g
 /**
  * 问题 → 文件名片段。保留中文(问题多半是中文,换成拼音只会更难认),
  * 只清掉文件名里非法的字符与结构隐患。
+ * 精练:先去语气词(占位置不定位),再按码点切到 12 字——
+ * 线上实测 40 字 slug 让 ls 糊成三行;文件名是索引,标题全文在文件内第一行。
  */
 export function slugify(q: string): string {
   const cleaned = q
+    .replace(SLUG_STOPWORDS, '')
     .replace(UNSAFE, '')
     .replace(/\s+/g, '-')
     .replace(/-{2,}/g, '-')

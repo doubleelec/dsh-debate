@@ -131,9 +131,47 @@ describe('normalizeConfig', () => {
       expect(r.config.auto).toBeUndefined()
     }
   })
-  it('轮数钳制 1~10', () => {
+  it('轮数钳制 1~20(上限 20:10 轮题刚好压线,超 20 未收敛多半真谈不拢)', () => {
     const r = normalizeConfig({ maxRounds: 99 })
-    if ('config' in r) expect(r.config.maxRounds).toBe(10)
+    if ('config' in r) expect(r.config.maxRounds).toBe(20)
+    const lo = normalizeConfig({ maxRounds: 0 })
+    if ('config' in lo) expect(lo.config.maxRounds).toBe(1)
+    const ok = normalizeConfig({ maxRounds: 20 })
+    if ('config' in ok) {
+      expect(ok.config.maxRounds).toBe(20)
+      // 没被钳:不留痕。
+      expect(ok.config.note).toBeUndefined()
+    }
+  })
+  it('轮数被钳时留痕:静默丢配置比报错更糟', () => {
+    const r = normalizeConfig({ maxRounds: 30 })
+    if (!('config' in r)) throw new Error('bad')
+    expect(r.config.maxRounds).toBe(20)
+    expect(r.config.note).toContain('30')
+    expect(r.config.note).toContain('20')
+  })
+  it('制图 prompt:总结语言铁律(术语展开/依据说人话/下一步可执行)', () => {
+    const p = buildSynthesizerPrompt('按任务还是按仓划分?', '[R1 #1 builder] xxx')
+    // 术语第一次出现必须展开,不能扔缩写。
+    expect(p).toMatch(/术语.*展开|缩写|第一次出现/)
+    // 依据不许只甩编号,必须一句话说清内容。
+    expect(p).toMatch(/只写编号|编号.*内容|不许只/)
+    // 下一步必须可执行:查什么/跑什么/找谁,缺一不可。
+    expect(p).toMatch(/查什么|跑什么|找谁|可执行/)
+  })
+  it('兜底收尾:结论行说人话,不甩编号', () => {
+    const mk = (over: Partial<DebateRound> = {}): DebateRound => ({
+      round: 1, builderAnswer: 'a', builderAgree: true,
+      challengerAnswer: 'a', challengerAgree: true, hasNewInfo: true, builderRelayChars: 0,
+      protoVersion: STOP_PROTOCOL_VERSION, pendingItems: null,
+      quoteAudit: { quotableLines: 0, quotedLines: 0, hitLines: [], hitRate: null },
+      ...over,
+    })
+    const s = buildFallbackSummary('上不上 K8s?', [mk()], 'convergence', 5)
+    // 停机说法展开,不只说"共识收敛"四个字。
+    expect(s).toMatch(/第 1 轮|提前|收敛/)
+    // 依据行不出现裸编号引用。
+    expect(s).not.toMatch(/\[R\d+#\d+\]/)
   })
   it('目标工作区:透传 targetCwd,空串不进 config', () => {
     const withCwd = normalizeConfig({ maxRounds: 2, targetCwd: 'D:\\proj\\ai_proxy' })
