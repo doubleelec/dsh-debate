@@ -7,6 +7,9 @@
 
 export type TrFn = (k: string, vars?: Record<string, string | number>) => string
 
+/** 面板缺失清单展示截断(与 debate.ts 的 MISSING_SHOW_MAX 系对应,面板地方小所以更短)。 */
+const PANEL_MISSING_SHOW_MAX = 2
+
 /** role 名映射:未知 role 原样显示,不崩。 */
 export function roleName(role: string, tr: TrFn): string {
   if (role === 'builder') return tr('role.builder')
@@ -34,6 +37,8 @@ export interface RoundVerdict {
   /** v4 焦点账本:本轮挑战者自报的未决条件(null=没提供)。 */
   pendingItems?: string[] | null
   quoteAudit: { quotedLines: number; quotableLines: number }
+  /** 出处指针审计(null=无文件型指针/老局没验,只审计不 gate)。 */
+  pointerAudit?: { total: number; hit: number; missing: string[]; unverified: string[] } | null
 }
 
 /** 每轮一句话小结:翻译 host 的判定数据,不调模型。 */
@@ -57,6 +62,14 @@ export function roundSummary(r: RoundVerdict, tr: TrFn): string {
   const n = r.pendingItems?.length ?? 0
   if (n > 0) tail.push(tr('summary.pending', { n }))
   if (r.quoteAudit.quotableLines > 0) tail.push(tr('summary.quoted', { q: r.quoteAudit.quotedLines, t: r.quoteAudit.quotableLines }))
+  // 出处指针审计:只报命中数,不 gate(缺 side 数据时不猜,直接不显示)。
+  // 面板只列前 2 条缺失(地方小),全量在结论文档里——截断数见 debate.ts MISSING_SHOW_MAX 系。
+  const ptr = r.pointerAudit
+  if (ptr !== undefined && ptr !== null && ptr.total > 0) {
+    tail.push(tr('audit.ptr', { hit: ptr.hit, total: ptr.total }))
+    if (ptr.missing.length > 0) tail.push(tr('audit.ptrMissing', { missing: ptr.missing.slice(0, PANEL_MISSING_SHOW_MAX).join('、') }))
+    if (ptr.unverified.length > 0) tail.push(tr('audit.ptrUnverified', { n: ptr.unverified.length }))
+  }
   return `${verdict};${tail.join(' · ')}`
 }
 

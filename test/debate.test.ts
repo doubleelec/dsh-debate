@@ -33,6 +33,10 @@ import {
   DECISION_SECTION,
   PENDING_MAX_ITEMS,
   convergedAtCap,
+  extractPointers,
+  auditPointers,
+  parseGaps,
+  gapAge,
   type DebateRound,
   type TranscriptEntry,
 } from '../src/debate'
@@ -678,6 +682,24 @@ describe('v4 pending ledger', () => {
     expect(long?.[0].length).toBe(60)
   })
 
+  it('parsePendingItems:超长截断不断词——回退到 60 字内最后一个空白/标点', () => {
+    // 中文:逗号在 50 处,硬切 60 会劈开后半句,应回退到逗号前。
+    const zh = `${'字'.repeat(50)}，${'字'.repeat(50)}`
+    const rzh = parsePendingItems(`待决清单=${zh}`)
+    expect(rzh?.[0].length).toBe(50)
+    expect(rzh?.[0]).toBe('字'.repeat(50))
+    // ASCII:空格分隔的词,截断后不能留半个词也不能留尾空格。
+    const en = `${'word '.repeat(30)}tail`
+    const ren = parsePendingItems(`待决清单=${en}`)
+    expect(ren?.[0].length).toBeLessThan(60)
+    expect(ren?.[0].endsWith('word')).toBe(true)
+    // 无边界可退(如纯单字重复) → 仍硬切 60(老行为不变)。
+    const hard = parsePendingItems(`待决清单=${'长'.repeat(200)}`)
+    expect(hard?.[0].length).toBe(60)
+    // 60 字内不断:短条原样。
+    expect(parsePendingItems('待决清单=短条件')).toEqual(['短条件'])
+  })
+
   it('pendingStalled:连续两轮清单逐条相同才算停滞(顺序无关)', () => {
     const a = mkRound({ round: 1, pendingItems: ['载体需补第四类', 'C_new 阈值'] })
     const b = mkRound({ round: 2, pendingItems: ['C_new 阈值', '载体需补第四类'] })
@@ -726,6 +748,98 @@ describe('v4 pending ledger', () => {
     const rec = toDebateRound(2, 'agree=false\nanswer=甲', 'agree=false\nanswer=乙\n待决清单=丙;丁', '旧')
     expect(rec.pendingItems).toEqual(['丙', '丁'])
     expect(rec.protoVersion).toBe(4)
+  })
+
+  it('toDebateRound:给了 exists 就验指针,不给就记 null(不验不猜)', () => {
+    const b = 'agree=false\nanswer=甲\n见 `live/run_live.py:162`。'
+    const c = 'agree=false\nanswer=乙\n另见 `docs/missing.md`。'
+    const withFn = toDebateRound(1, b, c, '旧', 0, (p) => p === 'live/run_live.py')
+    expect(withFn.pointerAudit?.total).toBe(2)
+    expect(withFn.pointerAudit?.hit).toBe(1)
+    expect(withFn.pointerAudit?.missing).toEqual(['docs/missing.md'])
+    const withoutFn = toDebateRound(1, b, c, '旧')
+    expect(withoutFn.pointerAudit).toBeNull()
+  })
+
+  it('extractPointers:只抽文件型指针,行号/行尾标点剥掉,节引用不抽', () => {
+    const text = [
+      'Evt5 由 `live/run_live.py:162-172` 触发,见 `docs/spec.md §Solution`。',
+      '[事实,docs/architecture.toml] 托管产物须申报;',
+      '[事实,spec §Solution] 快照只读副本;',
+      'tickets/02:8 与其 :14 仍写"上月+当月",`archive/YYYY-MM.zip` 的触发点要改。',
+      '裸词 run_live.py 不算(无路径,无法定位)。',
+    ].join('\n')
+    const ps = extractPointers(text)
+    // live/run_live.py(含行号剥掉) / docs/spec.md / docs/architecture.toml / tickets/02 / archive/YYYY-MM.zip
+    expect(ps).toContain('live/run_live.py')
+    expect(ps).toContain('docs/spec.md')
+    expect(ps).toContain('docs/architecture.toml')
+    expect(ps).toContain('tickets/02')
+    expect(ps).toContain('archive/YYYY-MM.zip')
+    // spec §Solution 这种节引用无法定位 → 不抽,不算缺失。
+    expect(ps.every((p) => !p.startsWith('spec '))).toBe(true)
+    expect(ps.some((p) => p.includes(':'))).toBe(false)
+    // 去重。
+    expect(ps.length).toBe(new Set(ps).size)
+  })
+
+  it('auditPointers:存在性只审计不 gate,无指针返回 null', () => {
+    // 命中/缺失二分(节引用根本不进抽取)。
+    const a = auditPointers('见 `live/run_live.py:162` 与 `docs/missing.md`,另 [事实,spec §Solution] 快照只读。', (p) => p === 'live/run_live.py')
+    expect(a?.total).toBe(2)
+    expect(a?.hit).toBe(1)
+    expect(a?.missing).toEqual(['docs/missing.md'])
+    expect(a?.unverified).toEqual([])
+    expect(a?.hitRate).toBe(0.5)
+    // exists 抛错 = 验不了,进 unverified(验不了 ≠ 不存在,不进 missing)。
+    const u = auditPointers('见 `live/a.py`。', () => { throw new Error('no-fs') })
+    expect(u?.missing).toEqual([])
+    expect(u?.unverified).toEqual(['live/a.py'])
+    expect(u?.hitRate).toBe(0)
+    // 无文件型指针 → null(与"引用 0 行"区分开,跟 quoteAudit.hitRate=null 同一哲学)。
+    expect(auditPointers('没有指针,只有 [事实,spec §Solution] 节引用。', () => true)).toBeNull()
+    expect(auditPointers('', () => true)).toBeNull()
+  })
+
+  it('extractPointers:纯文本裸路径与前导点路径也抽,行尾标点剥掉', () => {
+    const ps = extractPointers('详见 docs/foo.md,另有 .data_live/snap.json 未采样;相对 ./x/y.txt 可读。')
+    expect(ps).toContain('docs/foo.md')
+    expect(ps).toContain('.data_live/snap.json')
+    expect(ps).toContain('./x/y.txt')
+    // "a/b"这种无扩展名的措辞不当路径。
+    expect(extractPointers('甲乙 a/b 丙丁')).toEqual([])
+  })
+
+  it('parseGaps:只认缺口行,[缺失]整行与缺失/无实测/无采样短语都抓', () => {
+    const text = [
+      '## 详细论证',
+      '8.[缺失] 单日live_state体积、journal日均行数/字节、.data_live总量:文件不在工作区,无实测。',
+      '最关键缺失:三处体积无实测——live_state单日大小、journal月增速。',
+      '资源三项体积无采样,标缺失(文件不在工作区)。',
+      '## 本轮变化',
+      '新缺口:体积三项仍缺du采样,T01前需补。',
+    ].join('\n')
+    const gs = parseGaps(text)
+    // 同一缺口的不同说法归一后去重,条数≤行数。
+    expect(gs.length).toBeGreaterThan(0)
+    expect(gs.length).toBeLessThanOrEqual(4)
+    expect(gs.every((g) => g.length > 0)).toBe(true)
+    // 非缺口行不抓。
+    expect(parseGaps('## 结论摘要\n主张并列,不收敛。')).toEqual([])
+    expect(parseGaps('')).toEqual([])
+  })
+
+  it('gapAge:同一缺口存活了几轮进审计,中途补上即止', () => {
+    // 缺口 g1 只在 R1 出现 → 存活 1 轮;g2 在 R2/R3 → 存活 2 轮。
+    const ages = gapAge([
+      { round: 1, gaps: ['体积无实测'] },
+      { round: 2, gaps: ['体积无实测', 'manifest样例缺失'] },
+      { round: 3, gaps: ['manifest样例缺失'] },
+    ])
+    expect(ages).toEqual([
+      { gap: '体积无实测', firstRound: 1, lastRound: 2, age: 2 },
+      { gap: 'manifest样例缺失', firstRound: 2, lastRound: 3, age: 2 },
+    ])
   })
 
   it('缺「本轮变化」段时回落整篇比对(旧格式不破)', () => {
@@ -785,6 +899,46 @@ describe('v4 decision summary', () => {
     const s = buildFallbackSummary('问题', [], null)
     expect(s).toContain('## 决策摘要')
     expect(s).toContain('未形成明确答案')
+  })
+
+  it('兜底收尾:收敛但缺口仍存活 → 加"未覆盖"声明,不拦停机', () => {
+    const conv = (n: number) => mkRound({
+      round: n, builderAgree: true, challengerAgree: true,
+      builderAnswer: '上 K8s', challengerAnswer: '上 K8s',
+    })
+    const s = buildFallbackSummary('上不上 K8s?', [conv(1), conv(2)], 'convergence', 5, [
+      { gap: '体积三项无采样', firstRound: 1, lastRound: 2, age: 2 },
+    ])
+    expect(s).toContain('共识收敛')
+    expect(s).toContain('未覆盖')
+    expect(s).toContain('体积三项无采样')
+    expect(s).toContain('存活 2 轮')
+    // 没给 gapSpans → 不写,不猜。
+    const plain = buildFallbackSummary('上不上 K8s?', [conv(1), conv(2)], 'convergence', 5)
+    expect(plain).not.toContain('未覆盖')
+  })
+
+  it('兜底收尾:指针审计只报数(命中 x/y),缺了也不 gate', () => {
+    const r = mkRound({
+      round: 1, builderAgree: true, challengerAgree: true,
+      builderAnswer: '上 K8s', challengerAnswer: '上 K8s',
+      pointerAudit: { total: 2, hit: 1, missing: ['docs/missing.md'], unverified: [], hitRate: 0.5 },
+    })
+    const s = buildFallbackSummary('上不上 K8s?', [r], 'convergence', 5)
+    expect(s).toContain('出处核验')
+    expect(s).toContain('命中 1 条')
+    expect(s).toContain('未命中 1 条')
+    expect(s).toContain('docs/missing.md')
+    // 验不了的轮单独报数,不进 missing。
+    const u = mkRound({
+      round: 1, pointerAudit: { total: 1, hit: 0, missing: [], unverified: ['live/a.py'], hitRate: 0 },
+    })
+    const su = buildFallbackSummary('问?', [u], 'maxRounds', 5)
+    expect(su).toContain('验不了 1 条')
+    expect(su).not.toContain('未命中: ')
+    // 老局(字段缺失) → 不写这行,不猜。
+    const old = buildFallbackSummary('上不上 K8s?', [mkRound({ round: 1 })], 'convergence', 5)
+    expect(old).not.toContain('出处核验')
   })
 
   it('convergedAtCap:只有"上限轮 + 真收敛"才算压线,不是提前收敛', () => {

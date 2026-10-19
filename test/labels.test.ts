@@ -13,6 +13,7 @@ const tr: TrFn = (k, vars) => {
     'summary.standoff': '建构方坚持「{b}」,挑战方坚持「{c}」',
     'summary.opening': '开题:建构方摆出「{b}」,挑战方摆出「{c}」',
     'summary.quoted': '引用对方{q}/{t}行',
+    'audit.ptr': '出处{hit}/{total}', 'audit.ptrMissing': '缺:{missing}', 'audit.ptrUnverified': '验不了{n}条',
   }
   let s = d[k] ?? k
   if (vars) for (const key in vars) s = s.split(`{${key}}`).join(String(vars[key]))
@@ -71,6 +72,24 @@ describe('roundSummary', () => {
       ...base, round: 2, builderAgree: false, challengerAgree: false,
       hasNewInfo: false, quoteAudit: { quotedLines: 0, quotableLines: 0 },
     }, tr)).toBe('建构方坚持「选A方案」,挑战方坚持「选B方案」;本轮没新料')
+  })
+
+  it('summarizes pointer audit hits without gating', () => {
+    expect(roundSummary({
+      ...base, round: 2, builderAgree: false, challengerAgree: false,
+      pointerAudit: { total: 2, hit: 1, missing: ['docs/missing.md'], unverified: [] },
+    }, tr)).toBe('建构方坚持「选A方案」,挑战方坚持「选B方案」;有新料 · 引用对方3/5行 · 出处1/2 · 缺:docs/missing.md')
+    expect(roundSummary({
+      ...base, round: 2, builderAgree: false, challengerAgree: false,
+      pointerAudit: { total: 2, hit: 1, missing: [], unverified: ['live/a.py'] },
+    }, tr)).toBe('建构方坚持「选A方案」,挑战方坚持「选B方案」;有新料 · 引用对方3/5行 · 出处1/2 · 验不了1条')
+    // 老局(字段缺失)/无指针 → 不显示,不猜。
+    expect(roundSummary({ ...base, round: 2, builderAgree: false, challengerAgree: false }, tr))
+      .toBe('建构方坚持「选A方案」,挑战方坚持「选B方案」;有新料 · 引用对方3/5行')
+    expect(roundSummary({
+      ...base, round: 2, builderAgree: false, challengerAgree: false,
+      pointerAudit: null,
+    }, tr)).toBe('建构方坚持「选A方案」,挑战方坚持「选B方案」;有新料 · 引用对方3/5行')
   })
 })
 

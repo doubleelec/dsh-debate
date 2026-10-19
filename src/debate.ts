@@ -69,6 +69,17 @@ export function parseAnswer(text: string): string {
 
 /** 未决清单单项上限(超长截断,防单条吃掉整个 prompt 预算)。 */
 export const PENDING_ITEM_MAX_LEN = 60
+
+/** 截断不断词:超长时回退到上限内最后一个空白/标点处,免得把词从中间劈开。 */
+function clipWord(s: string, max: number): string {
+  if (s.length <= max) return s
+  const head = s.slice(0, max)
+  // 中英文的词边界:空白 + 常见分隔标点(逗号/句号/分号/顿号/括号/冒号等)。
+  const m = head.match(/^(.*)[\s，。、；;,.!?！？:：()（）「」『』【】\[\]]/)
+  const cut = m ? m[1].trimEnd() : ''
+  // 有边界就认(哪怕只剩几个字,也是完整词);无边界才硬切。
+  return cut !== '' ? cut : head
+}
 /** 未决清单条数上限(超出丢弃:账本要短才好读,长清单本身就是失焦信号)。 */
 export const PENDING_MAX_ITEMS = 6
 
@@ -94,7 +105,7 @@ export function parsePendingItems(text: string): string[] | null {
     .flatMap((s) => s.split('、'))
     .map((s) => s.replace(/^\s*[-*\d]+\s*[)）.、:：]?\s*/, '').trim())
     .filter((s) => s !== '' && !/^(无|none)$/i.test(s))
-    .map((s) => s.slice(0, PENDING_ITEM_MAX_LEN))
+    .map((s) => clipWord(s, PENDING_ITEM_MAX_LEN))
   return items.slice(0, PENDING_MAX_ITEMS)
 }
 
@@ -264,7 +275,12 @@ export interface DebateRound {
   pendingItems: string[] | null
   /** 挑战者本轮引用建构者原文的命中统计(B6/S3,见 auditQuotes)。 */
   quoteAudit: QuoteAudit
-}
+  /**
+   * 本轮双方输出里的文件型出处指针存在性审计(只审计不 gate,见 auditPointers)。
+   * 可选:老记录没有它,读到即 unknown(不 bump RECORD_VERSION,见 ADR-0021);
+   * null=本轮无文件型指针(跟 quoteAudit.hitRate=null 同一哲学)。
+   */
+  pointerAudit?: PointerAudit | null}
 
 /**
  * 引用审计(B6):挑战者"必须引用对方原文"的硬约束有没有被遵守,
@@ -343,6 +359,171 @@ function hasFragHit(sent: string, chalNorm: string): boolean {
   return false
 }
 
+/** 出处指针审计结果(只审计不 gate,见 auditPointers)。 */
+export interface PointerAudit {
+  /** 抽到的文件型指针总数(去重后)。 */
+  total: number
+  /** 存在性命中的条数。 */
+  hit: number
+  /** 未命中的指针原文(去重后,供回跳核对)。 */
+  missing: string[]
+  /** 验不了的指针(exists 抛错:探针不可用 ≠ 文件不存在,不进 missing)。 */
+  unverified: string[]
+  /** 命中率 = hit / total(无指针时不构造本对象,调用方用 null 区分)。 */
+  hitRate: number
+}
+
+/** 行尾标点:剥掉,不属于路径。 */
+const PTR_TRAIL = /[，。、；;,.!?！？:：)）》】"'“”‘’]+$/
+
+/**
+ * 出处指针抽取(pointerAudit 上游)。
+ * 只抽**文件型**指针——含 `/` 的路径(`live/run_live.py`)或 `tickets/NN` 形。
+ * - backtick 段、`[事实,…]`/`(事实,…)` 出处位、纯文本裸路径都扫;
+ * - `:行号`/`:行-行` 剥掉(只验文件存在,不验行号);
+ * - `spec §Solution` 这类节引用无法定位 → 不抽(不算缺失,免得逼模型编路径)。
+ * 返回去重后的指针原文(不含行号)。
+ */
+export function extractPointers(text: string): string[] {
+  const found = new Set<string>()
+  const push = (raw: string): void => {
+    let p = raw.trim().replace(PTR_TRAIL, '')
+    // 剥行号:`path:162` / `path:162-172` / `tickets/02:8`。
+    const m = p.match(/^(.+?):\d+(?:-\d+)?$/)
+    if (m) p = m[1]
+    p = p.replace(PTR_TRAIL, '').trim()
+    if (p === '' || !p.includes('/')) return
+    // 路径字符白名单:字母数字中文._-/ 开头,还允 `./`/`../`/`.data_live` 形
+    // (前导点是相对路径/点目录的合法写法,不是标点)。
+    if (!/^(?:\.{1,2}\/)?\.?[\w\u4e00-\u9fa5][\w\u4e00-\u9fa5.\-/]*$/u.test(p)) return
+    found.add(p)
+  }
+  // 三个带标记位的来源同形:抽第一段(段内节后缀如"docs/spec.md §Solution"只取前半)。
+  // 裸 tickets/裸路径整段即指针(无捕获组),用 collectWhole。
+  const collect = (re: RegExp): void => {
+    for (const m of text.matchAll(re)) {
+      const first = m[1].split(/\s+/)[0]
+      if (first) push(first)
+    }
+  }
+  const collectWhole = (re: RegExp): void => {
+    for (const m of text.matchAll(re)) {
+      push(m[0].trim())
+    }
+  }
+  // backtick 段:`live/run_live.py:162-172` / `archive/YYYY-MM.zip`。
+  collect(/`([^`\n]+)`/g)
+  // 出处位:[事实,docs/architecture.toml](方括号,实测模型常用) / (事实,…) (圆括号)。
+  // [事实,spec §Solution]无 slash,自动落掉。
+  collect(/[(（](?:事实|推理|价值判断)[,，]\s*([^)）\n]+?)[)）]/g)
+  collect(/\[(?:事实|推理|价值判断)[,，]\s*([^\]\n]+?)\]/g)
+  // 裸 tickets/NN:tickets/02:8(行号照剥)。
+  collectWhole(/\btickets\/\d+[^\s，。、；;,)）】"'“”‘’`]*/g)
+  // 纯文本裸路径:docs/foo.md(前后是空白/标点/行首尾,不在 backtick 与出处位里)。
+  // 必须带小写扩展名才算(免得把"a/b"这种措辞当路径)。
+  collectWhole(/(^|[\s，。、；;(\[（【"'“”‘’])(?:\.{1,2}\/)?\.?[\w\u4e00-\u9fa5][\w\u4e00-\u9fa5.\-/]*\.[a-z0-9]{1,5}(?=$|[\s，。、；;,)）】"'“”‘’])/gu)
+  return [...found]
+}
+
+/**
+ * 出处指针审计:抽到的文件型指针逐条调 `exists` 验存在性。
+ * 只审计不 gate——调用方只记录、不停机(跟 QUOTE_HIT_ALERT 同一哲学):
+ * 幻觉指针和"文件在生产检出所以对不上"要区分,前者是模型问题,后者是环境问题,
+ * 审计只给"命中率 + 缺失清单",不断言是哪一种。
+ * `exists` 抛错 = 探针不可用,进 unverified(验不了 ≠ 不存在,不进 missing)。
+ * 无文件型指针时返回 null(与"0 命中"区分开,跟 quoteAudit.hitRate=null 同一哲学)。
+ */
+export function auditPointers(text: string, exists: (p: string) => boolean): PointerAudit | null {
+  const pointers = extractPointers(text)
+  if (pointers.length === 0) return null
+  const missing: string[] = []
+  const unverified: string[] = []
+  let hit = 0
+  for (const p of pointers) {
+    try {
+      if (exists(p)) hit++
+      else missing.push(p)
+    } catch {
+      unverified.push(p)
+    }
+  }
+  return { total: pointers.length, hit, missing, unverified, hitRate: hit / pointers.length }
+}
+
+/**
+ * 缺口抽取(gap-age 上游):从双方输出里抓"缺什么"的行。
+ * 只认三类缺口行——
+ * - `[缺失] …` 整行(建构者关键断言分类第 8 类);
+ * - 含"缺失/无实测/无采样/未采样/缺…/待补/需补"短语的行;
+ * - 「本轮变化」段的"新缺口:…"行。
+ * 返回归一化(去空白标点,见 normalizeAnswer)后去重的原文,供 gapAge 按轮比对。
+ */
+export function parseGaps(text: string): string[] {
+  const seen = new Map<string, string>()
+  const push = (raw: string): void => {
+    const s = raw.replace(/^[\s\d.\-|*#>…()（）:：]+/, '').trim()
+    if (s === '') return
+    const key = normalizeAnswer(s)
+    if (key === '' || seen.has(key)) return
+    seen.set(key, s.length > 80 ? `${s.slice(0, 80)}…` : s)
+  }
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (line === '') continue
+    if (/^[([]?缺失[\])）:]/.test(line) || line.includes('[缺失]')) { push(line.replace(/\[缺失\]/g, '').trim() || line); continue }
+    if (/缺失|无实测|无采样|未采样|缺du采样|需补|待补|标缺失|仍缺/.test(line)) { push(line); continue }
+    const m = line.match(/^新缺口\s*[:：]\s*(.+)$/)
+    if (m) push(m[1])
+  }
+  return [...seen.values()]
+}
+
+/** 缺口存活记录:同一缺口从哪轮活到哪轮。 */
+export interface GapSpan {
+  /** 缺口原文(首见轮的写法)。 */
+  gap: string
+  /** 首见轮。 */
+  firstRound: number
+  /** 末见轮(之后即被补上或不再提)。 */
+  lastRound: number
+  /** 存活轮数 = lastRound - firstRound + 1。 */
+  age: number
+}
+
+/**
+ * 缺口年龄:同一缺口(归一化比对)连续出现几轮。
+ * 输入每轮抽好的缺口(调用方用 parseGaps 逐轮抽);中断一轮即分段,
+ * 同一文本在 R1 与 R3 出现但 R2 缺席 → 记两段,不连起来。
+ * 只说事实(哪条活了几轮),不拦停机——调用方(收尾/报告)只加"未覆盖"声明。
+ */
+export function gapAge(roundGaps: Array<{ round: number; gaps: string[] }>): GapSpan[] {
+  const all: GapSpan[] = []
+  const active = new Map<string, GapSpan>()
+  const ordered = [...roundGaps].sort((a, b) => a.round - b.round)
+  for (const { round, gaps } of ordered) {
+    const keys = new Set<string>()
+    for (const g of gaps) {
+      const key = normalizeAnswer(g)
+      if (key === '') continue
+      keys.add(key)
+      const cur = active.get(key)
+      if (cur) {
+        cur.lastRound = round
+        cur.age = round - cur.firstRound + 1
+      } else {
+        const span: GapSpan = { gap: g, firstRound: round, lastRound: round, age: 1 }
+        active.set(key, span)
+        all.push(span)
+      }
+    }
+    // 这轮没出现的段即关闭(不再延长);后轮再出现则另起一段。
+    for (const key of [...active.keys()]) {
+      if (!keys.has(key)) active.delete(key)
+    }
+  }
+  return all.sort((a, b) => a.firstRound - b.firstRound || a.lastRound - b.lastRound)
+}
+
 /** 由两侧原文构造一轮记录(解析只做一次,判定与审计共用同一份输入)。 */
 export function toDebateRound(
   round: number,
@@ -350,6 +531,7 @@ export function toDebateRound(
   challengerOut: string,
   prevCombined: string,
   builderRelayChars = 0,
+  exists?: (p: string) => boolean,
 ): DebateRound {
   const currCombined = [builderOut, challengerOut].join('\n\n')
   // v4:新增判定优先只看双方「本轮变化」段(整篇找信号词永远命中)。
@@ -370,6 +552,8 @@ export function toDebateRound(
     protoVersion: STOP_PROTOCOL_VERSION,
     pendingItems: parsePendingItems(challengerOut),
     quoteAudit: auditQuotes(builderOut, challengerOut),
+    // exists 没给(纯函数单测/旧调用) → 不验,记 null(无指针与没验都用 null,都是"无可审计数")。
+    pointerAudit: exists ? auditPointers(currCombined, exists) : null,
   }
 }
 
@@ -742,6 +926,17 @@ function stopReasonText(stopReason: string | null, rounds: number, cap = false):
   return `跑满 ${rounds} 轮上限收尾`
 }
 
+/** 有出处审计数的轮(可选字段缺失的老局/没验的轮一律按无审计处理,不猜)。 */
+function hasPointerAudit(r: DebateRound): boolean {
+  return r.pointerAudit !== undefined && r.pointerAudit !== null
+}
+
+/** 展示截断:各处"缺失清单/未覆盖"只列前 N 条,全文仍在 transcript,面板不做分页。 */
+const MISSING_SHOW_MAX = 5
+const UNCOVERED_SHOW_MAX = 3
+const REPORT_UNCOVERED_MAX = 10
+const PANEL_MISSING_SHOW_MAX = 2
+
 /**
  * 兜底收尾陈述:制图员没吐出决策摘要段时,用判定数据拼一段自足的总结。
  * 只写有据可查的东西(双方最后答案/收敛与否/未决清单/引用统计),不替模型编结论。
@@ -751,6 +946,7 @@ export function buildFallbackSummary(
   rounds: DebateRound[],
   stopReason: string | null,
   maxRounds?: number,
+  gapSpans?: GapSpan[],
 ): string {
   const last = rounds[rounds.length - 1]
   const n = rounds.length
@@ -776,7 +972,25 @@ export function buildFallbackSummary(
       : `- 关键分歧:已无未决分歧;此前各轮争点见成果地图「分歧」节(保留历史争点)。`)
   }
   const quoted = rounds.reduce((a, r) => a + (r.quoteAudit?.quotedLines ?? 0), 0)
+  const ptrTotal = rounds.reduce((a, r) => a + (r.pointerAudit?.total ?? 0), 0)
+  const ptrMissing = rounds.flatMap((r) => r.pointerAudit?.missing ?? [])
   lines.push(`- 主要依据:${n} 轮交锋支撑,挑战方累计引用建构方原文 ${quoted} 处;逐条依据与出处见成果地图「依据」节。`)
+  // 出处指针审计:只报数(命中 x/y),不 gate。老局/没验的轮记 unknown,不混进分母。
+  // 口径:命中与缺失都按轮次累加(含重复出现),展示时才去重——分母分子同一口径。
+  const ptrAudited = rounds.filter((r) => hasPointerAudit(r))
+  if (ptrAudited.length > 0) {
+    const hit = ptrAudited.reduce((a, r) => a + (r.pointerAudit?.hit ?? 0), 0)
+    const missCount = ptrAudited.reduce((a, r) => a + (r.pointerAudit?.missing.length ?? 0), 0)
+    const unverCount = ptrAudited.reduce((a, r) => a + (r.pointerAudit?.unverified.length ?? 0), 0)
+    const uniqMissing = [...new Set(ptrMissing)].slice(0, MISSING_SHOW_MAX)
+    lines.push(`- 出处核验:文件型指针累计 ${ptrTotal} 条,命中 ${hit} 条,未命中 ${missCount} 条${unverCount > 0 ? `,验不了 ${unverCount} 条(探针不可用,不是不存在)` : ''}${uniqMissing.length > 0 ? `;未命中:${uniqMissing.join('、')}${ptrMissing.length > uniqMissing.length ? ' 等' : ''}(可能是幻觉指针,也可能是文件不在工作区,需人工核对)` : ''}。`)
+  }
+  // 缺口年龄:一致达成时仍存活的缺口 = "本次一致没覆盖什么",只说事实不拦停机。
+  const uncovered = (gapSpans ?? []).filter((g) => g.lastRound >= n)
+  if (uncovered.length > 0) {
+    const top = uncovered.slice(0, UNCOVERED_SHOW_MAX).map((g) => `「${g.gap}」(自 R${g.firstRound} 存活 ${g.age} 轮)`).join('、')
+    lines.push(`- 未覆盖:本次一致未覆盖 ${uncovered.length} 条缺口:${top}${uncovered.length > UNCOVERED_SHOW_MAX ? ' 等' : ''}——先补再动手,别当成已解决。`)
+  }
   const pending = last?.pendingItems ?? null
   if (pending !== null && pending.length > 0) {
     lines.push(`- 未决清单(${pending.length} 条):${pending.join(';')}`)

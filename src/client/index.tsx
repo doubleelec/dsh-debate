@@ -73,6 +73,8 @@ const DICTS: Record<string, Record<string, string>> = {
     'audit.quoted.tip': '本轮引用对方原文的行数 / 可引用的行数',
     'audit.relay.tip': '建构方给挑战方的交棒摘要长度',
     'audit.new': '有新料', 'audit.nonew': '本轮没新料',
+    'audit.ptr': '出处{hit}/{total}', 'audit.ptrMissing': '缺:{missing}', 'audit.ptrUnverified': '验不了{n}条',
+    'audit.ptr.tip': '本轮文件型出处指针的存在命中(相对目标工作区验,只审计不停机)',
     'summary.title': '轮次小结',
     'summary.agreeBoth': '双方达成一致「{answer}」',
     'summary.builderAccepts': '建构方接受了挑战方的「{answer}」',
@@ -128,6 +130,8 @@ const DICTS: Record<string, Record<string, string>> = {
     'audit.quoted.tip': 'Quoted lines from the other side / quotable lines',
     'audit.relay.tip': 'Handoff summary length from builder to challenger',
     'audit.new': 'new info', 'audit.nonew': 'no new info this round',
+    'audit.ptr': 'refs {hit}/{total}', 'audit.ptrMissing': 'missing:{missing}', 'audit.ptrUnverified': '{n} unverifiable',
+    'audit.ptr.tip': 'File-pointer existence hits this round (checked against target cwd, audit only)',
     'summary.title': 'Round summaries',
     'summary.agreeBoth': 'Both sides agree on "{answer}"',
     'summary.builderAccepts': 'Builder accepts challenger\'s "{answer}"',
@@ -177,6 +181,8 @@ interface RoundAudit {
   /** v4 焦点账本:挑战者本轮自报的未决条件(null=没提供,[]=已清零)。 */
   pendingItems?: string[] | null
   quoteAudit: { quotableLines: number; quotedLines: number; hitLines: number[]; hitRate: number | null }
+  /** 出处指针审计(null=无文件型指针/老局没验,只审计不 gate)。 */
+  pointerAudit?: { total: number; hit: number; missing: string[]; unverified: string[] } | null
 }
 interface AutoResolved { question: string; questionType: string; lenses: number; contextChars: number; targetCwd?: string | null; maxRounds?: number }
 interface StateResp {

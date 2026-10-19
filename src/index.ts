@@ -31,7 +31,7 @@ export interface TextContentBlock {
   [key: string]: unknown
 }
 import type { DebateConfig, DebateMap, DebateRound, DebateStatus, TranscriptEntry } from './debate'
-import { DEFAULT_CONFIG, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscript, toDebateRound, roundConverged, convergedAtCap, isSaturated, slimHandoff, formatPendingFocus, sectionText, parseAnswer, extractDecisionSummary, buildFallbackSummary, DECISION_SECTION } from './debate'
+import { DEFAULT_CONFIG, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscript, toDebateRound, roundConverged, convergedAtCap, isSaturated, slimHandoff, formatPendingFocus, sectionText, parseAnswer, parseGaps, gapAge, extractDecisionSummary, buildFallbackSummary, DECISION_SECTION } from './debate'
 import { BUILD_VERSION, assessVersions, type VersionFacts } from './version'
 import { fromRecord, markInterrupted, renderReport, reportRelPath, STORAGE_TABLE, STORAGE_UNIT, toRecord } from './persist'
 import { findLens, type LensTemplate } from './lenses'
@@ -120,6 +120,44 @@ interface DebateSession {
    * 可选:纯函数单测环境没有它,所以缺了也必须一切照常。
    */
   flush?: () => void
+}
+
+/**
+ * 缺口年龄(调用方拼好传给收尾/报告):逐轮从 transcript 原文抽缺口,算存活。
+ * transcript 按 round 聚合(两侧输出拼一起抽);开题轮(round 0)也参与——
+ * R0 点名、R10 还没补的缺口,正是"一致没覆盖什么"。
+ */
+export function gapSpansOf(session: DebateSession): import('./debate').GapSpan[] {
+  const byRound = new Map<number, string[]>()
+  for (const e of session.transcript) {
+    if (e.round < 0) continue
+    const cur = byRound.get(e.round) ?? []
+    cur.push(e.text)
+    byRound.set(e.round, cur)
+  }
+  return gapAge([...byRound].map(([round, texts]) => ({ round, gaps: parseGaps(texts.join('\n\n')) })))
+}
+
+/**
+ * 出处指针存在性探针:验指针相对 targetCwd 是否存在。
+ * 动态 import(宿主 node 直跑;vitest 下失败则返回 null,调用方不验)。
+ * 只验存在,不验行号(extractPointers 已剥掉行号)。
+ */
+async function pointerExistsFn(cwd: string | undefined): Promise<((p: string) => boolean) | null> {
+  if (cwd === undefined || cwd === '') return null
+  try {
+    const fs = await import('node:fs') as unknown as { existsSync(p: string): boolean }
+    const path = await import('node:path') as unknown as { join(...p: string[]): string }
+    return (p: string) => {
+      try {
+        return fs.existsSync(path.join(cwd, p))
+      } catch {
+        return false
+      }
+    }
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -451,6 +489,7 @@ async function writeReport(session: DebateSession): Promise<string | null> {
       transcript: session.transcript,
       generator: `dsh-debate v${BUILD_VERSION}`,
       stopText: stopReasonText(session),
+      gapSpans: gapSpansOf(session),
     })
     // 目录可能还不存在(targetCwd 建单时只校验过存在性,docs/debates 未必有)。
     fs.mkdirSync(path.dirname(abs), { recursive: true })
@@ -834,7 +873,9 @@ export async function runHostDebate(
         relayChars = out.builderRelayChars
       }
       // 停机判定:解析只做一次,判定与审计共用同一份输入(recordRoundAndJudge,ADR-0014)。
-      const verdict = recordRoundAndJudge(session, r, bOut, cOut, relayChars)
+      // 出处指针审计:存在性探针相对 targetCwd 验,只记 rounds[].pointerAudit,不 gate 停机。
+      const exists = await pointerExistsFn(session.config.targetCwd)
+      const verdict = recordRoundAndJudge(session, r, bOut, cOut, relayChars, exists ?? undefined)
       if (verdict === 'convergence') {
         stop = 'convergence'
         const atCap = r >= session.config.maxRounds
@@ -866,8 +907,9 @@ export async function runHostDebate(
         setProgress(session, '成果地图已出')
         // v4 收尾陈述:制图员的「决策摘要」优先;漏写则用判定数据兜底。
         // 兜底要传上限:只有 host 知道上限,猜上限等于实际轮数会把"提前收敛"误标成撞线。
+        // 缺口年龄同理:从 transcript 原文现算,不猜不编;制图员写了摘要则不打扰原文。
         const decision = extractDecisionSummary(text)
-        session.decisionSummary = decision !== '' ? `## ${DECISION_SECTION}\n${decision}` : buildFallbackSummary(auto.question, session.rounds, session.stopReason, session.config.maxRounds)
+        session.decisionSummary = decision !== '' ? `## ${DECISION_SECTION}\n${decision}` : buildFallbackSummary(auto.question, session.rounds, session.stopReason, session.config.maxRounds, gapSpansOf(session))
         mirror(parent, session, finalStatement(auto.question, session.decisionSummary))
       },
     })
@@ -1598,11 +1640,12 @@ export function recordRoundAndJudge(
   builderOut: string,
   challengerOut: string,
   builderRelayChars = 0,
+  exists?: (p: string) => boolean,
 ): 'convergence' | 'saturation' | null {
   const prevCombined = round === 1
     ? [lastBy(session, 'builder', 0), lastBy(session, 'challenger', 0)].join('\n\n')
     : [lastBy(session, 'builder', round - 1), lastBy(session, 'challenger', round - 1)].join('\n\n')
-  const record = toDebateRound(round, builderOut, challengerOut, prevCombined, builderRelayChars)
+  const record = toDebateRound(round, builderOut, challengerOut, prevCombined, builderRelayChars, exists)
   session.rounds.push(record)
   if (roundConverged(record)) return 'convergence'
   if (isSaturated(session.rounds)) return 'saturation'

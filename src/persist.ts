@@ -10,9 +10,9 @@
  *
  * 这里只放纯函数:文件名推导、渲染、记录形状校验。IO 与生命周期在 index.ts。
  */
-import type { DebateConfig, DebateMap, DebateRound, DebateStatus, TranscriptEntry } from './debate'
+import type { DebateConfig, DebateMap, DebateRound, DebateStatus, GapSpan, TranscriptEntry } from './debate'
 
-/** 记录格式版本:字段增删就 +1;`fromRecord` 拒绝读未来版本,而不是猜着读。 */
+/** 记录格式版本:不兼容变更才 +1(必填新增/改名/删字段/语义变);可选审计字段(缺即 unknown、只审计不 gate)不 bump,见 ADR-0021。 */
 export const RECORD_VERSION = 1
 
 /** 存储单元名。必须匹配 UNIT_NAME_RE `/^[a-z][a-z0-9_]*$/`——**不能用连字符**。 */
@@ -220,6 +220,8 @@ export interface ReportInput {
   generator: string
   /** 面板/对话区里那个停机原因的人话文本(与面板同一份口径)。 */
   stopText: string
+  /** 缺口年龄(调用方用 parseGaps 逐轮抽 + gapAge 算);缺了就不写"未覆盖"节,不猜。 */
+  gapSpans?: GapSpan[]
 }
 
 /** 表格单元:竖线会撕裂表格,换行会撕裂行。 */
@@ -270,6 +272,18 @@ export function renderReport(i: ReportInput): string {
     }
     lines.push('')
     lines.push(`> 未决 = 挑战者自报的未决条件条数(焦点账本);引用命中 = 挑战者引用建构者原文的片段命中率(ADR-0014/0017)。`, '')
+  }
+
+  // 未覆盖:一致达成时仍存活的缺口(只说事实,不拦停机;没给 gapSpans 就不写,不猜)。
+  // 展示截断与兜底收尾各管各的数(报告是文档可长,收尾是对话区要短),常量散两处是故意的。
+  const uncovered = (i.gapSpans ?? []).filter((g) => g.lastRound >= i.rounds.length && i.rounds.length > 0)
+  if (uncovered.length > 0) {
+    lines.push('## 未覆盖(一致达成时仍存活的缺口)', '')
+    for (const g of uncovered.slice(0, 10)) {
+      lines.push(`- ${cell(g.gap)}:自 R${g.firstRound} 存活 ${g.age} 轮(至 R${g.lastRound})`)
+    }
+    if (uncovered.length > 10) lines.push(`- ……等共 ${uncovered.length} 条`)
+    lines.push('')
   }
 
   lines.push('## 全文交锋记录', '')

@@ -280,4 +280,24 @@ describe('结论文档渲染(renderReport)', () => {
     expect(md).toContain('builder')
     expect(md).toContain('正文')
   })
+
+  it('给了 gapSpans 且缺口活到最后 → 加"未覆盖"节;没给就不写', () => {
+    const withGaps = renderReport(input({
+      gapSpans: [{ gap: '体积三项无采样', firstRound: 1, lastRound: 1, age: 1 }],
+    }))
+    expect(withGaps).toContain('## 未覆盖')
+    expect(withGaps).toContain('体积三项无采样')
+    expect(withGaps).toContain('存活 1 轮')
+    // 缺口中途已补(lastRound < 轮数) → 不算未覆盖。
+    const closed = renderReport(input({
+      gapSpans: [{ gap: '已补的缺口', firstRound: 1, lastRound: 1, age: 1 }],
+      rounds: [
+        { ...rounds[0], round: 1 },
+        { ...rounds[0], round: 2 },
+      ],
+    }))
+    expect(closed).not.toContain('## 未覆盖')
+    // 没给 gapSpans → 不写,不猜。
+    expect(renderReport(input())).not.toContain('## 未覆盖')
+  })
 })
