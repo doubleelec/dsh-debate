@@ -3,6 +3,8 @@ import {
   containsBannedPhrase,
   isConverged,
   isSaturated,
+  isOneSidedAccept,
+  isTopicLoop,
   normalizeAnswer,
   buildBuilderPrompt,
   buildBuilderRoundPrompt,
@@ -773,6 +775,106 @@ describe('v4 pending ledger', () => {
     expect(f).toContain('不得重开清单外已结事项')
   })
 
+  it('formatPendingFocus:已接受的判据定义进焦点块,换尺重算即违规', () => {
+    // 线上实测:R16 定死"横连贯=结构尺",R19 建构者换时间尺重算,同一格子四轮换三种含义。
+    // 已接受的定义必须原样带进下一轮 prompt,挑战者只能挑战"尺子本身错了"(给反例),不能悄悄换尺子。
+    const f = formatPendingFocus(['横连贯按结构尺算'], ['横连贯=跨会话可读同一意图验收且具权威源'])
+    expect(f).toContain('已接受判据')
+    expect(f).toContain('横连贯=跨会话可读同一意图验收且具权威源')
+    expect(f).toMatch(/换尺.*重算|违反/)
+    // 没给定判据 → 老行为,不硬编。
+    expect(formatPendingFocus(['甲'])).not.toContain('已接受判据')
+    // 空清单不断锁:收尾轮清单空了,判据还在,照样锁。
+    const locked = formatPendingFocus([], ['横连贯=结构尺'])
+    expect(locked).toContain('已接受判据')
+    expect(locked).not.toContain('待决清单')
+    // 双空 → 老行为,不硬编。
+    expect(formatPendingFocus([])).toBe('')
+  })
+
+  it('议题循环停机:清单长期不空且答案长期不动,提前收尾', () => {
+    // 线上实测:R15-R20 清单始终 1~2 条(且在变,不是停滞)、答案面不动,全在"横连贯"一格里打转,值得停。
+    // 纯字面判据,不做语义判断:同一格子的四种说法首词全不一样,首词重合不可靠。
+    const topic = (round: number, pending: string[]): DebateRound => mkRound({ round, hasNewInfo: true, pendingItems: pending, builderAnswer: 'F-s/F-w 等效', challengerAnswer: 'F-s/F-w 等效' })
+    const rounds = [
+      topic(1, ['补横连贯的单一定义并据此重算']),
+      topic(2, ['补权威意图源的可操作检验']),
+      topic(3, ['补锁的成本入分']),
+      topic(4, ['补成本与横连贯分列']),
+    ]
+    expect(isTopicLoop(rounds)).toBe(true)
+    // 静止清单是停滞不是循环 → 不判(归 pendingStalled 管,调用方 isSaturated 里先查停滞)。
+    expect(isTopicLoop([
+      topic(1, ['同清单']),
+      topic(2, ['同清单']),
+      topic(3, ['同清单']),
+      topic(4, ['同清单']),
+    ])).toBe(false)
+    // 答案在变 → 还在推进,不停。
+    expect(isTopicLoop([
+      ...rounds.slice(0, 3),
+      mkRound({ round: 4, hasNewInfo: true, pendingItems: ['补成本与横连贯分列'], builderAnswer: '新答案', challengerAnswer: '新答案' }),
+    ])).toBe(false)
+    // 清单空了 → 快收敛了,不算绕圈。
+    expect(isTopicLoop([
+      topic(1, ['补甲']),
+      topic(2, ['补乙']),
+      topic(3, ['补丙']),
+      mkRound({ round: 4, hasNewInfo: true, pendingItems: [], builderAnswer: 'F-s/F-w 等效', challengerAnswer: 'F-s/F-w 等效' }),
+    ])).toBe(false)
+    // 轮数不够 → 不判。
+    expect(isTopicLoop([topic(1, ['补甲'] as string[])])).toBe(false)
+  })
+
+  it('isSaturated 收纳议题循环(清单在变但在绕圈)', () => {
+    const topic = (round: number, pending: string[]): DebateRound => mkRound({ round, hasNewInfo: true, pendingItems: pending, builderAnswer: '同答案', challengerAnswer: '同答案' })
+    const rounds = [
+      topic(1, ['补甲']),
+      topic(2, ['补乙']),
+      topic(3, ['补丙']),
+      topic(4, ['补丁']),
+    ]
+    expect(isSaturated(rounds)).toBe(true)
+  })
+
+  it('跑满细分:一方已接受则结论可用,不说"谈崩"', () => {
+    // 线上实测:R20 建构者 agree=true、挑战者只剩记账分歧,F-s/F-w 等效已接受,结论可用。
+    const mk = (over: Partial<DebateRound> = {}): DebateRound => ({
+      round: 20, builderAnswer: 'a', builderAgree: true,
+      challengerAnswer: 'a', challengerAgree: false, hasNewInfo: true, builderRelayChars: 0,
+      protoVersion: STOP_PROTOCOL_VERSION, pendingItems: ['补成本与横连贯分列'],
+      quoteAudit: { quotableLines: 0, quotedLines: 0, hitLines: [], hitRate: null },
+      ...over,
+    })
+    const s = buildFallbackSummary('哪种架构适合并行?', [mk()], 'maxRounds', 20)
+    expect(s).toMatch(/一方接受|基本可用|结论.*可用|记账/)
+    expect(s).not.toMatch(/谈崩|未形成明确答案/)
+    // "基本可用"后不再跟"双方最终答案不一致"(归一化一致,跟一句不一致自相矛盾)。
+    expect(s).not.toMatch(/双方最终答案不一致/)
+    // 谁接受写谁的原文:仅挑战者接受且原文不同时,不写建构方的。
+    const cOnly = buildFallbackSummary('问?', [mk({ builderAnswer: '甲 方案 A', builderAgree: false, challengerAnswer: '甲方案A', challengerAgree: true })], 'maxRounds', 20)
+    expect(cOnly).toContain('挑战方已接受')
+    expect(cOnly).toContain('甲方案A')
+    expect(cOnly).not.toContain('甲 方案 A')
+  })
+
+  it('isOneSidedAccept:与兜底/进度同源,双agree不算单方', () => {
+    const mk = (over: Partial<DebateRound> = {}): DebateRound => ({
+      round: 1, builderAnswer: 'a', builderAgree: true,
+      challengerAnswer: 'a', challengerAgree: false, hasNewInfo: true, builderRelayChars: 0,
+      protoVersion: STOP_PROTOCOL_VERSION, pendingItems: ['x'],
+      quoteAudit: { quotableLines: 0, quotedLines: 0, hitLines: [], hitRate: null },
+      ...over,
+    })
+    expect(isOneSidedAccept([mk()], 'maxRounds')).toBe(true)
+    // 双 agree 是 converged,不是单方接受。
+    expect(isOneSidedAccept([mk({ challengerAgree: true })], 'maxRounds')).toBe(false)
+    // 答案不一致 → 谈崩,不是记账分歧。
+    expect(isOneSidedAccept([mk({ challengerAnswer: 'b', challengerAgree: false })], 'maxRounds')).toBe(false)
+    // 非跑满 → 不判。
+    expect(isOneSidedAccept([mk()], 'saturation')).toBe(false)
+  })
+
   it('changesOf:只取「本轮变化」段,整篇信号词不再污染判定', () => {
     const text = '## 结论摘要\n这里提到缺口和补充\n## 详细论证\n又一处新增\n## 本轮变化\n无'
     expect(changesOf(text)).toBe('无')
@@ -785,7 +887,7 @@ describe('v4 pending ledger', () => {
   it('toDebateRound 带上挑战者未决清单', () => {
     const rec = toDebateRound(2, 'agree=false\nanswer=甲', 'agree=false\nanswer=乙\n待决清单=丙;丁', '旧')
     expect(rec.pendingItems).toEqual(['丙', '丁'])
-    expect(rec.protoVersion).toBe(4)
+    expect(rec.protoVersion).toBe(STOP_PROTOCOL_VERSION)
   })
 
   it('toDebateRound:给了 exists 就验指针,不给就记 null(不验不猜)', () => {

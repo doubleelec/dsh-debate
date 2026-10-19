@@ -31,7 +31,8 @@ export interface TextContentBlock {
   [key: string]: unknown
 }
 import type { DebateConfig, DebateMap, DebateRound, DebateStatus, TranscriptEntry } from './debate'
-import { DEFAULT_CONFIG, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscript, toDebateRound, roundConverged, convergedAtCap, isSaturated, slimHandoff, formatPendingFocus, sectionText, parseAnswer, parseGaps, gapAge, extractDecisionSummary, buildFallbackSummary, DECISION_SECTION } from './debate'
+import { DEFAULT_CONFIG, normalizeAnswer, SETTLED_DEFS_MAX, isOneSidedAccept, isTopicLoop, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscript, toDebateRound, roundConverged, convergedAtCap, isSaturated, pendingStalled, slimHandoff, formatPendingFocus, sectionText, parseAnswer, parseGaps, gapAge, extractDecisionSummary, buildFallbackSummary, DECISION_SECTION } from './debate'
+export { isTopicLoop }
 import { BUILD_VERSION, assessVersions, type VersionFacts } from './version'
 import { fromRecord, markInterrupted, renderReport, reportRelPath, STORAGE_TABLE, STORAGE_UNIT, toRecord } from './persist'
 import { findLens, type LensTemplate } from './lenses'
@@ -222,14 +223,43 @@ export async function versionFacts(): Promise<VersionFacts> {
 }
 
 /**
- * 本轮焦点块(v4 焦点账本):把上一轮挑战者自报的未决清单原样带进下一轮 prompt。
+ * 本轮焦点块(v4 焦点账本 + S13 定义锁存):把上一轮挑战者自报的未决清单原样带进下一轮 prompt。
  * 清单为空 / 上一轮没提供(null)时不加约束——没有账本就别硬编一句空话。
+ * 锁存定义:从历史 accepted 轮里收"判据"行(挑战者 concession 里"接受…定义…"的写法),
+ * 原样带进 prompt,挑战者只能挑战判据本身,不能悄悄换尺重算。
  */
 export function focusBlockOf(session: DebateSession): string {
   const last = session.rounds[session.rounds.length - 1]
   const items = last?.pendingItems
   if (!items || items.length === 0) return ''
-  return formatPendingFocus(items)
+  return formatPendingFocus(items, settledDefsOf(session))
+}
+
+/**
+ * 已接受判据收集(S13 定义锁存):从双方 transcript 的 concession 段里收
+ * "接受…定义/口径/尺度/判据/判定线…"的行,去重后返回。
+ * 只认 concession 段里的"接受"行,不碰正文——正文里的"接受①②"是让步,不是判据。
+ * 上限见 SETTLED_DEFS_MAX(账本要短,先接受的先锁);80 字截断只动展示,
+ * prompt 里仍是原文,不叫"非原样"(原样指语义不改写,不是字符数)。
+ */
+export function settledDefsOf(session: DebateSession): string[] {
+  const defs: string[] = []
+  const seen = new Set<string>()
+  for (const e of session.transcript) {
+    if (e.role !== 'challenger' && e.role !== 'builder') continue
+    const m = e.text.match(/concession([\s\S]*?)(?=\n##\s|\nMODEL:|$)/i)
+    if (!m) continue
+    for (const line of m[1].split('\n')) {
+      const t = line.trim().replace(/^[-*\d]+\s*[)）.、:：]?\s*/, '')
+      if (!/接受/.test(t) || !/(定义|口径|尺子|尺度|判据|判定线)/.test(t)) continue
+      const key = t.slice(0, 40)
+      if (key === '' || seen.has(key)) continue
+      seen.add(key)
+      defs.push(t.length > 80 ? `${t.slice(0, 80)}…` : t)
+      if (defs.length >= SETTLED_DEFS_MAX) return defs
+    }
+  }
+  return defs
 }
 
 /**
@@ -897,14 +927,31 @@ export async function runHostDebate(
       if (verdict === 'saturation') {
         stop = 'saturation'
         const stalled = session.rounds[session.rounds.length - 1]?.pendingItems
-        setProgress(session, `第 ${r}/${session.config.maxRounds} 轮焦点停滞/无新增,提前停机`)
-        mirror(parent, session, stalled && stalled.length > 0
-          ? `🛑 焦点停滞:第 ${r} 轮起未决清单连续两轮没变(仍是 ${stalled.length} 条),再谈也不会推进,提前收尾进入制图。`
-          : `🛑 覆盖饱和:第 ${r} 轮无新增视角/缺口/状态变化,交锋提前结束,进入制图。`)
+        // 停滞优先于循环:清单逐条相同 × 多轮是更强的停机信号,循环判据已显式排除静止清单,
+        // 这里再按顺序兜底一次(判据改了顺序也不误报)。
+        const isStalled = pendingStalled(session.rounds)
+        const looped = !isStalled && isTopicLoop(session.rounds)
+        setProgress(session, looped
+          ? `第 ${r}/${session.config.maxRounds} 轮议题循环(清单清不空、答案面不动),提前停机`
+          : `第 ${r}/${session.config.maxRounds} 轮焦点停滞/无新增,提前停机`)
+        mirror(parent, session, looped
+          ? `🛑 议题循环:第 ${r} 轮起连续多轮清单清不空、答案面不动(同一格子里换尺子打转),再谈只是烧轮次,提前收尾进入制图。结论面没动,不是没谈完。`
+          : isStalled && stalled && stalled.length > 0
+            ? `🛑 焦点停滞:第 ${r} 轮起未决清单连续两轮没变(仍是 ${stalled.length} 条),再谈也不会推进,提前收尾进入制图。`
+            : `🛑 覆盖饱和:第 ${r} 轮无新增视角/缺口/状态变化,交锋提前结束,进入制图。`)
         break
       }
       if (r < session.config.maxRounds) setProgress(session, `第 ${r}/${session.config.maxRounds} 轮完成,进入第 ${r + 1} 轮`)
-      if (r === session.config.maxRounds) stop = 'maxRounds'
+      if (r === session.config.maxRounds) {
+        stop = 'maxRounds'
+        // 跑满细分:一方已接受(答案归一化一致,只剩记账分歧)≠ 谈崩——结论可用,直接在进度里说清。
+        // 同源判据见 debate.ts isOneSidedAccept(这里只有单轮,用 rounds 拼一轮数组复用它)。
+        const last = session.rounds[session.rounds.length - 1]
+        const oneSided = last !== undefined && isOneSidedAccept([last], 'maxRounds')
+        if (oneSided) {
+          setProgress(session, `跑满 ${session.config.maxRounds} 轮:一方已接受同一答案,只剩记账分歧——结论可用,进入制图`)
+        }
+      }
     }
     session.stopReason = stop ?? 'maxRounds'
     setProgress(session, '交锋完成,制图员写地图中…')

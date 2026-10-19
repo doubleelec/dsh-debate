@@ -45,8 +45,10 @@ export function isConverged(aAgree: boolean, bAgree: boolean, aAnswer: string, b
  * v3: + 归一化标点表补 ASCII 全套(半角逗号/句点曾漏判,共识召回补漏,只加不减);
  * v4: + `待决清单:` 行(焦点账本:挑战者列未决条件,逐轮只谈这些,清了才能收敛)
  *      + 新增判定只看「本轮变化」段(整篇找信号词会永远命中,饱和停机形同死代码)。
+ * v5: + concession 段"已接受判据"收集(定义锁存:host 从接受轮收判据定义,带进下一轮 prompt)
+ *      + 议题循环停机口径(清单在变但清不空、答案面不动,提前收尾)。
  */
-export const STOP_PROTOCOL_VERSION = 4
+export const STOP_PROTOCOL_VERSION = 5
 
 /**
  * agree 自报解析:只认显式接受(大小写/全角/中文容忍)。
@@ -128,18 +130,63 @@ export function pendingStalled(rounds: DebateRound[], window = 2): boolean {
 
 /**
  * 未决清单注入块:下一轮只谈这些,已结项不得重开。
- * 空清单返回 ''(没有账本就不加约束,不硬编一句空话)。
+ *
+ * 定义锁存(线上 20 轮局的教训):已接受的判据定义(如"横连贯=结构尺")
+ * 必须原样带进下一轮 prompt——挑战者只能挑战"尺子本身错了"(给反例),
+ * 不能悄悄换一把尺子重算(同一格子四轮换三种含义,挑战永不枯竭)。
+ * 锁存的定义由 host 从"接受"轮里收,纯函数只管拼装。
+ * 空清单时只剩锁存块(不清零定义:收尾轮清单空了,判据还在,照样锁)。
  */
-export function formatPendingFocus(items: string[]): string {
-  if (items.length === 0) return ''
-  const list = items.map((s, i) => `${i + 1}. ${s}`).join('\n')
-  return [
-    `待决清单(本轮焦点,共 ${items.length} 条):`,
-    list,
-    `本轮规则:只处理清单内条目,逐条给「接受/守住/部分接受」+ 依据;`,
-    `不得重开清单外已结事项;确实发现致命新问题最多新增 1 条,并在清单里写明。`,
-    `结束时同步更新清单:已解决的不再列入,仍未解决的照抄原文(便于 host 比对是否停滞)。`,
-  ].join('\n')
+export function formatPendingFocus(items: string[], settledDefs: string[] = []): string {
+  const defs = settledDefs.map((s) => s.trim()).filter((s) => s !== '')
+  if (items.length === 0 && defs.length === 0) return ''
+  const lines: string[] = []
+  if (items.length > 0) {
+    const list = items.map((s, i) => `${i + 1}. ${s}`).join('\n')
+    lines.push(
+      `待决清单(本轮焦点,共 ${items.length} 条):`,
+      list,
+      `本轮规则:只处理清单内条目,逐条给「接受/守住/部分接受」+ 依据;`,
+      `不得重开清单外已结事项;确实发现致命新问题最多新增 1 条,并在清单里写明。`,
+    )
+  }
+  if (defs.length > 0) {
+    lines.push(
+      `已接受判据(锁存,不得换尺重算):`,
+      ...defs.map((d, i) => `  ${i + 1}. ${d}`),
+      `违反即无效:只能挑战"判据本身错了"(给反例+替代判据),不能用另一把尺子悄悄重算同一格。`,
+    )
+  }
+  if (items.length > 0) {
+    lines.push(`结束时同步更新清单:已解决的不再列入,仍未解决的照抄原文(便于 host 比对是否停滞)。`)
+  }
+  return lines.join('\n')
+}
+
+/** 已接受判据条数上限:账本要短,超了只留前 N 条(先接受的先锁,后接受的等下一轮)。 */
+export const SETTLED_DEFS_MAX = 3
+
+/**
+ * 议题循环判定(线上 20 轮局的教训):清单一直在变(pendingStalled 不触发,逐条比对不同)、
+ * 每轮也有真新增(hasNewInfo 全 true,由调用方 isSaturated 保证先查),但连续 4 轮清单
+ * 始终清不空(长度 ≥1),且双方答案归一化后始终各自不变——议题面在缩小,结论面一动不动,
+ * 再谈只是在同一格里换尺子,不值得烧到上限轮。
+ * 纯字面判据,不做语义判断:"同主题"是不可靠的启发式(同一格子的四种说法
+ * 首词全不一样),但"清单在变 + 清单不空 + 答案各自不动 + 轮数够多"是可观测的绕圈形状。
+ */
+export function isTopicLoop(rounds: DebateRound[], window = 4): boolean {
+  if (rounds.length < window) return false
+  const tail = rounds.slice(-window)
+  // 清单始终非空(有账本且没谈完) + 清单在变(静止清单是停滞,不是循环,归 pendingStalled 管)。
+  const lists = tail.map((r) => normalizePending(r.pendingItems ?? []).join('|'))
+  if (lists.some((k) => k === '')) return false
+  if (lists.every((k) => k === lists[0])) return false
+  // 答案双方各自归一化后始终不变(结论面不动)。分开比对:拼接比对里 `|` 会被归一化抹掉,
+  // 交换双方答案也能撞车,必须 b 比 b、c 比 c。
+  const builderAns = tail.map((r) => normalizeAnswer(r.builderAnswer))
+  const challengerAns = tail.map((r) => normalizeAnswer(r.challengerAnswer))
+  if (builderAns.some((a) => a === '') || challengerAns.some((a) => a === '')) return false
+  return builderAns.every((a) => a === builderAns[0]) && challengerAns.every((a) => a === challengerAns[0])
 }
 
 /**
@@ -579,13 +626,16 @@ export function convergedAtCap(stopReason: string | null, rounds: DebateRound[],
 /**
  * 覆盖饱和判定(ADR-0004):一整轮无新增信息即停。
  * v4 追加焦点停滞:未决清单连续两轮逐条相同 → 谈不动了,同样停机。
+ * S13 追加议题循环:清单在变但连续 4 轮清不空、答案各自不动 → 提前收尾,
+ * 不值得烧到上限轮(线上 20 轮局 R15-R20 全在"横连贯"一格里打转)。
  * 调用方每轮结束后传入本轮记录;返回 true 表示已饱和应当停机。
  */
 export function isSaturated(rounds: DebateRound[]): boolean {
   if (rounds.length === 0) return false
   const last = rounds[rounds.length - 1]
   if (last.hasNewInfo === false) return true
-  return pendingStalled(rounds)
+  if (pendingStalled(rounds)) return true
+  return isTopicLoop(rounds)
 }
 
 /** 辩论单状态机。 */
@@ -939,6 +989,22 @@ function stopReasonText(stopReason: string | null, rounds: number, cap = false):
   return `跑满 ${rounds} 轮上限收尾`
 }
 
+/**
+ * 单方接受判定(S13 跑满细分):stop=maxRounds 但一方已接受,且双方答案归一化一致
+ * (只剩"数字摆法/定义口径"记账分歧,不是事实没查清)→ 结论可用,不是谈崩。
+ * 与 roundConverged 的区别:这里只要求一方 agree(双 agree 即 converged,不会走到这)。
+ * host 的 cap 进度提示与本函数同源,改了一处别忘了另一处。
+ */
+export function isOneSidedAccept(rounds: DebateRound[], stopReason: string | null): boolean {
+  if (stopReason !== 'maxRounds' || rounds.length === 0) return false
+  const last = rounds[rounds.length - 1]
+  if (last === undefined) return false
+  if (!last.builderAgree && !last.challengerAgree) return false
+  if (roundConverged(last)) return false
+  const b = last.builderAnswer
+  const c = last.challengerAnswer
+  return b !== '' && c !== '' && normalizeAnswer(b) === normalizeAnswer(c)
+}
 /** 有出处审计数的轮(可选字段缺失的老局/没验的轮一律按无审计处理,不猜)。 */
 function hasPointerAudit(r: DebateRound): boolean {
   return r.pointerAudit !== undefined && r.pointerAudit !== null
@@ -953,6 +1019,10 @@ const PANEL_MISSING_SHOW_MAX = 2
 /**
  * 兜底收尾陈述:制图员没吐出决策摘要段时,用判定数据拼一段自足的总结。
  * 只写有据可查的东西(双方最后答案/收敛与否/未决清单/引用统计),不替模型编结论。
+ *
+ * 跑满细分(线上 20 轮局的教训):stop=maxRounds 但一方已接受(如 R20 建构者 agree=true,
+ * 只剩"数字摆法"记账分歧)≠ 谈崩——结论可用,只剩记账项。说法必须区分,
+ * 不能一律写"跑满上限收尾"让用户以为白谈了 20 轮。
  */
 export function buildFallbackSummary(
   question: string,
@@ -968,16 +1038,25 @@ export function buildFallbackSummary(
   const converged = last !== undefined && roundConverged(last)
   // 上限需要调用方给:rounds 里没有上限,猜上限等于实际轮数会把"提前收敛"误标成撞线。
   const cap = maxRounds !== undefined && convergedAtCap(stopReason, rounds, maxRounds)
+  // 跑满但一方已接受:答案归一化一致(只差记账分歧) → 结论可用(同源判据见 isOneSidedAccept)。
+  const oneSidedAccept = isOneSidedAccept(rounds, stopReason)
   const lines: string[] = [`## ${DECISION_SECTION}`]
   lines.push(`- 问题:${question}`)
   if (converged) {
     lines.push(`- 结论:双方收敛于「${b}」(${stopReasonText(stopReason, n, cap)})。`)
+  } else if (oneSidedAccept) {
+    // 谁接受就写谁的原文:归一化一致只保证"意思一样",原文可能不同,别张冠李戴。
+    const accepted = last.builderAgree ? b : c
+    const who = last.builderAgree && last.challengerAgree ? '双方'
+      : last.builderAgree ? '建构方' : '挑战方'
+    lines.push(`- 结论:基本可用。${who}已接受「${accepted}」,只剩记账分歧未合(数字摆法/定义口径,不是事实没查清)——跑满 ${n} 轮上限收尾,但结论不是白谈的。`)
   } else if (b !== '' || c !== '') {
     lines.push(`- 结论:未收敛。建构方最后站「${b || '未给出'}」,挑战方最后站「${c || '未给出'}」(${stopReasonText(stopReason, n)})。`)
   } else {
     lines.push(`- 结论:未形成明确答案(${stopReasonText(stopReason, n)})。`)
   }
-  if (!converged && b !== '' && c !== '') {
+  // "基本可用"后不再跟"双方最终答案不一致":归一化一致的意思就是分歧只剩记账,跟一句"不一致"自相矛盾。
+  if (!converged && !oneSidedAccept && b !== '' && c !== '') {
     lines.push(`- 关键分歧:双方最终答案不一致;属于事实没查清还是价值排序不同,需看成果地图「分歧」节。`)
   } else if (converged) {
     lines.push(cap
