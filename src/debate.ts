@@ -379,6 +379,20 @@ export function roundConverged(r: DebateRound): boolean {
 }
 
 /**
+ * 上限处一致(convergedAtCap):最后一轮才判出双方 agree。
+ * 这是"上限撞线"而不是"提前收敛":就算判据完全真实,模型也是一路谈到没轮次才收,
+ * 用户该知道的是"轮数是不是刚好",而不是"收没收敛"。
+ * 所以它不是第四种停机原因,而是 convergence 的一个修饰位——只影响说法,不影响停机。
+ */
+export function convergedAtCap(stopReason: string | null, rounds: DebateRound[], maxRounds: number): boolean {
+  if (stopReason !== 'convergence') return false
+  if (rounds.length !== maxRounds) return false
+  if (maxRounds <= 1) return false
+  const last = rounds[rounds.length - 1]
+  return last !== undefined && roundConverged(last)
+}
+
+/**
  * 覆盖饱和判定(ADR-0004):一整轮无新增信息即停。
  * v4 追加焦点停滞:未决清单连续两轮逐条相同 → 谈不动了,同样停机。
  * 调用方每轮结束后传入本轮记录;返回 true 表示已饱和应当停机。
@@ -716,9 +730,13 @@ export function stripDecisionSummary(synthText: string): string {
   return synthText.replace(re, '').trim()
 }
 
-/** 停机原因的人话(收尾陈述用)。 */
-function stopReasonText(stopReason: string | null, rounds: number): string {
-  if (stopReason === 'convergence') return `第 ${rounds} 轮双方接受同一答案,共识收敛`
+/** 停机原因的人话(收尾陈述用)。cap=true 表示一致恰好撞在上限轮,要明说。 */
+function stopReasonText(stopReason: string | null, rounds: number, cap = false): string {
+  if (stopReason === 'convergence') {
+    return cap
+      ? `第 ${rounds} 轮双方接受同一答案,但这已经是上限轮(上限 ${rounds} 轮):共识是压线达成的,多给 1~2 轮可能谈得更透,也可能只是多耗一轮`
+      : `第 ${rounds} 轮双方接受同一答案,共识收敛`
+  }
   if (stopReason === 'saturation') return `${rounds} 轮后焦点停滞(未决清单连续两轮没变),提前收尾`
   if (stopReason === 'manual') return `跑到第 ${rounds} 轮手动收尾`
   return `跑满 ${rounds} 轮上限收尾`
@@ -732,16 +750,19 @@ export function buildFallbackSummary(
   question: string,
   rounds: DebateRound[],
   stopReason: string | null,
+  maxRounds?: number,
 ): string {
   const last = rounds[rounds.length - 1]
   const n = rounds.length
   const b = last?.builderAnswer ?? ''
   const c = last?.challengerAnswer ?? ''
   const converged = last !== undefined && roundConverged(last)
+  // 上限需要调用方给:rounds 里没有上限,猜上限等于实际轮数会把"提前收敛"误标成撞线。
+  const cap = maxRounds !== undefined && convergedAtCap(stopReason, rounds, maxRounds)
   const lines: string[] = [`## ${DECISION_SECTION}`]
   lines.push(`- 问题:${question}`)
   if (converged) {
-    lines.push(`- 结论:双方收敛于「${b}」(${stopReasonText(stopReason, n)})。`)
+    lines.push(`- 结论:双方收敛于「${b}」(${stopReasonText(stopReason, n, cap)})。`)
   } else if (b !== '' || c !== '') {
     lines.push(`- 结论:未收敛。建构方最后站「${b || '未给出'}」,挑战方最后站「${c || '未给出'}」(${stopReasonText(stopReason, n)})。`)
   } else {
@@ -750,7 +771,9 @@ export function buildFallbackSummary(
   if (!converged && b !== '' && c !== '') {
     lines.push(`- 关键分歧:双方最终答案不一致;属于事实没查清还是价值排序不同,需看成果地图「分歧」节。`)
   } else if (converged) {
-    lines.push(`- 关键分歧:已无未决分歧;此前各轮争点见成果地图「分歧」节(保留历史争点)。`)
+    lines.push(cap
+      ? `- 关键分歧:已无未决分歧,但这是在上限轮压线谈完的——分歧是真消了还是轮次到了才收的,看成果地图「分歧」节里 R${n} 轮的收法。`
+      : `- 关键分歧:已无未决分歧;此前各轮争点见成果地图「分歧」节(保留历史争点)。`)
   }
   const quoted = rounds.reduce((a, r) => a + (r.quoteAudit?.quotedLines ?? 0), 0)
   lines.push(`- 主要依据:${n} 轮交锋支撑,挑战方累计引用建构方原文 ${quoted} 处;逐条依据与出处见成果地图「依据」节。`)
@@ -760,8 +783,13 @@ export function buildFallbackSummary(
   }
   lines.push(`- 建议下一步:`)
   if (converged) {
-    lines.push(`  1. 按结论推进;先补齐成果地图「缺口」节里标缺失的项再动手。`)
-    lines.push(`  2. 结论里的置信度低项,落地前用一次实测或文档核对收口。`)
+    if (cap) {
+      lines.push(`  1. 若对结论有疑虑,加 1~2 轮重开一局(轮数给 ${n + 2} 左右),看一致是提前出现还是再次压线——两次都压线,说明这个问题本来就需要这么多轮。`)
+      lines.push(`  2. 按结论推进前,先补齐成果地图「缺口」节里标缺失的项再动手。`)
+    } else {
+      lines.push(`  1. 按结论推进;先补齐成果地图「缺口」节里标缺失的项再动手。`)
+      lines.push(`  2. 结论里的置信度低项,落地前用一次实测或文档核对收口。`)
+    }
   } else {
     lines.push(`  1. 把上面的未决清单逐条落成待办,查清后再重开一局,别在措辞上继续磨。`)
     lines.push(`  2. 若分歧其实来自目标不同,先定判据(谁的收益优先)再辩,能一轮收敛。`)

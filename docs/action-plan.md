@@ -1,6 +1,6 @@
 # dsh-debate Action Plan
 
-> Resume point: S7（协议 v4 聚焦与收尾）+ S8（版本真值）+ S9（结论落盘）实现完成并本地验证通过——`npm run test:sandbox` 跑真实 vitest 套件 **139/139 全绿、6 个测试文件 0 跳过**、真实构建产物集成断言 11/11、`tsc --noEmit` / `npm run build` 绿、pytest 治理门 15 passed。
+> Resume point: S7（协议 v4 聚焦与收尾）+ S8（版本真值）+ S9（结论落盘）+ S10（压线共识明示）实现完成并本地验证通过——`npm run test:sandbox` 跑真实 vitest 套件 **145/145 全绿、6 个测试文件 0 跳过**、tsc/build 绿、pytest 治理门 15 passed。
 > **迁到 v0.5.0 必须先重启宿主进程**：`lib/index.js` 只在宿主启动时加载。准确说不是 DSH 没有热重载，而是本 profile 没开**模块监听**（`dsh-base` 里 `hmr` 的 `root: []`，注释"module roots are opt-in"；ADR-0018 同日更正）。
 > 重启前面板徽标显示 `v?` + 告警（旧宿主没有 `/api/version`，实测 POST 返回 405），这是设计行为不是故障。
 > 重启后徽标应显示 `v0.5.0` 且无告警；随后跑一局真辩论复验两件事：S7（(a) 轮数是否真的下降、(b) 挑战者是否守约输出 `待决清单=` 行、(c) 对话区字数与收尾陈述是否可读）与 S9（(d) `<工作区>/docs/debates/` 下是否真出现结论文档、(e) 再重启一次后粘旧 id 是否仍能取到结论与全文）。
@@ -39,6 +39,7 @@
 | B10 | 对话区被逐字镜像灌入 10.9 万字；产物是 7,015 字地图，读完不知道下一步 | **done (S7)**：`chatDigest` 只镜像结论摘要 + 制图「决策摘要」段单独收尾 |
 | B11 | 整个测试套件在本机沙箱里**从不运行**（vitest 解析配置 `exec("net use")` → `spawn EPERM`），验证退化成只剩类型检查；手写的一次性断言脚本还放在 `.tmp/`，而该目录约定"任何会话可随时清空"——工具和结论一起丢 | **done (S9)**：`npm run test:sandbox` 编译并执行**同一份**测试文件（不另写平行断言），垫片遇到未实现的 matcher 抛错而非静默通过；跑出 139/139 |
 | B12 | 结论只活在 host 内存 + 对话区镜像里：前者一重启就 `unknown-id`，后者正是上下文压缩要吃掉的东西 | **done (S9)**：整局记录进 KV（重启后旧 id 仍可用）+ 结论文档进工作区（压缩后 `read <路径>` 仍能拿回逐字原文，ADR-0019） |
+| B13 | 上限设 5 就第 5 轮一致、设 10 就第 10 轮一致：`第 R/M 轮` 的计数器给了模型明确的截止线压力，最后一轮主动收官；但所有停机说法都只写"共识收敛"，用户无法评估"轮数是不是刚好" | **done (S10)**：`convergedAtCap` 修饰位（只影响说法不影响停机）+ 镜像/收尾/面板三处标"压线"并给加轮复验建议（ADR-0020） |
 
 ## Progress
 
@@ -54,3 +55,4 @@
 | S7 | 协议 v4 聚焦与收尾:未决清单焦点账本 + 新增判定只看变化段 + 篇幅预算 + 对话区镜像摘要 + 收尾陈述(决策摘要/兜底)+ 面板收尾块 | done (2026-10-01) | 协议层直跑断言 **39/39** + vitest 用例已补 + tsc/build 绿 + pytest 治理门 15 passed |
 | S8 | 版本真值:构建期内联 `BUILD_VERSION` + `/api/version` 三方对账(内联/磁盘/mtime vs 启动时刻)+ 徽标显示正在跑的版本(取不到显示 `v?`)+ 重启宿主/刷新页面两类提示 | done (2026-10-01) | 真实构建产物集成断言 **8/8**(running==disk、mtime 可读、stale=false、反事实判 stale)+ tsc/build 绿 + pytest 治理门绿 |
 | S9 | 结论落盘:整局记录进 KV 单元 `dsh_debate`(per-record,显式白名单)+ 启动恢复(半途的标已中断)+ 结论文档写 `<工作区>/docs/debates/`(日期-slug-id尾)+ 对话区镜像报路径 + `/api/history` + 面板显示路径/恢复标记/两类失败分开 | done (2026-10-01) | 真实 vitest 套件 **139/139**(新增 persist 35 条:白名单、宽容反序列化、文件名净化、markdown 结构)+ 真实构建产物集成断言 **11/11**(含 storage/history/docs-debates/ctx.effect 接线)+ tsc/build 绿 + pytest 治理门绿 |
+| S10 | 压线共识明示:上限处一致加 `convergedAtCap` 修饰位(只改说法不改停机)+ 镜像/兜底收尾/面板审计三处标"压线"并给"加 1~2 轮复验"建议 | done (2026-10-19) | 真实 vitest 套件 **145/145**(新增 6 条:压线判据 7 分支、兜底三态、面板 stopKey 4 分支)+ 线上局 `debate-mveltqkm-1` 三元组复核(stop=convergence, R10 才双 agree)+ tsc/build 绿 |

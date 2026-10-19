@@ -31,7 +31,7 @@ export interface TextContentBlock {
   [key: string]: unknown
 }
 import type { DebateConfig, DebateMap, DebateRound, DebateStatus, TranscriptEntry } from './debate'
-import { DEFAULT_CONFIG, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscript, toDebateRound, roundConverged, isSaturated, slimHandoff, formatPendingFocus, sectionText, parseAnswer, extractDecisionSummary, buildFallbackSummary, DECISION_SECTION } from './debate'
+import { DEFAULT_CONFIG, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscript, toDebateRound, roundConverged, convergedAtCap, isSaturated, slimHandoff, formatPendingFocus, sectionText, parseAnswer, extractDecisionSummary, buildFallbackSummary, DECISION_SECTION } from './debate'
 import { BUILD_VERSION, assessVersions, type VersionFacts } from './version'
 import { fromRecord, markInterrupted, renderReport, reportRelPath, STORAGE_TABLE, STORAGE_UNIT, toRecord } from './persist'
 import { findLens, type LensTemplate } from './lenses'
@@ -399,8 +399,15 @@ async function loadPersisted(ctx: Context): Promise<number> {
 export function stopReasonText(session: DebateSession): string {
   const r = session.stopReason
   const n = session.rounds.length
+  // 上限处一致算 convergence(判据真实),但说法必须标出"压线":
+  // 用户要评估的是"轮数给得合不合理",一句"共识收敛"会让他以为提前谈完了。
+  const cap = convergedAtCap(r, session.rounds, session.config.maxRounds)
   if (r === null) return session.status === 'done' ? '无(未记录)' : '未停机'
-  if (r === 'convergence') return `共识收敛(第 ${n} 轮双方 agree 同一答案)`
+  if (r === 'convergence') {
+    return cap
+      ? `压线共识(第 ${n} 轮一致,但上限就是 ${session.config.maxRounds} 轮:谈满了才收,不是提前收敛)`
+      : `共识收敛(第 ${n} 轮双方 agree 同一答案)`
+  }
   if (r === 'saturation') {
     return (session.rounds[n - 1]?.pendingItems?.length ?? 0) > 0
       ? `焦点停滞(第 ${n} 轮起未决清单连续两轮没变)`
@@ -830,8 +837,13 @@ export async function runHostDebate(
       const verdict = recordRoundAndJudge(session, r, bOut, cOut, relayChars)
       if (verdict === 'convergence') {
         stop = 'convergence'
-        setProgress(session, `第 ${r}/${session.config.maxRounds} 轮双方认可同一答案,提前停机`)
-        mirror(parent, session, `✅ 共识收敛:第 ${r} 轮双方 agree 同一答案,交锋提前结束,进入制图。`)
+        const atCap = r >= session.config.maxRounds
+        setProgress(session, atCap
+          ? `第 ${r} 轮双方认可同一答案,但这已经是上限轮(${session.config.maxRounds} 轮):压线收敛`
+          : `第 ${r}/${session.config.maxRounds} 轮双方认可同一答案,提前停机`)
+        mirror(parent, session, atCap
+          ? `✅ 第 ${r} 轮双方 agree 同一答案,但上限就是 ${session.config.maxRounds} 轮——这是压线共识,不是提前收敛。轮数给得刚好还是偏紧,看收尾陈述里的提示再定。进入制图。`
+          : `✅ 共识收敛:第 ${r} 轮双方 agree 同一答案,交锋提前结束,进入制图。`)
         break
       }
       if (verdict === 'saturation') {
@@ -853,9 +865,9 @@ export async function runHostDebate(
       onSide: (_role, text) => {
         setProgress(session, '成果地图已出')
         // v4 收尾陈述:制图员的「决策摘要」优先;漏写则用判定数据兜底。
-        // 这段是用户决定下一步的唯一依据,所以单独发一条,不跟地图混在一起。
+        // 兜底要传上限:只有 host 知道上限,猜上限等于实际轮数会把"提前收敛"误标成撞线。
         const decision = extractDecisionSummary(text)
-        session.decisionSummary = decision !== '' ? `## ${DECISION_SECTION}\n${decision}` : buildFallbackSummary(auto.question, session.rounds, session.stopReason)
+        session.decisionSummary = decision !== '' ? `## ${DECISION_SECTION}\n${decision}` : buildFallbackSummary(auto.question, session.rounds, session.stopReason, session.config.maxRounds)
         mirror(parent, session, finalStatement(auto.question, session.decisionSummary))
       },
     })
@@ -1811,6 +1823,7 @@ export default {
               lenses: session.config.auto.lenses.length,
               contextChars: session.config.auto.context.length,
               targetCwd: session.config.targetCwd ?? null,
+              maxRounds: session.config.maxRounds,
             } : undefined,
             mapText: session.mapText,
             map: session.map,

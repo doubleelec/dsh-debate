@@ -147,6 +147,7 @@ sequenceDiagram
 - [ADR-0017](adr/0017-focus-ledger-and-closing-statement.md): 协议 v4——未决清单焦点账本 + 新增判定只看「本轮变化」段 + 篇幅预算 + 对话区镜像摘要 + 收尾陈述（决策摘要/兜底）。
 - [ADR-0018](adr/0018-version-truth.md): 版本真值——构建期内联 + 三方对账；徽标显示正在跑的版本，取不到时显示 `v?` 而非冒充新版本。（同日更正：本 profile 关的是**模块监听**，不是 DSH 没有热重载。）
 - [ADR-0019](adr/0019-conclusion-persistence.md): 结论落盘——整局记录进 KV 单元 `dsh_debate`（per-record）、结论文档进 `<工作区>/docs/debates/`；恢复的局只读且把半途的标成已中断；两条失败原因分开可见。
+- [ADR-0020](adr/0020-cap-convergence.md): 压线共识——上限处一致是 convergence 的修饰位（`convergedAtCap`），只改说法不改停机；镜像/兜底收尾/面板审计三处标"压线"并给加轮复验建议。
 
 ## 6. Constraints and Risks
 

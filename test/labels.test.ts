@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { roleName, roundLabel, roundSummary, type TrFn } from '../src/client/labels'
+import { roleName, roundLabel, roundSummary, stopKey, type TrFn } from '../src/client/labels'
 
 // 最小中文 tr:只覆盖 labels 用到的 key。
 const tr: TrFn = (k, vars) => {
@@ -71,5 +71,33 @@ describe('roundSummary', () => {
       ...base, round: 2, builderAgree: false, challengerAgree: false,
       hasNewInfo: false, quoteAudit: { quotedLines: 0, quotableLines: 0 },
     }, tr)).toBe('建构方坚持「选A方案」,挑战方坚持「选B方案」;本轮没新料')
+  })
+})
+
+describe('stopKey', () => {
+  const agree = { round: 5, builderAgree: true, challengerAgree: true, builderAnswer: '选A方案', challengerAnswer: '选A方案' }
+  const fight = { round: 5, builderAgree: false, challengerAgree: false, builderAnswer: '选A方案', challengerAnswer: '选B方案' }
+
+  it('上限轮才一致 → 压线键(跟 host 的 convergedAtCap 同构)', () => {
+    const rounds = [1, 2, 3, 4].map((n) => ({ ...fight, round: n })).concat([{ ...agree, round: 5 }])
+    expect(stopKey('convergence', rounds, 5)).toBe('stop.convergenceCap')
+  })
+
+  it('提前一致 → 普通键(不看轮数,只看"谈完没")', () => {
+    const rounds = [{ ...agree, round: 1 }, { ...agree, round: 2 }, { ...agree, round: 3 }]
+    expect(stopKey('convergence', rounds, 5)).toBe('stop.convergence')
+  })
+
+  it('最后一轮但没收敛 → 跑满/饱和各走各的键,不蹭压线', () => {
+    const rounds = [1, 2, 3, 4, 5].map((n) => ({ ...fight, round: n }))
+    expect(stopKey('maxRounds', rounds, 5)).toBe('stop.maxRounds')
+    expect(stopKey('convergence', rounds, 5)).toBe('stop.convergence')
+  })
+
+  it('没给上限就别猜:缺 maxRounds 时永远回普通键', () => {
+    const rounds = [1, 2, 3, 4, 5].map((n) => ({ ...agree, round: n }))
+    expect(stopKey('convergence', rounds, undefined)).toBe('stop.convergence')
+    expect(stopKey('saturation', rounds, 5)).toBe('stop.saturation')
+    expect(stopKey('manual', rounds, 5)).toBe('stop.manual')
   })
 })

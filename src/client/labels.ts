@@ -59,3 +59,23 @@ export function roundSummary(r: RoundVerdict, tr: TrFn): string {
   if (r.quoteAudit.quotableLines > 0) tail.push(tr('summary.quoted', { q: r.quoteAudit.quotedLines, t: r.quoteAudit.quotableLines }))
   return `${verdict};${tail.join(' · ')}`
 }
+
+/**
+ * 停机标题键:convergence 恰好撞在上限轮时,用压线键而不是提前收敛键。
+ * 判据跟 host 的 convergedAtCap 同构(rounds.length===maxRounds 且最后一轮真收敛),
+ * 只是这里只有面板手里的数据(rounds/maxRounds),不调模型不读 host。
+ */
+export function stopKey(
+  stopReason: string | null,
+  rounds: Array<{ round: number; builderAgree: boolean; challengerAgree: boolean; builderAnswer: string; challengerAnswer: string }>,
+  maxRounds?: number,
+): string {
+  if (stopReason === 'convergence' && maxRounds !== undefined && maxRounds > 1 && rounds.length === maxRounds) {
+    const last = rounds[rounds.length - 1]
+    if (last !== undefined && last.builderAgree && last.challengerAgree
+      && last.builderAnswer.trim() !== '' && last.challengerAnswer.trim() !== '') {
+      return 'stop.convergenceCap'
+    }
+  }
+  return `stop.${stopReason}`
+}

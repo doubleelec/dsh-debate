@@ -32,6 +32,7 @@ import {
   buildSynthesizerPrompt,
   DECISION_SECTION,
   PENDING_MAX_ITEMS,
+  convergedAtCap,
   type DebateRound,
   type TranscriptEntry,
 } from '../src/debate'
@@ -784,5 +785,48 @@ describe('v4 decision summary', () => {
     const s = buildFallbackSummary('问题', [], null)
     expect(s).toContain('## 决策摘要')
     expect(s).toContain('未形成明确答案')
+  })
+
+  it('convergedAtCap:只有"上限轮 + 真收敛"才算压线,不是提前收敛', () => {
+    const last = (n: number) => mkRound({
+      round: n, builderAgree: true, challengerAgree: true,
+      builderAnswer: '上 K8s', challengerAnswer: '上 K8s',
+    })
+    const prev = (n: number) => mkRound({ round: n })
+    // 5 轮上限、第 5 轮收敛 → 压线。
+    expect(convergedAtCap('convergence', [prev(1), prev(2), prev(3), prev(4), last(5)], 5)).toBe(true)
+    // 10 轮上限、第 10 轮收敛 → 压线。
+    const ten = Array.from({ length: 9 }, (_, i) => prev(i + 1)); ten.push(last(10))
+    expect(convergedAtCap('convergence', ten, 10)).toBe(true)
+    // 第 3 轮就收敛(上限 5) → 提前收敛,不是压线。
+    expect(convergedAtCap('convergence', [prev(1), prev(2), last(3)], 5)).toBe(false)
+    // 最后一轮没收敛 → 不是压线(这是 maxRounds 跑满,走别的分支)。
+    expect(convergedAtCap('convergence', [prev(1), prev(2), prev(3), prev(4), prev(5)], 5)).toBe(false)
+    // 停机原因不是 convergence → 不是压线(上限是上限,别蹭共识的说法)。
+    expect(convergedAtCap('saturation', [prev(1), last(2)], 2)).toBe(false)
+    expect(convergedAtCap('maxRounds', [prev(1), last(2)], 2)).toBe(false)
+    expect(convergedAtCap(null, [prev(1), last(2)], 2)).toBe(false)
+    // 上限 1:只有一轮可谈,没有"提前 vs 压线"之分,不标。
+    expect(convergedAtCap('convergence', [last(1)], 1)).toBe(false)
+  })
+
+  it('兜底收尾:压线共识明说"上限",并给加轮复验的建议', () => {
+    const conv = (n: number) => mkRound({
+      round: n, builderAgree: true, challengerAgree: true,
+      builderAnswer: '上 K8s', challengerAnswer: '上 K8s',
+    })
+    const s = buildFallbackSummary('上不上 K8s?', [conv(1), conv(2), conv(3), conv(4), conv(5)], 'convergence', 5)
+    expect(s).toContain('上限 5 轮')
+    expect(s).toContain('压线')
+    expect(s).toContain('加 1~2 轮')
+    expect(s).not.toContain('共识收敛\n')
+    // 同样 5 轮,但第 3 轮就收敛(给了上限 5) → 提前收敛,不标压线。
+    const early = buildFallbackSummary('上不上 K8s?', [conv(1), conv(2), conv(3)], 'convergence', 5)
+    expect(early).toContain('共识收敛')
+    expect(early).not.toContain('压线')
+    // 没给上限 → 老行为,不猜(猜上限=轮数会把提前收敛误标成撞线)。
+    const unknown = buildFallbackSummary('上不上 K8s?', [conv(1), conv(2), conv(3), conv(4), conv(5)], 'convergence')
+    expect(unknown).toContain('共识收敛')
+    expect(unknown).not.toContain('压线')
   })
 })

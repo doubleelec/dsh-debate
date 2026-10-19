@@ -20,7 +20,7 @@ interface VersionResp {
 }
 import { splitSections } from './sections'
 import { resolveSessionId } from './session'
-import { roleName, roundLabel, roundSummary } from './labels'
+import { roleName, roundLabel, roundSummary, stopKey } from './labels'
 import {
   DIALOG_DEFAULT_H, DIALOG_DEFAULT_W,
   clampDialogHeight, clampDialogWidth, clampStoredHeight, clampStoredWidth,
@@ -50,7 +50,7 @@ const DICTS: Record<string, Record<string, string>> = {
     'type.tradeoff': '权衡 / 决策', 'type.causal': '因果 / 解释',
     'builder.label': '建构者模型', 'challenger.label': '挑战者模型', 'synth.label': '制图员模型',
     'rounds.label': '最大轮数',
-    'stop.convergence': '共识收敛停机', 'stop.saturation': '覆盖饱和停机', 'stop.maxRounds': '跑满停机',
+    'stop.convergence': '共识收敛停机', 'stop.convergenceCap': '压线共识停机(谈满上限轮才一致)', 'stop.saturation': '覆盖饱和停机', 'stop.maxRounds': '跑满停机',
     'stop.manual': '手动提前制图', 'stop.pending': '判定中…',
     'audit.title': '停机审计', 'audit.quoted': '引用', 'audit.relay': '交棒',
     'mirror.off': '仅面板(自建 parent,无对话区可写)',
@@ -105,7 +105,7 @@ const DICTS: Record<string, Record<string, string>> = {
     'type.tradeoff': 'Tradeoff / decision', 'type.causal': 'Causal / explanation',
     'builder.label': 'Builder model', 'challenger.label': 'Challenger model', 'synth.label': 'Synthesizer model',
     'rounds.label': 'Max rounds',
-    'stop.convergence': 'stopped: convergence', 'stop.saturation': 'stopped: saturation', 'stop.maxRounds': 'stopped: max rounds',
+    'stop.convergence': 'stopped: convergence', 'stop.convergenceCap': 'stopped: convergence at cap (agreed only on the last allowed round)', 'stop.saturation': 'stopped: saturation', 'stop.maxRounds': 'stopped: max rounds',
     'stop.manual': 'manual map', 'stop.pending': 'judging…',
     'audit.title': 'Stop audit', 'audit.quoted': 'quoted', 'audit.relay': 'relay',
     'mirror.off': 'panel only (self-built parent, no chat surface)',
@@ -178,7 +178,7 @@ interface RoundAudit {
   pendingItems?: string[] | null
   quoteAudit: { quotableLines: number; quotedLines: number; hitLines: number[]; hitRate: number | null }
 }
-interface AutoResolved { question: string; questionType: string; lenses: number; contextChars: number; targetCwd?: string | null }
+interface AutoResolved { question: string; questionType: string; lenses: number; contextChars: number; targetCwd?: string | null; maxRounds?: number }
 interface StateResp {
   ok: boolean
   id?: string
@@ -320,7 +320,7 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
   // targetCwd 面板不再露:聊天开局(debate_start)自动继承会话 cwd;HTTP 建单默认进程目录。
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [status, setStatus] = useState('idle')
-  const [resolved, setResolved] = useState<{ question: string; questionType: string; lenses: number; contextChars: number; targetCwd?: string | null } | null>(null)
+  const [resolved, setResolved] = useState<AutoResolved | null>(null)
   const [turns, setTurns] = useState<Turn[]>([])
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -813,7 +813,7 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
         {/* 停机审计:stopReason + 每轮人话小结(判定数据翻译,不调模型)。 */}
         {(stopReason !== null || roundAudits.length > 0) && (status === 'done' || status === 'running') && (
           <div className={C('dshd-resolved')}>
-            <div><b>{tr('audit.title')}</b>{stopReason !== null ? tr(`stop.${stopReason}`) : tr('stop.pending')}{mode !== '' && mode !== 'resident' ? ` · ${mode}` : ''}</div>
+            <div><b>{tr('audit.title')}</b>{stopReason !== null ? tr(stopKey(stopReason, roundAudits, resolved?.maxRounds)) : tr('stop.pending')}{mode !== '' && mode !== 'resident' ? ` · ${mode}` : ''}</div>
             {roundAudits.length > 0 && (
               <div><b>{tr('summary.title')}</b></div>
             )}
