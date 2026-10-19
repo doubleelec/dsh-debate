@@ -47,8 +47,11 @@ export function isConverged(aAgree: boolean, bAgree: boolean, aAnswer: string, b
  *      + 新增判定只看「本轮变化」段(整篇找信号词会永远命中,饱和停机形同死代码)。
  * v5: + concession 段"已接受判据"收集(定义锁存:host 从接受轮收判据定义,带进下一轮 prompt)
  *      + 议题循环停机口径(清单在变但清不空、答案面不动,提前收尾)。
+ * v6: + 制图 prompt 按题型给结论形状 + 结论/收敛状况拆行(`buildSynthesizerPrompt` 第三个参数)
+ *      + answer= 定义收窄(普通读者一句话答原问题;只有选择题写"用户现在就要动手选什么")
+ *      + 制图输入清洗(`renderTranscriptForSynthesizer`:去 host 协议行,只留论证)。
  */
-export const STOP_PROTOCOL_VERSION = 5
+export const STOP_PROTOCOL_VERSION = 6
 
 /**
  * agree 自报解析:只认显式接受(大小写/全角/中文容忍)。
@@ -69,6 +72,32 @@ export function parseAnswer(text: string): string {
   return sec ? sec[1].trim().slice(0, 500) : ''
 }
 
+/**
+ * 题型→制图结论形状:制图员拿到题型才知道"回答原问题"长什么样。
+ * selection=推荐方案(条件式也行);tradeoff=条件式(若 X 优先则 A);review=达标 verdict;
+ * causal=机制链条。不匹配形状的结论(如选择题只谈过程)就是跑偏。
+ */
+export function answerShapeOf(questionType: QuestionType): string {
+  switch (questionType) {
+    case 'selection':
+      return `结论形状(选择题):第一句必须写"推荐选 X"(条件式也行:"k≤3 选 A,超 3 选 B");不许以"本表只排…/k≤3…"这种过程限定开头——排什么不排什么是依据节的边界声明,不是结论。`
+    case 'tradeoff':
+      return `结论形状(权衡题):第一句必须是条件式("若 X 优先则选 A,若 Y 优先则选 B"),不许只谈过程不给条件。`
+    case 'review':
+      return `结论形状(评审题):第一句必须是达标 verdict("达标/基本达标/不达标") + 缺哪条,不许只谈过程。`
+    case 'causal':
+      return `结论形状(因果题):第一句必须是机制链条("因为 A 导致 B"),不许只谈"辩了几轮"。`
+  }
+}
+
+/** answer= 行的题型定义:普通读者能读懂的一句话回答原问题;只有选择题才写"用户现在就要动手,建议选什么"。 */
+export function answerSpecOf(questionType: QuestionType): string {
+  const base = `answer=<普通读者能读懂的一句话,直接回答上面的原问题;不写过程黑话(如"只排隔离稳"),不写"见上文">`
+  if (questionType === 'selection') {
+    return `${base}(你是选择题:按"用户现在就要动手,建议选什么"写,可执行;条件式也行)`
+  }
+  return `${base}`
+}
 /** 未决清单单项上限(超长截断,防单条吃掉整个 prompt 预算)。 */
 export const PENDING_ITEM_MAX_LEN = 60
 
@@ -806,8 +835,8 @@ export interface DebateMap {
   verdict?: { opinion: string; reasons: string[] }
 }
 
-/** 组装建构者开题 prompt。 */
 export function buildBuilderPrompt(question: string, lenses: LensTemplate[], questionType: QuestionType, context = ''): string {
+  const answerSpec = answerSpecOf(questionType)
   const lensList = lenses.map((l) => `- ${l.name}: ${l.description}`).join('\n')
   const ctxBlock = context.trim() !== '' ? `\n背景(前面会话已定,须遵守:已排除的不再铺,已验证的不再争,术语沿用,已决边界不重开):\n${context.trim()}\n` : ''
   return [
@@ -830,7 +859,7 @@ export function buildBuilderPrompt(question: string, lenses: LensTemplate[], que
     `6. 同时自报你的模型身份,格式:MODEL:<provider>/<model>。你没有环境查询工具,如实填你被配置的模型名;不知道就写 MODEL:unknown,不许编造。`,
     `7. 停机信号:本段固定两行,单独成段放在最后,不要写进三段正文里(host 解析用):`,
     `   agree=false`,
-    `   answer=<你的当前答案,一句话>`,
+    `   ${answerSpec}`,
     `8. 输出必须分三段,段标题原样保留(面板按段折叠渲染):`,
     `   ## 结论摘要`,
     `   ## 详细论证`,
@@ -839,6 +868,11 @@ export function buildBuilderPrompt(question: string, lenses: LensTemplate[], que
   ].join('\n')
 }
 
+/**
+ * 组装建构者交锋轮 prompt(常驻与一次性共用)。
+ * 之前建构者交锋轮复用挑战者 prompt(角色错位),这里改为建构者自己的回合:
+ * 逐条回应挑战(接受或守住)、可修正答案、必须报本轮变化。
+ */
 /**
  * 组装建构者交锋轮 prompt(常驻与一次性共用)。
  * 之前建构者交锋轮复用挑战者 prompt(角色错位),这里改为建构者自己的回合:
@@ -854,6 +888,8 @@ export function buildBuilderRoundPrompt(
 ): string {
   const ctxBlock = context.trim() !== '' ? `\n背景(前面会话已定:已验证的不再争,术语沿用,已决边界不重开):\n${context.trim()}\n` : ''
   const focusBlock = focus.trim() !== '' ? `\n${focus.trim()}\n` : ''
+  // 交锋轮签名没有题型参数:现场分类,不扩散签名(两处 host 调用点都不用动)。
+  const answerSpec = answerSpecOf(classifyQuestion(question).questionType)
   return [
     `你是建构者(builder)。这是第 ${round}/${maxRounds} 轮交锋——挑战者刚给了你上一轮的挑战,你要回应它。`,
     `边界:你是被辩论链路调用的子 agent,首要产出是文本论证。不要调用任何 debate_* 工具;但你手里的文件读取/检索/网络工具该用就用:守不住的事实断言要用工具查证后再守,查不到就承认并改成缺失。`,
@@ -872,7 +908,7 @@ export function buildBuilderRoundPrompt(
     `3. 自报模型身份,格式:MODEL:<provider>/<model>;不知道就写 MODEL:unknown,不许编造。`,
     `4. 停机信号:本段固定两行,单独成段放在最后,不要写进三段正文里(host 解析用):`,
     `   agree=true/false(完全接受挑战者当前答案时才是 true)`,
-    `   answer=<接受时填挑战者的答案原文,否则填你自己修正后的答案,一句话>`,
+    `   ${answerSpec}(接受对方时填对方答案原文,原文须已是普通读者能读懂的一句话)`,
     `5. 输出必须分三段,段标题原样保留(面板按段折叠渲染):`,
     `   ## 结论摘要`,
     `   ## 详细论证`,
@@ -893,6 +929,8 @@ export function buildChallengerPrompt(
 ): string {
   const ctxBlock = context.trim() !== '' ? `\n背景(前面会话已定:已验证的不再挑战,已决边界不重开;挑战须引用对方本场原文):\n${context.trim()}\n` : ''
   const focusBlock = focus.trim() !== '' ? `\n${focus.trim()}\n` : ''
+  // 交锋轮签名没有题型参数:现场分类,不扩散签名(两处 host 调用点都不用动)。
+  const answerSpec = answerSpecOf(classifyQuestion(question).questionType)
   return [
     `你是挑战者(challenger)。任务:打穿建构者的对照,专找四类洞:`,
     `1) 没覆盖的维度 2) 没覆盖的场景(常态/峰值/异常/增长) 3) 没证据的断言 4) 自相矛盾的推理。`,
@@ -914,7 +952,7 @@ export function buildChallengerPrompt(
     ...budgetLines(),
     `5. 停机信号:本段固定三行,单独成段放在最后,不要写进三段正文里(host 解析用,漏写会让收敛与停滞停机都失效):`,
     `   agree=true/false`,
-    `   answer=<你的当前答案,一句话;接受对方时填对方答案原文>`,
+    `   ${answerSpec}(接受对方时填对方答案原文,原文须已是普通读者能读懂的一句话)`,
     `   ${PENDING_LINE_SPEC}`,
     `6. 输出必须分三段,段标题原样保留(面板按段折叠渲染):`,
     `   ## 结论摘要`,
@@ -928,7 +966,7 @@ export function buildChallengerPrompt(
 export const DECISION_SECTION = '决策摘要'
 
 /** 组装制图员 prompt:只读实录,不参辩(ADR-0002/0006)。 */
-export function buildSynthesizerPrompt(question: string, transcript: string): string {
+export function buildSynthesizerPrompt(question: string, transcript: string, questionType: QuestionType = 'selection'): string {
   return [
     `你是制图员(synthesizer)。你没有参与前面的辩论,现在只读实录输出成果地图。`,
     `美德是忠实:不添油加醋,不磨平分歧,分歧如实保留。`,
@@ -949,11 +987,13 @@ export function buildSynthesizerPrompt(question: string, transcript: string): st
     `   必须一句话说清内容("subagent 没有 workspace 参数,只能只读编排、写操作串行")——编号可留,但内容不能省。`,
     `3. 下一步必须可执行:每条写清查什么(哪份文档哪一节)/跑什么(哪条命令)/找谁确认(哪个仓的 owner),`,
     `   缺一不可;不许写"试点跑任务记耗时"这种没头没尾的话。`,
-    `用下面四小段,每段短行,不要用表格:`,
-    `- 结论:一句话回答原问题;双方是否收敛,没收敛就写清各自最后站哪。`,
+    `用下面五小段,每段短行,不要用表格:`,
+    `- 结论:只答原问题,不谈过程——按题型形状写(见下),第一句必须能独立回答"用户下一步怎么办";不许以"本表只排…/k≤3…/辩了几轮…"这类过程限定开头。`,
+    `- 收敛状况:单独一行。写清双方是否接受同一答案(收敛/单方接受/未收敛);这是战况汇报,和上面的结论各写各的,不许合并成一句。`,
     `- 关键分歧:没谈拢的点,每条一句话(价值排序不同还是事实没查清,写明)。`,
-    `- 主要依据:支撑结论最硬的 2~3 条,每条一句话说清内容,可附[轮次引用]但不许只有编号。`,
+    `- 主要依据:支撑结论最硬的 2~3 条,每条一句话说清内容,可附[轮次引用]但不许只有编号;过程边界(如"本表只排 A 类任务")放这里当边界声明,不进结论。`,
     `- 建议下一步:2~3 条可执行动作(查什么/跑什么/找谁确认,缺一不可),附一条最大风险。`,
+    `${answerShapeOf(questionType)}`,
     `这段会原样贴进用户对话区,是用户决定下一步的依据,所以必须自足:不依赖下面的地图也读得懂,不许出现"见上文""如上"这类指代。`,
     ``,
     `## 成果地图(五件套,放在决策摘要之后)`,
@@ -1043,15 +1083,16 @@ export function buildFallbackSummary(
   const lines: string[] = [`## ${DECISION_SECTION}`]
   lines.push(`- 问题:${question}`)
   if (converged) {
-    lines.push(`- 结论:双方收敛于「${b}」(${stopReasonText(stopReason, n, cap)})。`)
+    lines.push(`- 结论:双方收敛于「${b}」(用户下一步照此推进,先补齐成果地图「缺口」节里标缺失的项再动手;${stopReasonText(stopReason, n, cap)}。)`)
   } else if (oneSidedAccept) {
     // 谁接受就写谁的原文:归一化一致只保证"意思一样",原文可能不同,别张冠李戴。
     const accepted = last.builderAgree ? b : c
     const who = last.builderAgree && last.challengerAgree ? '双方'
       : last.builderAgree ? '建构方' : '挑战方'
-    lines.push(`- 结论:基本可用。${who}已接受「${accepted}」,只剩记账分歧未合(数字摆法/定义口径,不是事实没查清)——跑满 ${n} 轮上限收尾,但结论不是白谈的。`)
+    lines.push(`- 结论:基本可用。${who}已接受「${accepted}」(用户下一步照此推进),只剩记账分歧未合(数字摆法/定义口径,不是事实没查清)——跑满 ${n} 轮上限收尾,但结论不是白谈的。`)
   } else if (b !== '' || c !== '') {
-    lines.push(`- 结论:未收敛。建构方最后站「${b || '未给出'}」,挑战方最后站「${c || '未给出'}」(${stopReasonText(stopReason, n)})。`)
+    // 未收敛不给推荐:只列双方最后立场,"用户下一步怎么办"看分歧节,不替用户选。
+    lines.push(`- 结论:未收敛,无推荐。建构方最后站「${b || '未给出'}」,挑战方最后站「${c || '未给出'}」(${stopReasonText(stopReason, n)})。`)
   } else {
     lines.push(`- 结论:未形成明确答案(${stopReasonText(stopReason, n)})。`)
   }
@@ -1089,8 +1130,9 @@ export function buildFallbackSummary(
     lines.push(`- 未决清单(${pending.length} 条):${pending.join(';')}`)
   }
   lines.push(`- 建议下一步:`)
-  if (converged) {
-    if (cap) {
+  if (converged || oneSidedAccept) {
+    // 收敛/基本可用 → 照此推进(先补缺口);未收敛分支见下,不给推荐。
+    if (converged && cap) {
       lines.push(`  1. 若对结论有疑虑,加 1~2 轮重开一局(轮数给 ${n + 2} 左右),看一致是提前出现还是再次压线——两次都压线,说明这个问题本来就需要这么多轮。`)
       lines.push(`  2. 按结论推进前,先补齐成果地图「缺口」节里标缺失的项再动手。`)
     } else {
@@ -1098,11 +1140,40 @@ export function buildFallbackSummary(
       lines.push(`  2. 结论里的置信度低项,落地前用一次实测或文档核对收口。`)
     }
   } else {
+    // 未收敛:不推荐,只给"怎么把分歧谈清楚"的动作,不许"按结论推进"。
     lines.push(`  1. 把上面的未决清单逐条落成待办,查清后再重开一局,别在措辞上继续磨。`)
     lines.push(`  2. 若分歧其实来自目标不同,先定判据(谁的收益优先)再辩,能一轮收敛。`)
   }
   lines.push(`  风险:结论只在本轮参与论证的范围内成立;会话背景之外的约束未参与论证。`)
   return lines.join('\n')
+}
+
+/**
+ * 制图员输入清洗:去掉 host 协议行,只留论证。
+ * 制图员看到运行日志(`agree=/answer=/待决清单=/MODEL:`)就会总结过程;它要读的是论证,不是机器信号。
+ * answer= 保留但标成立场(`[立场] …`):分歧节"各自最后站哪"还要用它。
+ * 引用审计用的【引R…】标记不在这里动:那是正文里的引用,审计和阅读都要。
+ */
+export function renderTranscriptForSynthesizer(entries: TranscriptEntry[]): string {
+  const cleaned = entries.map((e) => {
+    const kept: string[] = []
+    for (const raw of e.text.split('\n')) {
+      const line = raw.trim()
+      if (line === '') continue
+      if (/^(agree|待决清单)\s*[=:：]/.test(line)) continue
+      if (/^MODEL:/i.test(line)) continue
+      // 【引R{轮}】…【/引】是正文引用标记,拆成普通引号,阅读不丢信息。
+      const m = line.match(/^answer\s*[=:：]\s*(.*)$/i)
+      if (m) {
+        const ans = (m[1] ?? '').trim()
+        if (ans !== '') kept.push(`[立场] ${ans}`)
+        continue
+      }
+      kept.push(raw)
+    }
+    return `[R${e.round} #${e.seq} ${e.role}] ${kept.join('\n')}`
+  })
+  return cleaned.join('\n\n')
 }
 
 /** transcript 拼装(供制图员输入)。 */

@@ -32,6 +32,7 @@ import {
   extractDecisionSummary,
   stripDecisionSummary,
   buildSynthesizerPrompt,
+  renderTranscriptForSynthesizer,
   DECISION_SECTION,
   PENDING_MAX_ITEMS,
   convergedAtCap,
@@ -1122,5 +1123,77 @@ describe('v4 decision summary', () => {
     const unknown = buildFallbackSummary('上不上 K8s?', [conv(1), conv(2), conv(3), conv(4), conv(5)], 'convergence')
     expect(unknown).toContain('共识收敛')
     expect(unknown).not.toContain('压线')
+  })
+})
+
+describe('S14 结论答题化', () => {
+  it('制图 prompt:按题型给答案形状(selection 选方案/tradeoff 条件式/review  verdict/causal 机制)', () => {
+    const sel = buildSynthesizerPrompt('选甲还是乙?', '实录', 'selection')
+    expect(sel).toMatch(/推荐|选/)
+    const trade = buildSynthesizerPrompt('A 还是 B,代价如何权衡?', '实录', 'tradeoff')
+    expect(trade).toMatch(/条件|若.*则|优先/)
+    const review = buildSynthesizerPrompt('这版设计满足需求吗?', '实录', 'review')
+    expect(review).toMatch(/达标|满足|缺/)
+    const causal = buildSynthesizerPrompt('为什么这轮慢?', '实录', 'causal')
+    expect(causal).toMatch(/机制|链条|原因/)
+  })
+
+  it('制图 prompt:结论只答原问题,收敛状况另起一行(过程不许塞进第一句)', () => {
+    const p = buildSynthesizerPrompt('选甲还是乙?', '实录', 'selection')
+    // 结论行只答原问题,战况(是否收敛)归"收敛状况"行,不许合并。
+    expect(p).toMatch(/结论.*只答原问题|只答原问题.*结论/)
+    expect(p).toMatch(/收敛状况/)
+    expect(p).not.toMatch(/结论:一句话回答原问题;双方是否收敛/)
+    // 过程刻度(排什么/不排/轮数/口径)不许进结论,归依据节当边界声明。
+    expect(p).toMatch(/过程限定|排什么|依据.*边界|边界声明/)
+  })
+
+  it('answer= 定义收窄:普通读者一句话答原问题;只有选择题才写可执行选择', () => {
+    const b = buildBuilderPrompt('选甲还是乙?', [], 'selection')
+    expect(b).toMatch(/用户现在就要动手|选什么|可执行/)
+    const review = buildBuilderPrompt('这版设计满足需求吗?', [], 'review')
+    // 评审题不强求"选",只要求普通读者能读懂的一句话回答。
+    expect(review).toMatch(/普通读者|一句话.*回答/)
+    expect(review).not.toMatch(/用户现在就要动手/)
+    const r = buildBuilderRoundPrompt('为什么这轮慢?', '挑战输出', 2, 5)
+    expect(r).toMatch(/普通读者|一句话.*回答/)
+  })
+
+  it('renderTranscriptForSynthesizer:去 host 协议行,留论证;answer 标成立场', () => {
+    const entries: TranscriptEntry[] = [{
+      seq: 1, role: 'builder', round: 1,
+      text: '## 结论摘要\n立场甲\n\n## 详细论证\n因为甲\n\nagree=false\nanswer=甲\n待决清单=补依据\nMODEL:local-proxy/x',
+    }]
+    const out = renderTranscriptForSynthesizer(entries)
+    // host 协议行去掉(制图员读运行日志才会总结过程)。
+    expect(out).not.toMatch(/agree=|待决清单=|MODEL:/)
+    // 论证正文保留。
+    expect(out).toContain('立场甲')
+    expect(out).toContain('因为甲')
+    // answer 立场保留并标明身份(分歧节还要"各自最后站哪")。
+    expect(out).toMatch(/立场|答案/)
+  })
+
+  it('兜底收尾:收敛/单方接受给可执行说法,未收敛只列立场不推荐', () => {
+    const conv: DebateRound = {
+      round: 1, builderAnswer: '上 K8s', builderAgree: true,
+      challengerAnswer: '上 K8s', challengerAgree: true, hasNewInfo: true, builderRelayChars: 0,
+      protoVersion: STOP_PROTOCOL_VERSION, pendingItems: null,
+      quoteAudit: { quotableLines: 0, quotedLines: 0, hitLines: [], hitRate: null },
+    }
+    const s = buildFallbackSummary('上不上 K8s?', [conv], 'convergence', 5)
+    // 收敛 → 可执行说法(照此选)。
+    expect(s).toMatch(/照此|可执行|建议/)
+    const split = buildFallbackSummary('选甲还是乙?', [{
+      ...conv, builderAnswer: '甲', challengerAnswer: '乙',
+      builderAgree: false, challengerAgree: false,
+    }], 'saturation')
+    // 未收敛 → 列双方立场,不许出现推荐口吻("推荐"指"建议选谁",下一步的"重开一局/再辩"是动作,不算推荐)。
+    expect(split).toContain('未收敛')
+    expect(split).toContain('甲')
+    expect(split).toContain('乙')
+    expect(split).not.toMatch(/建议选|照此选|推荐选|无推荐.*推荐/)
+    expect(split).not.toContain('按结论推进')
+    expect(split).not.toContain('- 结论:未收敛,推荐')
   })
 })

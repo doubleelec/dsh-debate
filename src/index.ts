@@ -31,8 +31,9 @@ export interface TextContentBlock {
   [key: string]: unknown
 }
 import type { DebateConfig, DebateMap, DebateRound, DebateStatus, TranscriptEntry } from './debate'
-import { DEFAULT_CONFIG, normalizeAnswer, SETTLED_DEFS_MAX, isOneSidedAccept, isTopicLoop, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscript, toDebateRound, roundConverged, convergedAtCap, isSaturated, pendingStalled, slimHandoff, formatPendingFocus, sectionText, parseAnswer, parseGaps, gapAge, extractDecisionSummary, buildFallbackSummary, DECISION_SECTION } from './debate'
+import { DEFAULT_CONFIG, normalizeAnswer, SETTLED_DEFS_MAX, isOneSidedAccept, isTopicLoop, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscriptForSynthesizer, toDebateRound, roundConverged, convergedAtCap, isSaturated, pendingStalled, slimHandoff, formatPendingFocus, sectionText, parseAnswer, parseGaps, gapAge, extractDecisionSummary, buildFallbackSummary, DECISION_SECTION } from './debate'
 export { isTopicLoop }
+export { renderTranscriptForSynthesizer, answerShapeOf, answerSpecOf } from './debate'
 import { BUILD_VERSION, assessVersions, type VersionFacts } from './version'
 import { fromRecord, markInterrupted, renderReport, reportRelPath, STORAGE_TABLE, STORAGE_UNIT, toRecord } from './persist'
 import { findLens, type LensTemplate } from './lenses'
@@ -1766,7 +1767,7 @@ export async function stepSynthesize(
   const cfg = session.config
   const auto = requireAuto(session)
   live?.onStart?.('synthesizer')
-  const mapText = await askSubagent(subagents, parent, session.id, 'synthesizer', buildSynthesizerPrompt(auto.question, renderTranscript(session.transcript)), cfg.synthesizer, signal)
+  const mapText = await askSubagent(subagents, parent, session.id, 'synthesizer', buildSynthesizerPrompt(auto.question, renderTranscriptForSynthesizer(session.transcript), auto.questionType), cfg.synthesizer, signal)
   pushEntry(session, 'synthesizer', cfg.maxRounds + 1, mapText)
   live?.onSide?.('synthesizer', mapText)
   const map: DebateMap = {
