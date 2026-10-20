@@ -1,7 +1,7 @@
 # dsh-debate architecture.toml
 # Top-level Architecture-as-Code manifest (arch retrofit baseline + S18/S19/S21/S22 reconcile).
 # Single governed tree: src (host wiring) with nested src/client (browser bundle),
-# src/debate (debate pure logic) and src/task (cross-repo task pure modules).
+# src/debate (debate pure logic) and src/cross_tasks (cross-repo task pure modules).
 # tests/ holds the vitest behavior suite + vendored governance suite + per-module invariant mirrors.
 
 submodules = [

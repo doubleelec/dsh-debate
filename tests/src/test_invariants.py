@@ -75,9 +75,9 @@ def test_src_task_routes_are_seven():
 
 
 def test_src_peer_symmetry():
-    """S22: debate/ vs task/ are peer pure-logic dirs; host wiring stays in index.ts."""
+    """S22: debate/ vs cross_tasks/ are peer pure-logic dirs; host wiring stays in index.ts."""
     src_dir = ROOT / "src"
-    for peer in ("debate", "task"):
+    for peer in ("debate", "cross_tasks"):
         d = src_dir / peer
         assert d.is_dir(), f"src/{peer}/ missing: peers must both exist"
         assert (d / "module.toml").is_file(), f"src/{peer}/module.toml missing"
@@ -85,7 +85,7 @@ def test_src_peer_symmetry():
     flat = {p.name for p in src_dir.glob("*.ts")}
     assert flat == {"index.ts", "version.ts"}, f"flat src/*.ts drifted: {sorted(flat)}"
     # Peer dirs carry no host wiring: no webServer register, no tools.register.
-    for peer in ("debate", "task"):
+    for peer in ("debate", "cross_tasks"):
         for ts in (src_dir / peer).glob("*.ts"):
             text = ts.read_text(encoding="utf-8")
             assert "webServer.register" not in text, f"{ts} must not register routes"

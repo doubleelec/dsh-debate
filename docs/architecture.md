@@ -7,7 +7,7 @@
 > （`tests/vitest/` 行为 + `tests/governance/` 架构 + `tests/<module>/` 镜像）；`docs/test_index.md`
 > 从"只登治理门"扩为"两扇门总目录"。`npm run test:sandbox` 跑合并后同一套文件。
 > Merge record (S22 对称)：辩论纯逻辑从 `src/*.ts` 平铺搬入 `src/debate/`（`debate.ts`/`lenses.ts`/`persist.ts`），
-> 与 `src/task/` 平级对等；`src/version.ts` 留顶层共享（host/client 共用）；host 接线仍在 `src/index.ts`
+> 与 `src/cross_tasks/` 平级对等；`src/version.ts` 留顶层共享（host/client 共用）；host 接线仍在 `src/index.ts`
 > （单 tsdown entry，平台约束不变）。红线 SYM-01 + DEBATE-01 落 TOML，`tests/src/debate/` 镜像随行。
 > 定位收敛（S21）：`docs/debate-design.md` 是辩论功能的设计草稿（v0.1 冻结），不是全工程架构；
 > 本文件是全工程唯一架构描述（双功能：辩论 + 跨仓任务）。
@@ -19,7 +19,7 @@
   - **辩论**：为开放性论证题跑建构 / 挑战 / 制图三角色，产出一套固定五件套成果地图，而非单一结论句；
   - **跨仓任务**：扫一父目录下多仓结构（scan）→ 建任务材料目录（build，人审改 issued）→ 一仓一会话拉起执行（launch）→ 回信汇总（report/collect），见 ADR-0025。
 - **Scope**: `src/` 下的 host 半区（webServer 路由 + debate/task 工具 + 辩论循环与跨仓任务接线）与浏览器 bundle（overlay 对话框 + 输入框入口 + 任务面板）。测试单列 `tests/`（§7：vitest 行为门 + pytest 治理门，两扇门一处放）；部署与发包在圈外（见 spec Out of Scope）。
-- **Two functions, one seam**: 辩论（`src/debate/` 三纯模块 + `src/index.ts` 内 debate 接线）与多仓任务（`src/task/` 三纯模块 + `src/index.ts` 内 task 接线约 480 行）是**平级对等目录**（S22 对称：`debate/` vs `task/`，各管各的纯逻辑；`src/version.ts` 共享）。接线层（路由注册/工具注册/控制器）平台强制同文件（tsdown entry 单 `src/index.ts`、路由表在 `apply()` 逐条注册）。硬拆接线层造 shallow module：删掉它复杂度不消失（deletion test 不过），跨"辩论 vs 任务"没有可变点（two-adapter rule 不过）。减负方向是同模块内抽（`src/task/host.ts`、`src/client/TaskDialog.tsx`），见 ADR-0025 §7。
+- **Two functions, one seam**: 辩论（`src/debate/` 三纯模块 + `src/index.ts` 内 debate 接线）与多仓任务（`src/cross_tasks/` 三纯模块 + `src/index.ts` 内 task 接线约 480 行）是**平级对等目录**（S22 对称：`debate/` vs `cross_tasks/`，各管各的纯逻辑；`src/version.ts` 共享）。接线层（路由注册/工具注册/控制器）平台强制同文件（tsdown entry 单 `src/index.ts`、路由表在 `apply()` 逐条注册）。硬拆接线层造 shallow module：删掉它复杂度不消失（deletion test 不过），跨"辩论 vs 任务"没有可变点（two-adapter rule 不过）。减负方向是同模块内抽（`src/cross_tasks/host.ts`、`src/client/TaskDialog.tsx`），见 ADR-0025 §7。
 
 ## 2. Stakeholders and Concerns
 
@@ -165,14 +165,14 @@ flowchart TD
     - **常驻交棒（回退一）**：`createResidentPair`（`agents.create` 建双常驻会话 + preset 继承 + `subagent:delegation` 上下文 + 白名单笼：辩手 6 项、交集核对、scope-local guard）、`stepOpenResident/stepRoundResident`（开题互盲、交锋串行）、`driveResidentTurn`（`followup` 投交棒结论 → 进度感知等到 `whenIdle` → 读自有事件后缀 → 校验终止原因 → 取交棒结论；provider `error` 有界重投）、`readResidentEvents/extractHandoffConclusion/epochStopReason/epochStopDetail/turnVerdict`。
     - **一次性回退（回退二）**：`askSubagent`（spawn + 工具笼 + 6min 单步超时 + 实报）与 `stepOpen/stepRound/stepSynthesize`；`agents` 缺失或建对失败时整场回退，`mode/residentError` 记录整条回退链（`single:…; resident:…`）。
     - **共用**：`runHostDebate`（后台直驱 open→round×N→synthesize + 停机三条件）、`createFullParent`（webhook 样板挂 preset）、`mirror`（`user/message` + `surfaceOp:'append'`）。
-  - `src/debate/`（与 `src/task/` 平级对等，S22 对称）——
+  - `src/debate/`（与 `src/cross_tasks/` 平级对等，S22 对称）——
     - `debate.ts`: `classifyQuestion`（关键词启发式）、`extractSessionContext`（4000 字截断）、`buildBuilderPrompt/buildBuilderRoundPrompt/buildChallengerPrompt/buildSynthesizerPrompt`（三段式：结论摘要/详细论证/本轮变化，v4 起带 `focus` 焦点块与篇幅预算；制图要求先出「决策摘要」段）、`parseAgree/parseAnswer/detectNewInfo/isConverged`（停机协议）、`parsePendingItems/normalizePending/pendingStalled/formatPendingFocus`（v4 未决清单焦点账本）、`changesOf/sectionText`（分段取值）、`extractDecisionSummary/stripDecisionSummary/buildFallbackSummary`（v4 收尾陈述）、`isSaturated/normalizeAnswer/containsBannedPhrase`、`STOP_PROTOCOL_VERSION`（B5 解析版本位，v4）、`auditQuotes/QUOTE_FRAG_LEN/QUOTE_HIT_ALERT`（B6 片段级引用审计）、`ROUND_DETAIL_MAX_CHARS/PENDING_MAX_ITEMS`（v4 预算）。
     - `lenses.ts`: 四类题型种子模板（selection/review/tradeoff/causal）。
     - `persist.ts`: 留存层的纯函数（无 IO，故可单测）——`toRecord`（**显式白名单**：实时流/镜像开关/flush 等过程态不落盘）/`fromRecord`（宽容反序列化：关键字段缺失或版本超前则跳过该条，次要字段缺就补默认值）+ `markInterrupted`（把上次记 `running` 的局标成已中断）+ `slugify`/`reportRelPath`（文件名净化：Windows 非法字符、首尾点/连字符、按码点截断、中文保留）+ `renderReport`（结论文档排布：决策摘要 → 成果地图 → 每轮判定表 → 折叠全文；表格转义 `|`、正文中和 `</details>`）+ `STORAGE_UNIT/STORAGE_TABLE`。IO 全在 `src/index.ts`（ADR-0019）。
   - `src/version.ts`（共享）：版本真值——`BUILD_VERSION`（构建期内联，host/client 各一份）+ `assessVersions`（内联版本 / 磁盘 manifest / bundle mtime 与进程启动时刻三方对账）+ `isClientStale`。host 侧 `/dsh-debate/api/version` 出事实，面板徽标显示**正在跑的版本**并在磁盘更新时要求重启宿主（ADR-0018）。
   - `src/client`（辩论半区）: `DebateDialog`（2s 轮询 + 分段折叠 `TurnCard`）、`InputEntry`（草稿门控）、`useSessions.current` 透传（修 `input.right` 空 props 的根子）；停机审计块 + 镜像状态行（state 早有字段，S3 才接上）；`sections.ts` 纯分段函数（`splitSections` 从 index.tsx 抽出，可单测不拖 React/CSS）。实况只在辩论框内看（2s 轮询 `TurnCard/StreamCard`），独立实况页已删除（生产环境反向代理下基址推导打偏，只会“连接中…”）。
 - **Elements (task)**:
-  - `src/task/` 三纯模块（ADR-0025）——
+  - `src/cross_tasks/` 三纯模块（ADR-0025）——
     - `scan.ts`：结构探针（`scanParent`/`probeGit`/`mergeSameGitRoot`，`FsDeps` 注入可测）：输入 parentRoot，输出旗下直接子目录的 git 归属（`repo` 独立检出 / `part` 父库一部分 / `external` 名单或 junction 跳过 / `unknown` 拿不准让人勾）。
     - `materials.ts`：材料构建（`fillDirective`/`fillTo`/`buildMaterials` + `assertAscii`/`leftoverPlaceholders` + `handoffText`/`reportMarkdown`）：模板真身调用方显式传（`templateDir`/`directiveTemplate`/`toTemplate` 三选一），占位没填完就报错不写半成品。
     - `ensure-session.ts`：分组会话三道门（`ensureGroupedSession`，`EnsureDeps` 注入可测）：workspace 注册存在（resolve 或 create）→ `agents.create` 建会话（`meta.cwd` + preset + provider/model 显式）→ `attachSession` 挂进分组 → `followup` 派活。
@@ -185,10 +185,11 @@ flowchart TD
 | ------ | ----------- | ------ | ---------------- |
 | `src` | top-level only | 单插件单模块，无独立发包/测试节拍 | - |
 | `src/client` | top-level only | 随 host 同构建同发布（tsdown 一次出双 bundle） | - |
-| `src/debate` | top-level only | 辩论纯逻辑，与 `src/task/` 平级对等（S22）；随 host 同构建，无独立节拍 | - |
+| `src/debate` | top-level only | 辩论纯逻辑，与 `src/cross_tasks/` 平级对等（S22）；随 host 同构建，无独立节拍 | - |
 | `src/task` | top-level only | TS 纯模块随 host 同构建；与 `src/debate/` 平级对等（S22 对称） | - |
 
-- **Coverage note**: `arch` TOML 覆盖是全量的（`src` + 嵌套 `src/client`、`src/debate`、`src/task`）；测试单列 `tests/`（§7：vitest 行为门 + pytest 治理门，两扇门一处放，不再分 `test/`/`tests/` 两目录）。
+- **Coverage note**: `arch` TOML 覆盖是全量的（`src` + 嵌套 `src/client`、`src/debate`、`src/cross_tasks`）；测试单列 `tests/`（§7：vitest 行为门 + pytest 治理门，两扇门一处放，不再分 `test/`/`tests/` 两目录）。
+- **Naming (S23)**: 内部目录 `src/cross_tasks/` vs 公开面 `task_*` / `/api/task/*`——目录名取自废弃原型腾出的 `cross-tasks`（snake 式），公开面保持 `task` 前缀（breaking 边界：工具名/路由/manifest 不动）。文档里"跨仓任务"泛指功能，`cross_tasks` 特指代码目录，`cross-tasks`（kebab）仅指被废弃的原型实例目录，不混用。
 
 ### 4.4 Runtime/Concurrency View
 
@@ -282,7 +283,7 @@ sequenceDiagram
 - [ADR-0022](adr/0022-tool-cage-allowlist.md): 工具笼改白名单——deny 黑名单 fail-open（新工具默认放行），allow 白名单 fail-closed；辩手 6 项、制图员 3 项；启动交集核对（失效剔除、空集失败）、scope-local 走执行期 guard、生效笼型进已启动行 + 落盘（可选审计字段）。
 - [ADR-0023](adr/0023-session-takeover-plan-b.md): 会话接管 B 方案——忙快照 + 一键双停 + 打断可映射（旧局落盘/新局可见/面板画线）。
 - [ADR-0024](adr/0024-single-thread-fork.md): 单线分叉——单模型双角色交替线（互盲拿掉：挑战者能看到建构原文逐条反驳；载体用分叉保主会话零污染；种子照抄原生 fork；防呆 `isRouteIneffective` 豁免单线）。
-- [ADR-0025](adr/0025-task-merge.md): 增强入口与跨仓任务并入——输入框按钮改"✦ 增强"弹菜单（辩论/多仓任务），原生发送键不借用（`inputActions` 全仓只有 `setDraft`）；task 三纯模块并入 `src/task/`，路由挂 `/dsh-debate/api/task/*` 7 条，模型工具 `task_*` 5 个，launch 三道门 + issued 门照抄 launcher。
+- [ADR-0025](adr/0025-task-merge.md): 增强入口与跨仓任务并入——输入框按钮改"✦ 增强"弹菜单（辩论/多仓任务），原生发送键不借用（`inputActions` 全仓只有 `setDraft`）；task 三纯模块并入 `src/cross_tasks/`（S23 由 `src/task/` 改名，原型废弃后腾名），路由挂 `/dsh-debate/api/task/*` 7 条（公开面不动），模型工具 `task_*` 5 个（公开面不动），launch 三道门 + issued 门照抄 launcher。
 
 ## 6. Constraints and Risks
 
@@ -301,5 +302,5 @@ sequenceDiagram
 
 - **Vocabulary**: unit test 管一个 ticket，integration test 管一个 spec，system test 管两个以上 spec 或整 effort。常驻辩手 effort 的 system test 跑"真 1 轮辩论端到端"（单线分叉 + 制图，断言 transcript 结构与交替链不断）。
 - **Tools**: vitest（`tests/vitest/`，229 用例：协议纯函数 + 回合推进 + 单线分叉 + 落盘往返 + 面板分段 + task 五件：scan/materials/ensure-session/routes/panel，S18 起；2026-10-21 本地 229/229）；pytest（`tests/governance/` vendored 三件套 + `tests/<module>/` 真红线绑定，S20 起占位全部换成活门）；`arch_engine.py check`（TOML/孤儿/幻影/漂移门）；沙箱内 vitest 起不来（spawn EPERM）时用 `scripts/test-sandbox.mjs` 编译并执行同一份测试文件（垫片遇到未实现的 matcher 抛错而非静默通过）。
-- **Directory layout**: 单一 `tests/`（S20 合并，不再分 `test/`/`tests/` 两目录）：`tests/vitest/` → vitest 真用例（行为门：协议/回合/单线分叉/落盘/面板）；`tests/governance/` → 只读 vendored 门（架构门，动不得：orphan/phantom/kit 完备/meta-index）；`tests/<module>/`（`src`/`src/client`/`src/debate`/`src/task`）→ 模块真红线绑定（`test_invariants.py` 活门，不再是占位）；`docs/test_index.md` → 两扇门总目录（行为 + 治理各一行）；`.tmp/` → 沙箱替代校验脚本与真跑 state（gitignored，可清）。pytest 产物（`__pycache__/`、`.pytest_cache/`）是运行期垃圾，不在治理内（见 `.gitignore` 约束）。
+- **Directory layout**: 单一 `tests/`（S20 合并，不再分 `test/`/`tests/` 两目录）：`tests/vitest/` → vitest 真用例（行为门：协议/回合/单线分叉/落盘/面板）；`tests/governance/` → 只读 vendored 门（架构门，动不得：orphan/phantom/kit 完备/meta-index）；`tests/<module>/`（`src`/`src/client`/`src/debate`/`src/cross_tasks`）→ 模块真红线绑定（`test_invariants.py` 活门，不再是占位）；`docs/test_index.md` → 两扇门总目录（行为 + 治理各一行）；`.tmp/` → 沙箱替代校验脚本与真跑 state（gitignored，可清）。pytest 产物（`__pycache__/`、`.pytest_cache/`）是运行期垃圾，不在治理内（见 `.gitignore` 约束）。
 - **Layer-scope overrides**: 本 effort 单 spec 跨 host+client 双 bundle，其 integration gate 按 system-grade 跑（真起子 agent 读文件，见笼子验证局），已在 `docs/action-plan.md` Wave 1 注记，不静默。

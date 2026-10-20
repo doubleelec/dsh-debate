@@ -7,7 +7,7 @@ import {
   mergeSameGitRoot,
   isExternalName,
   type FsDeps,
-} from '../../src/task/scan'
+} from '../../src/cross_tasks/scan'
 
 /** fake fs:map(abs -> {dir:bool, junction?:bool}) + files(abs -> content)。 */
 function fakeFs(entries: Record<string, { dir: boolean; junction?: boolean }>, files: Record<string, string> = {}): FsDeps {

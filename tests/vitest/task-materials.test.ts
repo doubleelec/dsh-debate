@@ -9,7 +9,7 @@ import {
   reportMarkdown,
   assertAscii,
   leftoverPlaceholders,
-} from '../../src/task/materials'
+} from '../../src/cross_tasks/materials'
 
 // 模板用内联最小占位(与 cross-tasks directive_template.md/to_template.md 同口径)。
 const DIRECTIVE_TEMPLATE = [

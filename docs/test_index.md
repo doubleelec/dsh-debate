@@ -50,8 +50,8 @@ One row per test function in each `tests/<module>/test_invariants.py`. Placehold
 | `test_invariants.py::test_client_no_send_key_intercept` | src/client send key stays unwired (ADR-0025) | panel code touches `inputActions`/`actions` beyond `setDraft` |
 | `test_invariants.py::test_debate_pure_surface_exists` | src/debate pure modules keep entry points (S22) | an exported pure function disappears |
 | `test_invariants.py::test_debate_vitest_mirrors_exist` | src/debate every module keeps vitest mirror (S22) | a debate vitest file is missing |
-| `test_invariants.py::test_task_pure_surface_exists` | src/task pure modules keep entry points | an exported pure function disappears |
-| `test_invariants.py::test_task_vitest_mirrors_exist` | src/task every module keeps vitest mirror | a task vitest file is missing |
+| `test_invariants.py::test_task_pure_surface_exists` | src/cross_tasks pure modules keep entry points | an exported pure function disappears |
+| `test_invariants.py::test_task_vitest_mirrors_exist` | src/cross_tasks every module keeps vitest mirror | a cross_tasks vitest file is missing |
 
 ## Behavior suite (vitest, `tests/vitest/`)
 

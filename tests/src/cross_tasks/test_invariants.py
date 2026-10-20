@@ -1,11 +1,11 @@
-# tests/src/task/test_invariants.py — module-local red lines for src/task.
+# tests/src/cross_tasks/test_invariants.py — module-local red lines for src/cross_tasks.
 # Guards the cross-repo task pure modules: exported surface present, each one
 # carrying its vitest behavior file. Anti-hollow: real asserts, no bare pass.
 
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
-TASK = ROOT / "src" / "task"
+TASK = ROOT / "src" / "cross_tasks"
 VITEST = ROOT / "tests" / "vitest"
 
 
@@ -29,7 +29,7 @@ def test_task_pure_surface_exists():
         "reportFileName",
         "reportMarkdown",
     ):
-        assert symbol in materials, f"src/task/materials.ts missing: {symbol}"
+        assert symbol in materials, f"src/cross_tasks/materials.ts missing: {symbol}"
     ensure = _read(TASK / "ensure-session.ts")
     assert "export async function ensureGroupedSession" in ensure
 

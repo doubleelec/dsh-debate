@@ -41,9 +41,9 @@ import { BUILD_VERSION, assessVersions, type VersionFacts } from './version'
 import { fromRecord, markInterrupted, renderReport, reportRelPath, STORAGE_TABLE, STORAGE_UNIT, toRecord } from './debate/persist'
 import { findLens, type LensTemplate } from './debate/lenses'
 // 跨仓任务(task):scan/build/launch/report/collect/stop —— 从 dsh-task-launcher 移植(ADR-0025)。
-import { scanParent, defaultDeps as taskDefaultDeps } from './task/scan'
-import { buildMaterials, handoffText, reportFileName, reportMarkdown, assertAscii as assertTaskAscii, leftoverPlaceholders } from './task/materials'
-import { ensureGroupedSession, clearTempHandles as clearTaskTempHandles } from './task/ensure-session'
+import { scanParent, defaultDeps as taskDefaultDeps } from './cross_tasks/scan'
+import { buildMaterials, handoffText, reportFileName, reportMarkdown, assertAscii as assertTaskAscii, leftoverPlaceholders } from './cross_tasks/materials'
+import { ensureGroupedSession, clearTempHandles as clearTaskTempHandles } from './cross_tasks/ensure-session'
 
 /** 请求面(结构子集,镜像 explorer)。 */
 export interface DebateHttpRequest {

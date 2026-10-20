@@ -1,11 +1,13 @@
-# src/task/module.toml
-# Task launcher module: scan/build/launch/report/collect (ported from dsh-task-launcher).
+# src/cross_tasks/module.toml
+# Cross-repo task launcher: scan/build/launch/report/collect (ported from dsh-task-launcher).
 # Peer of src/debate/ (S22 symmetry): pure logic lives here, host wiring in src/index.ts.
+# S23 rename: src/task/ → src/cross_tasks/ (prototype retired, name reclaimed).
+# Public surface keeps the task_ prefix (tools/routes/manifest unchanged: breaking boundary).
 # TS sources are not counted by vendored orphan checks (only .py/.ps1 + dirs),
 # so submodules stays empty; TS files are documented in architecture.md §4.2.
 
 [module]
-name = "src/task"
+name = "src/cross_tasks"
 description = "Cross-repo task launcher: structure scan, material build, grouped session launch."
 submodules = []
 require_invariants = true
@@ -18,4 +20,4 @@ reason = "No facade: routes in src/index.ts import these modules directly (same-
 [[invariant.pure.rules]]
 id = "PURE-01"
 desc = "Three pure modules keep their exported entry points; every module keeps a vitest mirror."
-test_ref = "tests/src/task/test_invariants.py::test_task_pure_surface_exists"
+test_ref = "tests/src/cross_tasks/test_invariants.py::test_task_pure_surface_exists"
