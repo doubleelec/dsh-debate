@@ -285,3 +285,20 @@ _Avoid_: 报告，导出，总结文件，结果 md
 写盘或写文件失败时**不让辩论失败**，只把原因分别记在 `persistError` / `reportError`
 并显示出来。两条原因分开存，因为修法不同：前者查存储后端，后者查工作区权限。
 _Avoid_: 容错，静默失败，忽略错误
+
+### 接管
+
+**发起会话忙闲（parent_busy）**:
+辩论期间发起会话是空闲的（host 后台直驱，不占 turn），用户随时能说话。
+每轮边界采一次 `parent.status`，面板显示忙/闲；`null`=没采过。
+_Avoid_: 会话状态，占用，在忙
+
+**一键双停（interrupt_both）**:
+先停发起会话的 turn（`keepInbox` 留住用户刚说的话），再 abort 后台辩论。
+只做"停两边"，不做续跑。
+_Avoid_: 中断，强制停止，双杀
+
+**打断点（interrupt_mark）**:
+stop/interrupt 时 transcript 停在哪（round/seq），面板在实录对应位置画线。
+transcript 本来就全保留，这个标记是"断在哪"的映射。
+_Avoid_: 断点，中断位置，标记位

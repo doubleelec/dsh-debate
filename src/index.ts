@@ -101,6 +101,18 @@ interface DebateSession {
    */
   cageNote: string | null
   /**
+   * 打断点(S17 会话接管):stop/interrupt 时 transcript 停在哪(round/seq)。
+   * transcript 本来就全保留,缺的只是"打断点在哪"这个映射——面板照此画线。
+   * 开题前就停了记 null(没东西可指)。可选审计字段,老记录缺即 null(ADR-0021)。
+   */
+  interruptedAt: { round: number; seq: number } | null
+  /**
+   * 发起会话忙快照(S17 会话接管):每轮边界采样一次 parent.status,只记 running/闲。
+   * 落盘的是快照不是引用(恢复的局没有活着的 parent,快照只是"那时忙不忙")。
+   * 可选审计字段,老记录缺即 false(ADR-0021)。
+   */
+  parentBusy: boolean | null
+  /**
    * 实时流:正在写的各方当前 turn 流式累计文本(key=role),面板 2s 轮询即见打字机效果。
    * turn 落 transcript 即清对应项;synthesizer 走 one-shot 无流,只有进度文案。
    * kind=text 是 assistant 文本增量;kind=tools 是工具心跳(读文件阶段文本还没出来时)。
@@ -469,6 +481,8 @@ async function loadPersisted(ctx: Context): Promise<number> {
         mode: fixed.mode,
         residentError: fixed.residentError,
         cageNote: fixed.cageNote ?? null,
+        interruptedAt: fixed.interruptedAt ?? null,
+        parentBusy: fixed.parentBusy ?? null,
         streaming: {},
         decisionSummary: fixed.decisionSummary,
         reportRel: fixed.reportRel,
@@ -930,6 +944,8 @@ export async function runHostDebate(
     let stop: 'convergence' | 'saturation' | 'maxRounds' | null = null
     for (let r = 1; r <= session.config.maxRounds; r++) {
       if (signal.aborted) throw new Error('aborted')
+      // S17 接管快照:每轮边界采一次发起会话忙闲(轮询不订阅,host 侧无 parent.ctx 监听保证)。
+      try { session.parentBusy = parentBusyOf(parent) } catch { /* 采样失败不拦轮次 */ }
       // 常驻已建对则整场走交棒;中途失败即停,不中途切一次性(记忆形状不同,混跑污染 transcript)。
       let bOut: string
       let cOut: string
@@ -1138,6 +1154,38 @@ export function scopedToolGuard(execution: { name: string }): string | undefined
     return `debate-guard:subagent 类 scope-local 工具不许辩手调用(${execution.name})`
   }
   return undefined
+}
+
+/**
+ * 打断点(S17 会话接管):transcript 最后一条的位置,面板照此画线,不猜不编。
+ * 空实录记 null(开题前就停了,没东西可指)。纯函数,可单测。
+ */
+export function interruptMarkOf(
+  transcript: Array<{ round: number; seq: number }>,
+  _round: number,
+): { round: number; seq: number } | null {
+  const last = transcript[transcript.length - 1]
+  if (!last) return null
+  return { round: last.round, seq: last.seq }
+}
+
+/**
+ * 发起会话忙快照(S17 会话接管):只认 parent.status==='running',别的全算闲。
+ * parent 是外部引用不落盘,落盘的是这个快照(state 暴露,面板显示"发起会话忙/闲")。
+ * 形状未知(null/缺 status/别的值)一律按闲处理,不误报忙。纯函数,可单测。
+ */
+export function parentBusyOf(parent: unknown): boolean {
+  if (parent === null || typeof parent !== 'object') return false
+  return (parent as { status?: unknown }).status === 'running'
+}
+
+/**
+ * 一键双停的执行计划(S17 会话接管):先停 parent turn,后 abort 后台 debate。
+ * keepInbox:true 是关键——用户打断时说的那句话要留着,不清空。
+ * 纯函数,可单测;IO(调 cancel/abort)在路由里。
+ */
+export function interruptPlanOf(_parentSid: string | null): { cancelKind: 'user'; keepInbox: true } {
+  return { cancelKind: 'user', keepInbox: true }
 }
 
 /** 一次性子 agent 单步超时:6 分钟。子 agent hang 住(等人点/大海捞针)时直接失败,不无限卡轮次。 */
@@ -1963,6 +2011,8 @@ export default {
             mode: 'oneShot',
             residentError: 'not-attempted',
             cageNote: null,
+            interruptedAt: null,
+            parentBusy: null,
             streaming: {},
             decisionSummary: null,
             reportRel: null,
@@ -2043,6 +2093,8 @@ export default {
             mode: session.mode,
             residentError: session.residentError,
             cageNote: session.cageNote,
+            interruptedAt: session.interruptedAt,
+            parentBusy: session.parentBusy,
             streaming: session.streaming,
             decisionSummary: session.decisionSummary,
             // 持久化可观测性:结论文档路径 + 两条独立的失败原因(null=没出问题)。
@@ -2089,10 +2141,53 @@ export default {
           // v0.3:先 abort 后台任务,再兜底置 stopped(任务退出时自己会收 controllers)。
           try { controllers.get(session.id)?.abort() } catch { /* 忽略 */ }
           if (session.status === 'running') {
+            // S17 打断标记:停在 transcript 哪,面板照此画线。
+            session.interruptedAt = interruptMarkOf(session.transcript, session.round)
             session.status = 'stopped'
             session.updatedAt = Date.now()
+            session.flush?.()
           }
           return writeJson(res, { ok: true, id: session.id, status: session.status })
+        },
+      },
+      {
+        kind: 'exact',
+        path: '/dsh-debate/api/interrupt',
+        handler: async (req, res) => {
+          // S17 一键双停:先停 parent turn(keepInbox 留住用户刚说的话),后 abort 后台 debate。
+          // 只做"停两边",不做"续跑"——续跑是下一跳,本跳只保证停得干净、transcript 可映射。
+          const body = await readJsonBody(req)
+          const session = sessions.get(String(body.id ?? ''))
+          if (!session) return writeJson(res, { ok: false, error: 'unknown-id' })
+          const plan = interruptPlanOf(session.parentSid)
+          let parentStopped = false
+          let parentError: string | null = null
+          if (session.parentSid) {
+            try {
+              const agents = (ctx as unknown as { get(name: string): unknown }).get('agents') as
+                | { get(id: string): { cancel?: (cause: unknown, opts?: unknown) => void } | undefined }
+                | undefined
+              const parent = agents?.get(session.parentSid)
+              if (parent && typeof parent.cancel === 'function') {
+                parent.cancel({ kind: plan.cancelKind }, { keepInbox: plan.keepInbox })
+                parentStopped = true
+              } else {
+                parentError = parent ? 'no-cancel' : 'no-live-parent'
+              }
+            } catch (e) {
+              parentError = e instanceof Error ? e.message : String(e)
+            }
+          } else {
+            parentError = 'no-parent-sid'
+          }
+          try { controllers.get(session.id)?.abort() } catch { /* 忽略 */ }
+          if (session.status === 'running') {
+            session.interruptedAt = interruptMarkOf(session.transcript, session.round)
+            session.status = 'stopped'
+            session.updatedAt = Date.now()
+            session.flush?.()
+          }
+          return writeJson(res, { ok: true, id: session.id, status: session.status, parentStopped, parentError })
         },
       },
       {
@@ -2456,6 +2551,8 @@ export default {
             mode: 'oneShot',
             residentError: 'not-attempted',
             cageNote: null,
+            interruptedAt: null,
+            parentBusy: null,
             streaming: {},
             decisionSummary: null,
             reportRel: null,

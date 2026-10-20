@@ -73,6 +73,10 @@ export interface SessionRecord {
   reportRel: string | null
   /** 生效笼型(S16,可选审计字段:老记录缺它即按 null 恢复,不 bump 版本,见 ADR-0021)。 */
   cageNote?: string | null
+  /** 打断点(S17,可选审计字段:老记录缺它即按 null 恢复,不 bump 版本,见 ADR-0021)。 */
+  interruptedAt?: { round: number; seq: number } | null
+  /** 发起会话忙快照(S17,可选审计字段:老记录缺它即按 false 恢复,不 bump 版本,见 ADR-0021)。 */
+  parentBusy?: boolean | null
 }
 
 /** `toRecord` 的入参面:内存会话只要形状对得上即可(结构子类型,不比 index.ts 的私有接口耦合)。 */
@@ -105,6 +109,8 @@ export function toRecord(s: PersistableSession): SessionRecord {
     decisionSummary: s.decisionSummary,
     reportRel: s.reportRel ?? null,
     cageNote: s.cageNote ?? null,
+    interruptedAt: s.interruptedAt ?? null,
+    parentBusy: s.parentBusy ?? null,
   }
 }
 
@@ -152,6 +158,10 @@ export function fromRecord(raw: unknown): SessionRecord | null {
     decisionSummary: typeof raw.decisionSummary === 'string' ? raw.decisionSummary : null,
     reportRel: typeof raw.reportRel === 'string' ? raw.reportRel : null,
     cageNote: typeof raw.cageNote === 'string' ? raw.cageNote : null,
+    interruptedAt: isObj(raw.interruptedAt) && typeof raw.interruptedAt.round === 'number' && typeof raw.interruptedAt.seq === 'number'
+      ? { round: raw.interruptedAt.round as number, seq: raw.interruptedAt.seq as number }
+      : null,
+    parentBusy: raw.parentBusy === true ? true : raw.parentBusy === false ? false : null,
   }
 }
 

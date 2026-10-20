@@ -44,7 +44,7 @@ import {
   type DebateRound,
   type TranscriptEntry,
 } from '../src/debate'
-import { normalizeConfig, extractModelEcho, isRouteIneffective, resolveAuto, settledDefsOf, settledItemsOfSession, stepOpen, stepRound, stepSynthesize, sessions, extractHandoffConclusion, heartbeatOf, epochStopReason, epochStopDetail, stepOpenResident, stepRoundResident, turnVerdict, isRetriableTurnError, recordRoundAndJudge, driveResidentTurn, createResidentPair, toolAllowFor, resolveToolAllow, cageLabel, visibleNamesOf, scopedToolGuard, DEBATER_TOOL_ALLOW, SYNTH_TOOL_ALLOW, STEP_STALL_MS, STEP_HARD_CAP_MS } from '../src/index'
+import { normalizeConfig, extractModelEcho, isRouteIneffective, resolveAuto, settledDefsOf, settledItemsOfSession, stepOpen, stepRound, stepSynthesize, sessions, extractHandoffConclusion, heartbeatOf, epochStopReason, epochStopDetail, stepOpenResident, stepRoundResident, turnVerdict, isRetriableTurnError, recordRoundAndJudge, driveResidentTurn, createResidentPair, toolAllowFor, resolveToolAllow, cageLabel, visibleNamesOf, scopedToolGuard, interruptMarkOf, parentBusyOf, interruptPlanOf, DEBATER_TOOL_ALLOW, SYNTH_TOOL_ALLOW, STEP_STALL_MS, STEP_HARD_CAP_MS } from '../src/index'
 import { settledItemsOf } from '../src/debate'
 import { defaultLensIds, findLens, LENS_TEMPLATES } from '../src/lenses'
 import { splitSections } from '../src/client/sections'
@@ -480,7 +480,7 @@ describe('stepwise loop', () => {
       id: 't', config: r.config, status: 'running' as const, round: -1,
       transcript: [] as TranscriptEntry[], map: null, mapText: null, error: null, mirrorToChat: false,
       progress: '', mirrorCount: 0, mirrorError: null, parentSid: null, stopReason: null, rounds: [] as DebateRound[],
-      mode: 'oneShot' as const, residentError: null, cageNote: null, streaming: {}, decisionSummary: null,
+      mode: 'oneShot' as const, residentError: null, cageNote: null, interruptedAt: null, parentBusy: null, streaming: {}, decisionSummary: null,
       reportRel: null, persistError: null, reportError: null, restored: false,
       createdAt: 0, updatedAt: 0,
     }
@@ -518,7 +518,7 @@ describe('resident relay', () => {
       id: 't', config: r.config, status: 'running' as const, round: -1,
       transcript: [] as TranscriptEntry[], map: null, mapText: null, error: null, mirrorToChat: false,
       progress: '', mirrorCount: 0, mirrorError: null, parentSid: null, stopReason: null, rounds: [] as DebateRound[],
-      mode: 'oneShot' as const, residentError: null, cageNote: null, streaming: {}, decisionSummary: null,
+      mode: 'oneShot' as const, residentError: null, cageNote: null, interruptedAt: null, parentBusy: null, streaming: {}, decisionSummary: null,
       reportRel: null, persistError: null, reportError: null, restored: false,
       createdAt: 0, updatedAt: 0,
     }
@@ -1304,5 +1304,27 @@ describe('S16 白名单工具笼', () => {
     expect(typeof scopedToolGuard({ name: 'subagent' })).toBe('string')
     expect(scopedToolGuard({ name: 'read' })).toBe(undefined)
     expect(scopedToolGuard({ name: 'write' })).toBe(undefined)
+  })
+})
+
+describe('S17 会话接管·打断标记', () => {
+  const tr = (seq: number, role: 'builder' | 'challenger', round: number): TranscriptEntry => ({ seq, role, round, text: 't' })
+  it('interruptMarkOf:空实录记 null,有实录记末条位置', () => {
+    // 打断点 = transcript 最后一条的位置,面板照此画线,不猜不编。
+    expect(interruptMarkOf([], 2)).toBe(null)
+    expect(interruptMarkOf([tr(1, 'builder', 0), tr(2, 'challenger', 1)], 1)).toEqual({ round: 1, seq: 2 })
+  })
+
+  it('parentBusyOf:只认 running,别的状态一律算闲', () => {
+    // parent.status 只有 idle|running 两种(unknown 形状按闲处理,不误报忙)。
+    expect(parentBusyOf({ status: 'running' })).toBe(true)
+    expect(parentBusyOf({ status: 'idle' })).toBe(false)
+    expect(parentBusyOf({})).toBe(false)
+    expect(parentBusyOf(null)).toBe(false)
+  })
+
+  it('interruptPlanOf:一键双停的执行计划(先停 parent turn,后 abort 后台)', () => {
+    // keepInbox:true 是关键——用户打断时说的那句话要留着,不清空。
+    expect(interruptPlanOf('sid-1')).toEqual({ cancelKind: 'user', keepInbox: true })
   })
 })

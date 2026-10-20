@@ -55,7 +55,10 @@ const DICTS: Record<string, Record<string, string>> = {
     'audit.title': '停机审计', 'audit.quoted': '引用', 'audit.relay': '交棒',
     'mirror.off': '仅面板(自建 parent,无对话区可写)',
     'mirror.on': '对话区镜像', 'mirror.fail': '镜像失败',
+    'interrupt.mark': '⛔ 此处被打断(后续实录是停机前已写完的,之后无新增)',
+    'takeover.busy': '发起会话忙(用户正在说话)', 'takeover.idle': '发起会话闲',
     'btn.start': '开始辩论', 'btn.stop': '停止', 'btn.close': '关闭',
+    'btn.interrupt': '一键双停', 'btn.interruptTip': '连发起会话的 turn 一起停(用户刚说的话留着),后台辩论同步中止',
     'st.idle': '就绪', 'st.running': '辩论进行中…(host 后台直驱,开题/交锋/地图自动进面板)',
     'st.polling': '等待模型执行…', 'st.done': '已完成', 'st.failed': '失败', 'st.stopped': '已停止',
     'draft.hint': '跑完后可复制成果地图回输入框',
@@ -112,7 +115,10 @@ const DICTS: Record<string, Record<string, string>> = {
     'audit.title': 'Stop audit', 'audit.quoted': 'quoted', 'audit.relay': 'relay',
     'mirror.off': 'panel only (self-built parent, no chat surface)',
     'mirror.on': 'chat mirror', 'mirror.fail': 'mirror failed',
+    'interrupt.mark': '⛔ interrupted here (entries below were finished before stop, nothing after)',
+    'takeover.busy': 'parent busy (user talking)', 'takeover.idle': 'parent idle',
     'btn.start': 'Start debate', 'btn.stop': 'Stop', 'btn.close': 'Close',
+    'btn.interrupt': 'Interrupt both', 'btn.interruptTip': 'Stop the parent turn too (keep what the user just said), abort the background debate',
     'st.idle': 'Ready', 'st.running': 'Debate running… (host drives open → rounds → map into the panel)',
     'st.polling': 'Waiting for model…', 'st.done': 'Done', 'st.failed': 'Failed', 'st.stopped': 'Stopped',
     'draft.hint': 'Copy the result map back to the composer when done',
@@ -203,6 +209,10 @@ interface StateResp {
   rounds?: RoundAudit[]
   mode?: string
   residentError?: string | null
+  /** S17 打断点:stop/interrupt 时 transcript 停在哪,面板照此画线。null=没被打断/开题前就停。 */
+  interruptedAt?: { round: number; seq: number } | null
+  /** S17 接管快照:发起会话忙闲(轮询采样)。null=还没采过。 */
+  parentBusy?: boolean | null
   streaming?: Record<string, { round: number; kind: 'text' | 'tools'; text: string }>
   decisionSummary?: string | null
   /** 结论文档(ADR-0019):相对工作区路径 + 绝对路径;null=没写(未指定工作区或写入失败)。 */
@@ -351,6 +361,8 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
   const [persistError, setPersistError] = useState<string | null>(null)
   const [reportError, setReportError] = useState<string | null>(null)
   const [restored, setRestored] = useState(false)
+  const [interruptedAt, setInterruptedAt] = useState<{ round: number; seq: number } | null>(null)
+  const [parentBusy, setParentBusy] = useState<boolean | null>(null)
   /**
    * 版本对账(v0.4):徽标显示**后台真正在跑的版本**(host 内联常量),不是磁盘版本。
    * null = 还没拿到;verMissing = 后台没这条路由(旧宿主)或取数失败。
@@ -489,6 +501,8 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
       if (s.persistError !== undefined) setPersistError(s.persistError)
       if (s.reportError !== undefined) setReportError(s.reportError)
       if (s.restored !== undefined) setRestored(s.restored === true)
+      if (s.interruptedAt !== undefined) setInterruptedAt(s.interruptedAt)
+      if (s.parentBusy !== undefined) setParentBusy(s.parentBusy)
       if (s.status === 'done' || s.status === 'failed' || s.status === 'stopped') {
         if (timer.current !== null) { window.clearInterval(timer.current); timer.current = null }
         if (s.status === 'failed') setError(s.error ?? 'failed')
@@ -589,6 +603,18 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
     if (!sessionId) return
     try {
       await api('stop', { id: sessionId })
+      setStatus('stopped')
+      if (timer.current !== null) { window.clearInterval(timer.current); timer.current = null }
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
+  // S17 一键双停:停 parent turn(留住用户刚说的话) + abort 后台 debate。
+  const interrupt = async (): Promise<void> => {
+    if (!sessionId) return
+    try {
+      await api('interrupt', { id: sessionId })
       setStatus('stopped')
       if (timer.current !== null) { window.clearInterval(timer.current); timer.current = null }
     } catch (e) {
@@ -797,7 +823,11 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
         )}
         <div className={C('dshd-actions')}>
           {status === 'running' || status === 'polling'
-            ? <button className={C('dshd-stop')} onClick={() => { void stop() }} disabled={status === 'polling'} title={status === 'polling' ? '等模型开局:输入框回车后自动跟局' : undefined}>{tr('btn.stop')}</button>
+            ? <>
+                <button className={C('dshd-stop')} onClick={() => { void stop() }} disabled={status === 'polling'} title={status === 'polling' ? '等模型开局:输入框回车后自动跟局' : undefined}>{tr('btn.stop')}</button>
+                {/* S17 一键双停:连发起会话的 turn 一起停(用户刚说的话留着)。 */}
+                <button className={C('dshd-stop')} onClick={() => { void interrupt() }} disabled={status === 'polling'} title={tr('btn.interruptTip')}>{tr('btn.interrupt')}</button>
+              </>
             : <button className={C('dshd-start')} onClick={() => { void start() }}>{tr('btn.start')}</button>}
           <span className={C('dshd-status')}>{tr(`st.${status}`)}</span>
         </div>
@@ -814,7 +844,7 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
         )}
         {sessionId !== null && status === 'running' && (
           <div className={C('dshd-note')}>
-            <div className={C('dshd-sid')}>会话 {sessionId}</div>
+            <div className={C('dshd-sid')}>会话 {sessionId}{parentBusy === true ? ` · ${tr('takeover.busy')}` : parentBusy === false ? ` · ${tr('takeover.idle')}` : ''}</div>
           </div>
         )}
         {sessionId !== null && status === 'done' && turns.length > 0 && (
@@ -858,7 +888,13 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
         {turns.length > 0 && (
           <div className={C('dshd-feed')} ref={feedRef} onScroll={onFeedScroll}>
             {turns.map((t) => (
-              <TurnCard key={t.seq} turn={t} />
+              <span key={t.seq}>
+                <TurnCard turn={t} />
+                {/* S17 打断线:停在 transcript 哪,面板照此画线,不猜不编。 */}
+                {interruptedAt !== null && t.seq === interruptedAt.seq && (
+                  <div className={C('dshd-interrupted')}>{tr('interrupt.mark')}</div>
+                )}
+              </span>
             ))}
           </div>
         )}

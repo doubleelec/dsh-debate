@@ -76,6 +76,27 @@ describe('记录白名单(toRecord)', () => {
     delete old.cageNote
     expect(fromRecord(old)?.cageNote).toBe(null)
   })
+
+  it('S17 打断标记往返:toRecord 带 interruptedAt,老记录缺它按 null 恢复(不 bump 版本)', () => {
+    // ADR-0021:可选审计字段缺即 unknown,只审计不 gate,不 bump RECORD_VERSION。
+    const rec = toRecord(mkSession({ interruptedAt: { round: 2, seq: 5 } }))
+    expect(rec.interruptedAt).toEqual({ round: 2, seq: 5 })
+    expect(fromRecord(rec)?.interruptedAt).toEqual({ round: 2, seq: 5 })
+    // 老记录没有 interruptedAt → 宽容补 null,不判坏记录。
+    const old = { ...rec } as Record<string, unknown>
+    delete old.interruptedAt
+    expect(fromRecord(old)?.interruptedAt).toBe(null)
+  })
+
+  it('S17 接管快照往返:toRecord 带 parentBusy,老记录缺它按 null 恢复(不 bump 版本)', () => {
+    // null=没采过(false 会谎报"采过且闲"),缺字段按 null 恢复。
+    const rec = toRecord(mkSession({ parentBusy: true }))
+    expect(rec.parentBusy).toBe(true)
+    expect(fromRecord(rec)?.parentBusy).toBe(true)
+    const old = { ...rec } as Record<string, unknown>
+    delete old.parentBusy
+    expect(fromRecord(old)?.parentBusy).toBe(null)
+  })
 })
 
 describe('记录往返(toRecord → fromRecord)', () => {
