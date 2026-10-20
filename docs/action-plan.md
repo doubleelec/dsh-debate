@@ -1,6 +1,7 @@
 # dsh-debate Action Plan
 
-> Resume point: S19（单线分叉：单模型双角色交替线默认驱动）实现完成并本地验证通过——`npm run test:sandbox` 跑真实 vitest 套件 **192/192 全绿、6 个测试文件 0 跳过**、tsc/build 绿、pytest 治理门绿。
+> Resume point: Wave 5 - in flight: none - blocked: none
+> S20 落定：测试单目录 + 占位换活门 + 文档补齐，双绿 + ALL CLEAR。
 > 单线分叉后一局只产 1 个分叉会话文件（+N×3 个 one-shot 落盘，宿主行为改不了），结束扫掉只留结论文档；用户主会话零污染（转述+摘要才进对话区）。
 > 待线上真跑一局复验：fork→交替→扫盘全链（面板看 `mode:single`）+ 版本号 bump（0.13.0→0.14.0，新功能 minor）。
 > **迁到 v0.5.0 必须先重启宿主进程**：`lib/index.js` 只在宿主启动时加载。准确说不是 DSH 没有热重载，而是本 profile 没开**模块监听**（`dsh-base` 里 `hmr` 的 `root: []`，注释"module roots are opt-in"；ADR-0018 同日更正）。
@@ -16,6 +17,7 @@
 - **Final Wave (Integration & System testing)**: 跨 host+client 联调（面板停机审计块 + 对话区镜像状态 + 实况页同款 + `splitSections` 抽纯文件可测）与全门回归 + B5/B6（ADR-0016）。退出条件：治理门 + vitest 全绿，一局可读的真辩论。
 - **Wave 3 (Focus & legibility)**: 复盘一局真跑 10 轮（10.9 万字、饱和 10/10 误判、对话区灌 10.9 万字、7,015 字地图无决策陈述）后的协议 v4——未决清单焦点账本（`待决清单=` + `pendingStalled`）、新增判定只看「本轮变化」段、篇幅预算（1800 字）、对话区镜像摘要（`chatDigest`）、收尾陈述（制图「决策摘要」+ `buildFallbackSummary` 兜底）+ 面板收尾陈述块（ADR-0017）。退出条件：聚焦/有效/易懂三项各有实测读数支撑，一局跑完对话区直接给出下一步。
 - **Wave 4 (Durability & verification)**: 结论落盘（ADR-0019）——整局记录进 KV 单元 `dsh_debate`、启动恢复、结论文档写 `<工作区>/docs/debates/`、镜像报路径、面板可观测；外加把"从不运行的测试套件"救回来（`npm run test:sandbox`）。退出条件：重启后旧 id 仍能取到结论，且回归有可重复的入口而不是一次性脚本。
+- **Wave 5 (Test merge & doc completion)**: 测试单目录 + 占位换活门 + 文档补齐（S20）——`test/` 并入 `tests/vitest/`，三占位换 10 活门 + 四红线落 TOML，architecture.md 补 4.1/4.2/4.6。退出条件：vitest + pytest 双绿，arch check ALL CLEAR。
 
 ## Serial constraints
 
@@ -78,3 +80,4 @@
 | S18 | 增强入口与跨仓任务并入(ADR-0025):launcher 三纯模块移植 src/task/ + /api/task/* 7 路由 + task_* 5 工具(host)+ 输入框增强菜单 + TaskDialog 三步面板 + src/client/task.ts 纯逻辑(client,原生发送键不借用) | done (2026-10-20) | 真实 suite 229/229(
 pm run test:sandbox,含新增 task 22 + 增强 label 1)+ tsc/build 绿 + pytest 治理门 17 passed |
 | S19 | 单线分叉(ADR-0024):单模型双角色交替线默认驱动——fork 发起会话(seed=当前上下文,isSeeded=true,模型锁定发起会话当前模型),建构写完挑战接着写(串行,无互盲);失败回退常驻(开题互盲),再失败回退 one-shot(失败链留痕`single:…; resident:…`);种子补 forked closer(照抄 openTurnClosers);结束扫分叉文件只留结论文档(sweepError/sweptSessions 落盘,可选审计字段不 bump 版本);防呆 isRouteIneffective 豁免单线 | done (2026-10-20) | 真实 vitest 套件 **192/192**(新增 6 条:fork 种子前缀+end-seed/开尾 closer/分叉血统+种子透传+模型锁定/串行交替 transcript 同形/mode 三态往返/sweep 落盘往返)+ 双轴 code-review 复审(Spec 3 硬伤全收:扫盘/模型锁定/失败链; SingleThread 包 ResidentAgent 去 cast)+ tsc/build 绿 |
+| S20 | 测试合并与文档补全(arch reconcile):`test/` 11 文件并入 `tests/vitest/`(import 深度+1,动态 import 一处,tsconfig/vitest.config/test-sandbox.mjs 跟进);三占位换 10 活门(src 5/client 3/task 2,require_invariants=true×3,WIRE-01/CAGE-01/PANEL-01/PURE-01 四红线落 TOML);test_index 从治理目录扩为两扇门总目录(行为 11 行);architecture.md 补 Scope 双功能判据/4.1 三态载体/4.2 分层+Legend/4.6 安全视图/§7 单一 tests | done (2026-10-21) | vitest 229/229 + pytest 26 passed/5 skipped + arch check ALL CLEAR |

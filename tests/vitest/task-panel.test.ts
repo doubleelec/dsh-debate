@@ -6,7 +6,7 @@ import {
   validateTaskBuild,
   loadTaskPrefs,
   saveTaskPrefs,
-} from '../src/client/task'
+} from '../../src/client/task'
 
 describe('parseInvolvedLines', () => {
   it('空行/#注释忽略,首见序去重', () => {

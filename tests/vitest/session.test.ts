@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { apply } from '../src/client/index'
-import { resolveSessionId } from '../src/client/session'
+import { apply } from '../../src/client/index'
+import { resolveSessionId } from '../../src/client/session'
 
 describe('session-scoped input identity', () => {
   it('registers an input-right inject that forwards the active session ID', () => {

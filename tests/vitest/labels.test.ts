@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { roleName, roundLabel, roundSummary, stopKey, type TrFn } from '../src/client/labels'
+import { roleName, roundLabel, roundSummary, stopKey, type TrFn } from '../../src/client/labels'
 
 // 最小中文 tr:只覆盖 labels 用到的 key。
 const tr: TrFn = (k, vars) => {

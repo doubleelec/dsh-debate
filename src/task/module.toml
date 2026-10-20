@@ -7,7 +7,14 @@
 name = "src/task"
 description = "Cross-repo task launcher: structure scan, material build, grouped session launch."
 submodules = []
+require_invariants = true
 
 [public_api]
 exposed = []
 reason = "No facade: routes in src/index.ts import these modules directly (same-process wiring)."
+
+# Semantic red lines for the task pure modules (S20: placeholder replaced by live binds).
+[[invariant.pure.rules]]
+id = "PURE-01"
+desc = "Three pure modules keep their exported entry points; every module keeps a vitest mirror."
+test_ref = "tests/src/task/test_invariants.py::test_task_pure_surface_exists"

@@ -5,7 +5,7 @@ Human-facing catalog of the governance test suite. This file answers two questio
 1. **What does a given test enforce?** — look up any row below.
 2. **Is coverage complete?** — every governance test must have exactly one row; the meta-guard `test_governance_tests_are_indexed` fails on any gap in either direction.
 
-Scope: the **governance suite only** — the global kit tests below plus every module-local `tests/<module>/test_invariants.py`. Unit tests are out of scope.
+Scope: the **governance suite** (global kit + module-local `test_invariants.py`) **plus the vitest behavior suite** (`tests/vitest/`) — both gates in one catalog. Run them with `npm run test:sandbox` (vitest, 229) and `pytest tests/ -q` (governance + invariants). Unit tests are out of scope.
 
 ## Global governance kit
 
@@ -33,19 +33,44 @@ Scope: the **governance suite only** — the global kit tests below plus every m
 | `test_architecture_kit_complete.py::test_governed_modules_completeness` | governance-kit completeness | a module lacks mandatory `module.toml` sections or its `tests/<module>/` directory |
 | `test_architecture_kit_complete.py::test_governance_tests_are_indexed` | index freshness (meta-guard) | a governance test is missing from this file, or a row points at a test that no longer exists |
 
-## Module-local invariants
+## Module-local invariants (live red lines, S20)
 
-One row per test function in each `tests/<module>/test_invariants.py`. Use the file basename in the first column and name the owning module in the *Enforces* column when the same function name exists in several modules.
+One row per test function in each `tests/<module>/test_invariants.py`. Placeholders retired in S20: every row below binds a `test_ref` in its module's `module.toml` and fails on real drift.
 
 | Test | Enforces | Fails when |
 |:---|:---|:---|
-| `test_invariants.py::test_module_invariants_placeholder` | src placeholder — TS 行为门在 `test/debate.test.ts` (vitest), 本镜像只满足 kit 完备门 | never; 换成真实红线绑定时同步改本行 |
-| `test_invariants.py::test_task_module_invariants_placeholder` | src/task placeholder — TS 行为门在 `test/task-*.test.ts` (vitest), 本镜像只满足 kit 完备门 | never; 换成真实红线绑定时同步改本行 |
-| `test_invariants.py::test_client_module_invariants_placeholder` | src/client placeholder — TS 行为门在 `test/session.test.ts` + `test/dialogLayout.test.ts` (vitest), 本镜像只满足 kit 完备门 | never; 换成真实红线绑定时同步改本行 |
+| `test_invariants.py::test_src_single_thread_seam_exists` | src single-thread fork seam (ADR-0024) | a seam symbol (create/step/sweep) disappears from host |
+| `test_invariants.py::test_src_debater_tool_allowlist_is_closed` | src debater allowlist closed at six tools (ADR-0022) | the allowlist gains/loses an entry |
+| `test_invariants.py::test_src_synth_tool_allowlist_is_closed` | src synth allowlist closed at three tools (ADR-0022) | the allowlist gains/loses an entry |
+| `test_invariants.py::test_src_registered_tools_match_manifest` | src registration matches manifest tools | registration and `dsh.plugin.json` disagree |
+| `test_invariants.py::test_src_task_routes_are_seven` | src task wiring keeps seven routes (ADR-0025) | a task route is added/removed/renamed |
+| `test_invariants.py::test_client_pure_surface_exists` | src/client pure modules keep entry points | an exported pure function disappears |
+| `test_invariants.py::test_client_task_dialog_wired` | src/client TaskDialog wired to task calls | dialog or a task/* call disappears |
+| `test_invariants.py::test_client_no_send_key_intercept` | src/client send key stays unwired (ADR-0025) | panel code touches `inputActions`/`actions` beyond `setDraft` |
+| `test_invariants.py::test_task_pure_surface_exists` | src/task pure modules keep entry points | an exported pure function disappears |
+| `test_invariants.py::test_task_vitest_mirrors_exist` | src/task every module keeps vitest mirror | a task vitest file is missing |
+
+## Behavior suite (vitest, `tests/vitest/`)
+
+One row per file (each file's cases are the gate). Run: `npm run test:sandbox`.
+
+| Test file | Enforces | Fails when |
+|:---|:---|:---|
+| `debate.test.ts` | 协议纯函数 + 回合推进 + 单线分叉 + 笼子交集 + 打断计划 | 判定/收敛/停机/工具笼任一语义漂移 |
+| `persist.test.ts` | 落盘白名单 + 宽容反序列化 + 文件名净化 + markdown 结构 + mode 三态 + sweep | 历史局读不出或文档排布坏掉 |
+| `version.test.ts` | 构建期内联版本 + 三方对账 + stale 判据 | 徽标显示的版本不代表真实程序 |
+| `session.test.ts` | 会话 id 归一 + 增强入口 label | 面板开错会话或入口按钮回退 |
+| `dialogLayout.test.ts` | 对话框尺寸钳制 + 高度持久化 | 面板尺寸越界或记忆丢失 |
+| `labels.test.ts` | 角色名 + 轮次标签/小结 + stopKey | 面板人话标签漂移 |
+| `task-scan.test.ts` | 跨仓结构探针 + git 归属判定 | 仓识别错（repo/part/external 误判）|
+| `task-materials.test.ts` | directive/to 模板填充 + ASCII 门 + 回信汇总 | 材料缺占位或混入非 ASCII |
+| `task-ensure-session.test.ts` | 分组会话三道门 + 临时会话回收 | 会话拉错仓或泄漏 |
+| `task-routes.test.ts` | task 七路由 + 模型工具参数校验 | 路由/工具与纯模块脱节 |
+| `task-panel.test.ts` | 面板任务纯逻辑（解析/校验/偏好） | 表单校验或偏好读写坏掉 |
 
 ## Maintenance rules
 
-1. **One row per governance test.** When a test is added or renamed, update this file in the same session — `test_governance_tests_are_indexed` fails otherwise.
-2. **Reference format:** `<file>.py::<function>` in the first column, matching the `test_ref` convention used by invariant rules.
+1. **One row per test.** When a test is added or renamed, update this file in the same session — `test_governance_tests_are_indexed` fails otherwise (governance rows are meta-guarded; behavior rows are convention, checked in review).
+2. **Reference format:** `<file>.py::<function>` for bound rows (matches `test_ref`); `<file>.test.ts` for behavior rows.
 3. **Never delete a row to silence the guard.** If its test is gone, the rule it enforced is gone too — remove the rule explicitly (TOML entry + row together) or restore the test.
 4. **Use this table to audit coverage** before adding a new invariant: a rule whose red line has no row here (and no `test_ref`) is documentation-only, not governance.

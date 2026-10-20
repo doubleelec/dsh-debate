@@ -14,7 +14,20 @@ submodules = [
     "client",
     "task",
 ]
+require_invariants = true
 
 [public_api]
 exposed = []
 reason = "No cross-module facade: single-module plugin, host/client wired via dsh.plugin.json and cordis.patch.yml."
+
+# Semantic red lines for the host half (S20: placeholders replaced by live binds).
+# Host route/tool surface must not drift without a guard failing.
+[[invariant.wiring.rules]]
+id = "WIRE-01"
+desc = "Host route/tool/task-route surface is locked: 9 debate routes, 7 task routes, 10 tools."
+test_ref = "tests/src/test_invariants.py::test_src_registered_tools_match_manifest"
+
+[[invariant.cage.rules]]
+id = "CAGE-01"
+desc = "Debater allowlist is exactly the six read-only tools, synth three; closed by construction."
+test_ref = "tests/src/test_invariants.py::test_src_debater_tool_allowlist_is_closed"

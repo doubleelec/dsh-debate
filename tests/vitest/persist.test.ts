@@ -11,8 +11,8 @@ import {
   toRecord,
   type PersistableSession,
   type ReportInput,
-} from '../src/persist'
-import type { DebateConfig, DebateRound, TranscriptEntry } from '../src/debate'
+} from '../../src/persist'
+import type { DebateConfig, DebateRound, TranscriptEntry } from '../../src/debate'
 
 const cfg = (): DebateConfig => ({
   builder: { provider: 'p', model: 'm' },

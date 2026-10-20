@@ -6,7 +6,14 @@
 name = "src/client"
 description = "Browser debate panel: overlay dialog, foldable transcript, session wiring."
 submodules = []
+require_invariants = true
 
 [public_api]
 exposed = []
 reason = "No facade: bundled via lib/client.js and slot registration in apply()."
+
+# Semantic red lines for the panel half (S20: placeholder replaced by live binds).
+[[invariant.panel.rules]]
+id = "PANEL-01"
+desc = "TaskDialog stays wired to task/* calls; send path beyond setDraft stays unwired (ADR-0025)."
+test_ref = "tests/src/client/test_invariants.py::test_client_task_dialog_wired"

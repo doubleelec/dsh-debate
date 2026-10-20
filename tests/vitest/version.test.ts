@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assessVersions, BUILD_VERSION, isClientStale } from '../src/version'
+import { assessVersions, BUILD_VERSION, isClientStale } from '../../src/version'
 
 describe('version truth', () => {
   const START = 1_700_000_000_000
@@ -53,7 +53,7 @@ describe('version truth', () => {
   })
 
   it('集成:真实磁盘 manifest 与内联版本一致 → 不 stale(刚构建完就该是健康态)', async () => {
-    const { versionFacts } = await import('../src/index')
+    const { versionFacts } = await import('../../src/index')
     const facts = await versionFacts()
     // 内联版本必须等于磁盘 manifest 版本,否则"版本号代表真实程序版本"就不成立。
     expect(facts.running).toBe(BUILD_VERSION)

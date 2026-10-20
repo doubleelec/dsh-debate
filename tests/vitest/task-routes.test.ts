@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import pluginDefault from '../src/index'
+import pluginDefault from '../../src/index'
 
 const { apply } = pluginDefault as unknown as { apply(ctx: never): void }
 

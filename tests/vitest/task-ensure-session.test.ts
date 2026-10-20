@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ensureGroupedSession, tempSessionHandles, clearTempHandles } from '../src/task/ensure-session'
+import { ensureGroupedSession, tempSessionHandles, clearTempHandles } from '../../src/task/ensure-session'
 
 /** fake agents:record create 参数,回可 followup 的假 agent。 */
 function fakeAgents(): {

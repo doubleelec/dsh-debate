@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clampDialogHeight, clampDialogWidth, clampStoredHeight, clampStoredWidth, loadManualHeight, loadManualWidth, saveManualHeight, saveManualWidth } from '../src/client/dialogLayout'
+import { clampDialogHeight, clampDialogWidth, clampStoredHeight, clampStoredWidth, loadManualHeight, loadManualWidth, saveManualHeight, saveManualWidth } from '../../src/client/dialogLayout'
 
 describe('clampDialogHeight', () => {
   it('rounds and clamps the manual height into range', () => {

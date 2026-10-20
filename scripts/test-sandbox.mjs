@@ -6,7 +6,7 @@
  * `exec("net use")`,而沙箱阻断子进程管道 stdio → `spawn EPERM`(全局 AGENTS.md §五)。
  * 结果是"测试套件存在,但从不运行",这比没有测试更危险。
  *
- * 本脚本**不另写断言**:它把 tests/ 里那一份真实测试文件编译成 CJS 后用 Node 直接跑。
+ * 本脚本**不另写断言**:它把 tests/vitest/ 里那一份真实测试文件编译成 CJS 后用 Node 直接跑。
  * 平行断言会和真实用例漂移,那才是最坏的情况。垫片只实现用例实际用到的 matcher,
  * 遇到没实现的 matcher **抛错**(而不是静默通过),所以"垫片下全绿"不会因用错的
  * matcher 而被污染——这条已经被验证过:最初缺 `.rejects`/`not.toThrow`/`toBeCloseTo`
@@ -135,7 +135,7 @@ fs.mkdirSync(out, { recursive: true })
 
 // 收 .ts 与 .tsx:客户端入口是 .tsx,对应测试要能一起跑(否则覆盖率会静默缩水)。
 const srcFiles = walk(path.join(root, 'src'), (p) => p.endsWith('.ts') || p.endsWith('.tsx'))
-const testFiles = walk(path.join(root, 'test'), (p) => p.endsWith('.test.ts'))
+const testFiles = walk(path.join(root, 'tests/vitest'), (p) => p.endsWith('.test.ts'))
 
 const tsc = path.join(root, 'node_modules', 'typescript', 'lib', 'tsc.js')
 const args = [
@@ -155,9 +155,10 @@ if (!fs.existsSync(path.join(out, 'src', 'index.js'))) {
   process.exit(1)
 }
 
-// 仓库是 type:module,编译产物要按 CJS 跑,所以给 src/ 与 test/ 各放一份就近标记
-// (不能覆盖 out/package.json——version.ts 会 require 它当数据读)。
-for (const d of ['src', 'test']) {
+// 仓库是 type:module,编译产物要按 CJS 跑,所以给 src/ 与 tests/ 下每层各放一份就近标记
+// (不能覆盖 out/package.json——version.ts 会 require 它当数据读;
+// tests/vitest/ 的产物向上找最近的 package.json,是 tests/ 那份)。
+for (const d of ['src', 'tests', 'tests/vitest']) {
   fs.writeFileSync(path.join(out, d, 'package.json'), '{"type":"commonjs"}')
 }
 // import.meta.url 在 CJS 里是语法错误:换成等价的文件 URL。
