@@ -31,7 +31,7 @@ export interface TextContentBlock {
   [key: string]: unknown
 }
 import type { DebateConfig, DebateMap, DebateRound, DebateStatus, TranscriptEntry } from './debate'
-import { DEFAULT_CONFIG, normalizeAnswer, SETTLED_DEFS_MAX, isOneSidedAccept, isTopicLoop, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscriptForSynthesizer, toDebateRound, roundConverged, convergedAtCap, isSaturated, pendingStalled, slimHandoff, formatPendingFocus, sectionText, parseAnswer, parseGaps, gapAge, extractDecisionSummary, buildFallbackSummary, DECISION_SECTION } from './debate'
+import { DEFAULT_CONFIG, normalizeAnswer, isContinuationHint, SETTLED_DEFS_MAX, isOneSidedAccept, isTopicLoop, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscriptForSynthesizer, toDebateRound, roundConverged, convergedAtCap, isSaturated, pendingStalled, slimHandoff, formatPendingFocus, sectionText, parseAnswer, parseGaps, gapAge, extractDecisionSummary, buildFallbackSummary, DECISION_SECTION } from './debate'
 export { isTopicLoop }
 export { renderTranscriptForSynthesizer, answerShapeOf, answerSpecOf } from './debate'
 import { BUILD_VERSION, assessVersions, type VersionFacts } from './version'
@@ -224,16 +224,20 @@ export async function versionFacts(): Promise<VersionFacts> {
 }
 
 /**
- * 本轮焦点块(v4 焦点账本 + S13 定义锁存):把上一轮挑战者自报的未决清单原样带进下一轮 prompt。
- * 清单为空 / 上一轮没提供(null)时不加约束——没有账本就别硬编一句空话。
+ * 本轮焦点块(v4 焦点账本 + S13 定义锁存 + S15 已决账本):把上一轮挑战者自报的未决清单
+ * 原样带进下一轮 prompt,外加两本账——已接受判据(锁了什么尺子) + 已决事项(定了什么结论)。
+ * 清单为空 / 上一轮没提供(null)时不加清单约束,但两本账照样带(收尾轮清单空了,锁和结论还在)。
  * 锁存定义:从历史 accepted 轮里收"判据"行(挑战者 concession 里"接受…定义…"的写法),
  * 原样带进 prompt,挑战者只能挑战判据本身,不能悄悄换尺重算。
+ * 已决事项同理:concession 里接受的非定义行,已决不得重开,除非给反例。
  */
 export function focusBlockOf(session: DebateSession): string {
   const last = session.rounds[session.rounds.length - 1]
   const items = last?.pendingItems
-  if (!items || items.length === 0) return ''
-  return formatPendingFocus(items, settledDefsOf(session))
+  const defs = settledDefsOf(session)
+  const settled = settledItemsOfSession(session)
+  if ((!items || items.length === 0) && defs.length === 0 && settled.length === 0) return ''
+  return formatPendingFocus(items ?? [], defs, settled)
 }
 
 /**
@@ -261,6 +265,21 @@ export function settledDefsOf(session: DebateSession): string[] {
     }
   }
   return defs
+}
+
+/** 已决事项条数上限:与判据账本同口径(账本要短,先接受的先记)。 */
+export const SETTLED_ITEMS_MAX = 3
+
+/**
+ * 已决事项收集(S15 中间结论账本):concession 段里"接受…"但**不是**判据定义的行。
+ * 三本账分工:未决清单=还要补什么;已接受判据=锁了什么尺子;已决事项=定了什么结论。
+ * 线上实测:R16"轮=2h 人在场"、R18 两合取,两边都不收,下一轮 invisible,R19 换个角度重开。
+ * 定义行归 settledDefsOf,不进这里(两本账不重账,判据见 debate.ts isSettledDefLine)。
+ * 纯收集缝在 debate.ts(同名函数,收 transcript 数组);这里是 session 版,供 focusBlockOf 用。
+ */
+export function settledItemsOfSession(session: DebateSession): string[] {
+  const { settledItemsOf } = require('./debate') as typeof import('./debate')
+  return settledItemsOf(session.transcript)
 }
 
 /**
@@ -585,9 +604,12 @@ export function normalizeConfig(body: Record<string, unknown>): { config: Debate
 /**
  * 执行时自动判断:从 parent 会话提炼问题/题型/lens/背景。
  * hint 为触发语里模型转述的用户意图(可空);hint 为空则取最近一条 user 消息当问题。
+ * hint 是承接语(只有指代、没有实质问题,如"就以上问题继续辩论")则视为无 hint:
+ * question 本该是对用户意图理解后的清晰描述,不是一句指代(S15)。
  */
 export function resolveAuto(events: { type: string; data?: unknown }[], hint: string): NonNullable<DebateConfig['auto']> {
-  const question = hint.trim() !== '' ? hint.trim() : lastUserText(events)
+  const usableHint = isContinuationHint(hint) ? '' : hint.trim()
+  const question = usableHint !== '' ? usableHint : lastUserText(events)
   const { questionType, lenses } = classifyQuestion(question)
   const context = extractSessionContext(events)
   return { question, questionType, lenses, context }

@@ -155,6 +155,20 @@ _Avoid_: 答案格式，结论模板，输出形状
 制图员读运行日志就会总结过程——它要读的是论证，不是机器信号。
 _Avoid_: 实录过滤，transcript 清洗，输入预处理
 
+**问题承接语消解（question_continuation）**:
+`question` 是对用户意图理解后的清晰描述，不是一句指代。`hint` 只有指代没有实质问题
+（如"就以上问题继续辩论"）时视为无 hint（`isContinuationHint`），回落找真正的用户问题
+（`lastUserText`）。`slugify` 同步清承接语外壳做纵深（清完剩空回落 `debate`）。
+_Avoid_: 指代消解，问题补全，hint 回落
+
+**已决事项（settled_item）**:
+三本账的第三本：`concession` 里接受的非定义行（如"轮=2h 人在场"），定了什么结论。
+未决清单=还要补什么；已接受判据=锁了什么尺子；已决事项=定了什么结论。
+`settledItemsOf`（纯函数，收 transcript 数组）+ `settledItemsOfSession`（session 版，
+供 `focusBlockOf` 用），随焦点块带进下一轮，已决不得重开（除非给反例）。
+定义行归判据账本，两本账不重账（同源判据 `isSettledDefLine`）。
+_Avoid_: 已决结论，中间结论，定论账本
+
 **镜像摘要（chat_digest）**:
 辩论发言进对话区时的压缩形式：只取「结论摘要」前几行 + 当前答案，全文留在 transcript。
 对话区是读结论的地方，逐字直播归面板。

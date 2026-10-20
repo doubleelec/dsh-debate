@@ -50,8 +50,11 @@ export function isConverged(aAgree: boolean, bAgree: boolean, aAnswer: string, b
  * v6: + 制图 prompt 按题型给结论形状 + 结论/收敛状况拆行(`buildSynthesizerPrompt` 第三个参数)
  *      + answer= 定义收窄(普通读者一句话答原问题;只有选择题写"用户现在就要动手选什么")
  *      + 制图输入清洗(`renderTranscriptForSynthesizer`:去 host 协议行,只留论证)。
+ * v7: + question 承接语消解(`isContinuationHint`:hint 只有指代没有实质问题时视为无 hint,
+ *      回落找真正的用户问题;question 是对意图理解后的清晰描述,不是一句指代)
+ *      + 已决事项账本(`settledItemsOf` + 焦点块第三段:中间结论已决不得重开)。
  */
-export const STOP_PROTOCOL_VERSION = 6
+export const STOP_PROTOCOL_VERSION = 7
 
 /**
  * agree 自报解析:只认显式接受(大小写/全角/中文容忍)。
@@ -98,6 +101,28 @@ export function answerSpecOf(questionType: QuestionType): string {
   }
   return `${base}`
 }
+
+/**
+ * 承接语判定(S15):hint 里只有指代、没有实质问题时,视为无 hint。
+ * 线上实测:用户随手写"就以上问题继续辩论",hint 直接当整局问题,
+ * 文件名/制图/结论全跟着错——question 本该是对用户意图理解后的清晰描述,不是一句指代。
+ * 判定口径:去掉承接语外壳后,剩下的实质部分超短(≤4 字)或为空 → 是承接语,回落找真正的用户问题。
+ * 实质问题(如"主库延迟高怎么办")不受影响:去外壳后还剩很长,不误杀。
+ */
+export function isContinuationHint(hint: string): boolean {
+  const t = hint.trim()
+  if (t === '') return false
+  const rest = t
+    .replace(/^(就|请|那请|那么|那|请针对|针对|关于|对于|围绕|围绕着)+/u, '')
+    .replace(/(以上|上述|前面|之前|刚才|刚刚|先前)(的|这个问题|这些问题|那个问题|讨论|内容|话题)?/gu, '')
+    .replace(/(问题|话题|讨论|内容)/gu, '')
+    .replace(/(继续|接着|再|重新|新开|另起|深入|展开|细化)(辩论|辩一轮|辩一下|讨论|聊聊|说说|讲讲|来一轮|一轮|一下)?/gu, '')
+    .replace(/[\s，。、；;,.!！?？:：…—\-–]+/gu, '')
+    .trim()
+  if (rest === '') return true
+  // 去完外壳还剩很短 → 指代(如"这个继续"),不是实质问题。
+  return Array.from(rest).length <= 4
+}
 /** 未决清单单项上限(超长截断,防单条吃掉整个 prompt 预算)。 */
 export const PENDING_ITEM_MAX_LEN = 60
 
@@ -140,6 +165,47 @@ export function parsePendingItems(text: string): string[] | null {
   return items.slice(0, PENDING_MAX_ITEMS)
 }
 
+/** 已决事项收集的纯函数缝:host 侧 settledItemsOf 的同源判据,单测与实现共用。 */
+export function isSettledDefLine(t: string): boolean {
+  return /(定义|口径|尺子|尺度|判据|判定线)/.test(t)
+}
+
+/**
+ * 已决事项收集(S15 中间结论账本):concession 段里"接受…"但**不是**判据定义的行。
+ * 三本账分工:未决清单=还要补什么;已接受判据=锁了什么尺子;已决事项=定了什么结论。
+ * 线上实测:R16"轮=2h 人在场"、R18 两合取,两边都不收,下一轮 invisible,R19 换个角度重开。
+ * 定义行归 settledDefsOf,不进这里(两本账不重账,同源判据见 isSettledDefLine)。
+ */
+export function settledItemsOf(transcript: Array<{ role: string; text: string }>): string[] {
+  const items: string[] = []
+  const seen = new Set<string>()
+  for (const e of transcript) {
+    if (e.role !== 'challenger' && e.role !== 'builder') continue
+    const m = e.text.match(/concession([\s\S]*?)(?=\n##\s|\nMODEL:|$)/i)
+    if (!m) continue
+    for (const line of m[1].split('\n')) {
+      const t = line.trim().replace(/^[-*\d]+\s*[)）.、:：]?\s*/, '')
+      if (!/接受/.test(t) || isSettledDefLine(t)) continue
+      const key = t.slice(0, 40)
+      if (key === '' || seen.has(key)) continue
+      seen.add(key)
+      items.push(t.length > 80 ? `${t.slice(0, 80)}…` : t)
+      if (items.length >= SETTLED_ITEMS_MAX) return items
+    }
+  }
+  return items
+}
+
+/** 已决事项条数上限:与判据账本同口径(账本要短,先接受的先记)。 */
+export const SETTLED_ITEMS_MAX = 3
+
+/**
+ * concession 行清洗:去列表符,取正文。
+ */
+function cleanConcessionLine(line: string): string {
+  return line.trim().replace(/^[-*\d]+\s*[)）.、:：]?\s*/, '')
+}
+
 /** 未决清单归一化(比停滞用):去空白标点,排序,便于逐条比对)。 */
 export function normalizePending(items: string[]): string[] {
   return items.map((s) => normalizeAnswer(s)).filter((s) => s !== '').sort()
@@ -163,12 +229,15 @@ export function pendingStalled(rounds: DebateRound[], window = 2): boolean {
  * 定义锁存(线上 20 轮局的教训):已接受的判据定义(如"横连贯=结构尺")
  * 必须原样带进下一轮 prompt——挑战者只能挑战"尺子本身错了"(给反例),
  * 不能悄悄换一把尺子重算(同一格子四轮换三种含义,挑战永不枯竭)。
- * 锁存的定义由 host 从"接受"轮里收,纯函数只管拼装。
- * 空清单时只剩锁存块(不清零定义:收尾轮清单空了,判据还在,照样锁)。
+ * 已决事项(S15):concession 里接受的非定义行(如"轮=2h 人在场")同样带进 prompt,
+ * 已决不得重开,除非给反例——中间结论不再 invisible。
+ * 锁存的定义与已决都由 host 从"接受"轮里收,纯函数只管拼装。
+ * 空清单时只剩锁存/已决块(不清零:收尾轮清单空了,判据和结论还在,照样锁)。
  */
-export function formatPendingFocus(items: string[], settledDefs: string[] = []): string {
+export function formatPendingFocus(items: string[], settledDefs: string[] = [], settledItems: string[] = []): string {
   const defs = settledDefs.map((s) => s.trim()).filter((s) => s !== '')
-  if (items.length === 0 && defs.length === 0) return ''
+  const settled = settledItems.map((s) => s.trim()).filter((s) => s !== '')
+  if (items.length === 0 && defs.length === 0 && settled.length === 0) return ''
   const lines: string[] = []
   if (items.length > 0) {
     const list = items.map((s, i) => `${i + 1}. ${s}`).join('\n')
@@ -184,6 +253,13 @@ export function formatPendingFocus(items: string[], settledDefs: string[] = []):
       `已接受判据(锁存,不得换尺重算):`,
       ...defs.map((d, i) => `  ${i + 1}. ${d}`),
       `违反即无效:只能挑战"判据本身错了"(给反例+替代判据),不能用另一把尺子悄悄重算同一格。`,
+    )
+  }
+  if (settled.length > 0) {
+    lines.push(
+      `已决事项(不得重开,除非给反例):`,
+      ...settled.map((d, i) => `  ${i + 1}. ${d}`),
+      `违反即无效:已决结论只能用反例推翻,不能换个角度悄悄重开同一条。`,
     )
   }
   if (items.length > 0) {

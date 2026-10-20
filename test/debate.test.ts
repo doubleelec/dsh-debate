@@ -33,6 +33,7 @@ import {
   stripDecisionSummary,
   buildSynthesizerPrompt,
   renderTranscriptForSynthesizer,
+  isSettledDefLine,
   DECISION_SECTION,
   PENDING_MAX_ITEMS,
   convergedAtCap,
@@ -43,7 +44,8 @@ import {
   type DebateRound,
   type TranscriptEntry,
 } from '../src/debate'
-import { normalizeConfig, extractModelEcho, isRouteIneffective, resolveAuto, stepOpen, stepRound, stepSynthesize, sessions, extractHandoffConclusion, heartbeatOf, epochStopReason, epochStopDetail, stepOpenResident, stepRoundResident, turnVerdict, isRetriableTurnError, recordRoundAndJudge, driveResidentTurn, createResidentPair, STEP_STALL_MS, STEP_HARD_CAP_MS } from '../src/index'
+import { normalizeConfig, extractModelEcho, isRouteIneffective, resolveAuto, settledDefsOf, settledItemsOfSession, stepOpen, stepRound, stepSynthesize, sessions, extractHandoffConclusion, heartbeatOf, epochStopReason, epochStopDetail, stepOpenResident, stepRoundResident, turnVerdict, isRetriableTurnError, recordRoundAndJudge, driveResidentTurn, createResidentPair, STEP_STALL_MS, STEP_HARD_CAP_MS } from '../src/index'
+import { settledItemsOf } from '../src/debate'
 import { defaultLensIds, findLens, LENS_TEMPLATES } from '../src/lenses'
 import { splitSections } from '../src/client/sections'
 
@@ -289,6 +291,20 @@ describe('resolveAuto', () => {
     ], '')
     expect(auto?.question).toBe('架构满足指标吗')
     expect(auto?.questionType).toBe('review')
+  })
+  it('hint 是承接语则视为无 hint,回落到真正的用户问题', () => {
+    // 线上实测:用户在输入框随手写"就以上问题继续辩论",hint 直接当问题,
+    // 整局问题/文件名/结论全跟着错(文件名"就以上问题继续辩论",内容看不出在辩管理架构)。
+    const events = [
+      { type: 'user/message', data: { content: '怎样的管理架构更适合 agent 编程' } },
+    ]
+    for (const h of ['就以上问题继续辩论', '针对上面的问题继续', '接着刚才的再辩一轮', '以上,继续']) {
+      const auto = resolveAuto(events, h)
+      expect(auto?.question).toBe('怎样的管理架构更适合 agent 编程')
+    }
+    // hint 本身就是完整新问题 → 照常用,不误杀。
+    const real = resolveAuto(events, '主库延迟高怎么办')
+    expect(real?.question).toBe('主库延迟高怎么办')
   })
 })
 
@@ -1195,5 +1211,46 @@ describe('S14 结论答题化', () => {
     expect(split).not.toMatch(/建议选|照此选|推荐选|无推荐.*推荐/)
     expect(split).not.toContain('按结论推进')
     expect(split).not.toContain('- 结论:未收敛,推荐')
+  })
+})
+
+describe('S15 每轮回带基本问题与交锋账本', () => {
+  it('已决事项收集:concession 里非定义的接受行进已决账本,定义行归判据账本', () => {
+    // 线上实测:R16 定"轮=2h 人在场"、R18 两合取,既不在未决清单(已解决不列),
+    // 也不在判据锁存(不是定义),下一轮 invisible,R19 换个角度重开。
+    const session = {
+      transcript: [
+        {
+          seq: 1, role: 'challenger', round: 16,
+          text: '## 详细论证\nxx\nconcession\n- 接受轮=2h 人在场,证据充分。\n- 接受横连贯=结构尺,作为判据。\n## 本轮变化\n无\nMODEL:x',
+        },
+      ],
+    }
+    const defs = settledDefsOf(session as never)
+    const items = settledItemsOf((session as never as { transcript: Array<{ role: string; text: string }> }).transcript)
+    const viaSession = settledItemsOfSession(session as never)
+    // 定义行归判据账本,不进已决(同源判据 isSettledDefLine,两边不重账)。
+    expect(isSettledDefLine('接受横连贯=结构尺,作为判据')).toBe(true)
+    expect(isSettledDefLine('接受轮=2h 人在场')).toBe(false)
+    // 定义行归判据账本,不进已决。
+    expect(defs.some((d) => d.includes('横连贯'))).toBe(true)
+    expect(items.some((d: string) => d.includes('横连贯'))).toBe(false)
+    // 非定义接受行进已决账本。
+    expect(items.some((d: string) => d.includes('轮=2h'))).toBe(true)
+    // 已决行不重复收录同一条;session 版与纯函数版同源。
+    expect(items.filter((d: string) => d.includes('轮=2h')).length).toBe(1)
+    expect(viaSession).toEqual(items)
+  })
+
+  it('焦点块带已决段:已决不得重开,除非给反例;三本账各就其位', () => {
+    const f = formatPendingFocus(['补成本分列'], ['横连贯=结构尺'], ['轮=2h 人在场'])
+    expect(f).toContain('待决清单')
+    expect(f).toContain('已接受判据')
+    expect(f).toContain('已决事项')
+    expect(f).toContain('轮=2h 人在场')
+    expect(f).toMatch(/不得重开|重开.*反例|反例.*重开/)
+    // 三本账都不空 → 三段全在;全空 → 老行为返回 ''。
+    expect(formatPendingFocus([], [], [])).toBe('')
+    expect(formatPendingFocus([], [], ['轮=2h'])).toContain('已决事项')
   })
 })

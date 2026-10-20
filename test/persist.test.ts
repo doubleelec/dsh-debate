@@ -187,6 +187,13 @@ describe('文件名安全(slugify / reportRelPath)', () => {
     expect(slugify('   ')).toBe('debate')
   })
 
+  it('承接语兜底:混进来的"以上/继续"前缀清掉,清完剩空才回落 debate', () => {
+    // 纵深:就算 question 里混了承接语(如 hint 和历史拼成的长句),文件名也不该是废话。
+    expect(slugify('就以上问题继续辩论')).toBe('debate')
+    expect(slugify('针对上述管理架构问题继续辩论')).toContain('管理架构')
+    expect(slugify('以上,继续:怎样的管理架构更适合 agent 编程')).toContain('管理架构')
+  })
+
   it('路径形状固定:docs/debates/<日期>-<slug>-<id尾>.md', () => {
     const p = reportRelPath(1_700_000_000_000, '多仓上 K8s?', 'debate-abc123-7')
     expect(p.startsWith(`${REPORT_DIR}/`)).toBe(true)

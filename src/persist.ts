@@ -29,6 +29,14 @@ export const SLUG_MAX_CODEPOINTS = 12
 /** 文件名里的语气词:占位置但不定位,去掉了不影响认出是哪一局。 */
 const SLUG_STOPWORDS = /我现在想|不要太|根据|这个|一个|更好|还是|是否|该不该|一下|这些|怎么|如何|什么|为什么|能不能|可以|进行/g
 
+/**
+ * 承接语外壳(S15):文件名里混进来的指代必须清掉。
+ * 纵深:就算 question 里混了承接语(如 hint 和历史拼成的长句),文件名也不该是废话
+ * ("就以上问题继续辩论" → 清完剩空 → 回落 debate)。
+ * 清掉的是外壳(以上/继续/辩论…),实质问题(如"管理架构")保留。
+ */
+const SLUG_CONTINUATION = /(就|请|那请|那么|那|针对|关于|对于|围绕|围绕着)?(以上|上述|前面|之前|刚才|刚刚|先前)(的|这个问题|这些问题|那个问题|讨论|内容|话题)?(继续|接着|再|重新|新开|另起|深入|展开|细化)?(辩论|辩一轮|辩一下|讨论|聊聊|说说|讲讲|来一轮|一轮|一下)?/gu
+
 /** 停机原因取值域(校验用,顺序即枚举)。 */
 const STOP_REASONS = ['convergence', 'saturation', 'maxRounds', 'manual'] as const
 type StopReason = (typeof STOP_REASONS)[number]
@@ -165,6 +173,9 @@ const UNSAFE = /[\\/:*?"<>|\u0000-\u001f\u007f]/g
  */
 export function slugify(q: string): string {
   const cleaned = q
+    .replace(SLUG_CONTINUATION, '')
+    // 承接语清完剩下标点/空白(如"就以上问题继续辩论"→"问题继续辩论"→"继续辩论"),再清一轮残留。
+    .replace(/^(问题|话题|讨论|内容)?(继续|接着|再|重新|新开|另起|深入|展开|细化)?(辩论|辩一轮|辩一下|讨论|聊聊|说说|讲讲|来一轮|一轮|一下)?/u, '')
     .replace(SLUG_STOPWORDS, '')
     .replace(UNSAFE, '')
     .replace(/\s+/g, '-')
