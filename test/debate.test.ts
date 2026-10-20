@@ -44,7 +44,7 @@ import {
   type DebateRound,
   type TranscriptEntry,
 } from '../src/debate'
-import { normalizeConfig, extractModelEcho, isRouteIneffective, resolveAuto, settledDefsOf, settledItemsOfSession, stepOpen, stepRound, stepSynthesize, sessions, extractHandoffConclusion, heartbeatOf, epochStopReason, epochStopDetail, stepOpenResident, stepRoundResident, turnVerdict, isRetriableTurnError, recordRoundAndJudge, driveResidentTurn, createResidentPair, STEP_STALL_MS, STEP_HARD_CAP_MS } from '../src/index'
+import { normalizeConfig, extractModelEcho, isRouteIneffective, resolveAuto, settledDefsOf, settledItemsOfSession, stepOpen, stepRound, stepSynthesize, sessions, extractHandoffConclusion, heartbeatOf, epochStopReason, epochStopDetail, stepOpenResident, stepRoundResident, turnVerdict, isRetriableTurnError, recordRoundAndJudge, driveResidentTurn, createResidentPair, toolAllowFor, resolveToolAllow, cageLabel, visibleNamesOf, scopedToolGuard, DEBATER_TOOL_ALLOW, SYNTH_TOOL_ALLOW, STEP_STALL_MS, STEP_HARD_CAP_MS } from '../src/index'
 import { settledItemsOf } from '../src/debate'
 import { defaultLensIds, findLens, LENS_TEMPLATES } from '../src/lenses'
 import { splitSections } from '../src/client/sections'
@@ -480,7 +480,7 @@ describe('stepwise loop', () => {
       id: 't', config: r.config, status: 'running' as const, round: -1,
       transcript: [] as TranscriptEntry[], map: null, mapText: null, error: null, mirrorToChat: false,
       progress: '', mirrorCount: 0, mirrorError: null, parentSid: null, stopReason: null, rounds: [] as DebateRound[],
-      mode: 'oneShot' as const, residentError: null, streaming: {}, decisionSummary: null,
+      mode: 'oneShot' as const, residentError: null, cageNote: null, streaming: {}, decisionSummary: null,
       reportRel: null, persistError: null, reportError: null, restored: false,
       createdAt: 0, updatedAt: 0,
     }
@@ -518,7 +518,7 @@ describe('resident relay', () => {
       id: 't', config: r.config, status: 'running' as const, round: -1,
       transcript: [] as TranscriptEntry[], map: null, mapText: null, error: null, mirrorToChat: false,
       progress: '', mirrorCount: 0, mirrorError: null, parentSid: null, stopReason: null, rounds: [] as DebateRound[],
-      mode: 'oneShot' as const, residentError: null, streaming: {}, decisionSummary: null,
+      mode: 'oneShot' as const, residentError: null, cageNote: null, streaming: {}, decisionSummary: null,
       reportRel: null, persistError: null, reportError: null, restored: false,
       createdAt: 0, updatedAt: 0,
     }
@@ -1252,5 +1252,57 @@ describe('S15 每轮回带基本问题与交锋账本', () => {
     // 三本账都不空 → 三段全在;全空 → 老行为返回 ''。
     expect(formatPendingFocus([], [], [])).toBe('')
     expect(formatPendingFocus([], [], ['轮=2h'])).toContain('已决事项')
+  })
+})
+
+describe('S16 白名单工具笼', () => {
+  it('双名单只给只读:辩手六项、制图员三项,写盘/执行/套娃一律不在', () => {
+    // 辩论结论:辩手六项、制图员三项。只读 = 读文件找证据 + 联网查证。
+    expect([...DEBATER_TOOL_ALLOW].sort()).toEqual(['glob', 'grep', 'read', 'read_image', 'web_fetch', 'web_search'])
+    expect([...SYNTH_TOOL_ALLOW].sort()).toEqual(['glob', 'read', 'read_image'])
+    const banned = ['write', 'edit', 'pwsh', 'subagent', 'subagent_fork', 'workflow', 'ask_user_question', 'present', 'create_goal', 'todo_write', 'interrupt_agent', 'send_message', 'list_agents', 'job_kill', 'exit_plan_mode']
+    for (const n of [...DEBATER_TOOL_ALLOW, ...SYNTH_TOOL_ALLOW]) {
+      expect(banned.includes(n)).toBe(false)
+    }
+  })
+
+  it('角色取名单:辩手(builder/challenger)六项,制图员(synthesizer)三项', () => {
+    expect(toolAllowFor('builder')).toEqual(DEBATER_TOOL_ALLOW)
+    expect(toolAllowFor('challenger')).toEqual(DEBATER_TOOL_ALLOW)
+    expect(toolAllowFor('synthesizer')).toEqual(SYNTH_TOOL_ALLOW)
+  })
+
+  it('启动核对:种子名单与宿主实际表取交集,失效名剔掉并留痕(不整场毙掉)', () => {
+    // 线上教训:全局表改名时 allow 列 unknown 名会整场抛错。
+    // 交集源 = host 侧 schemas(parent) 的全局视图,取不到(undefined)按种子先发、交系统校验。
+    const r = resolveToolAllow(['read', 'glob', '改名了的工具'], ['read', 'glob', 'grep'])
+    expect(r.allow).toEqual(['read', 'glob'])
+    expect(r.dropped).toEqual(['改名了的工具'])
+    // 取不到实际表(undefined) → 按种子先发,不剔(挑战者终轮结论:让系统自己校验报错)。
+    const u = resolveToolAllow(['read', 'glob'], undefined)
+    expect(u.allow).toEqual(['read', 'glob'])
+    expect(u.dropped).toEqual([])
+    expect(u.unverified).toBe(true)
+    // 取到但交集为空 → 显式失败,不无笼裸奔(建构者终轮:终态定为直接失败)。
+    expect(() => resolveToolAllow(['改名了的工具'], ['read'])).toThrow('empty-allow')
+  })
+
+  it('visibleNamesOf:从 schemas 原始形状里抽名字,非字符串一律丢掉', () => {
+    expect(visibleNamesOf([{ name: 'read' }, { name: 42 }, {}, { name: 'glob' }])).toEqual(['read', 'glob'])
+    expect(visibleNamesOf(undefined)).toEqual([])
+  })
+
+  it('笼标签进已启动行:会话可见生效笼型,不只写日志', () => {
+    // 辩论结论:笼型并入已启动进度行。
+    expect(cageLabel(['read', 'glob'], []).includes('白名单')).toBe(true)
+    expect(cageLabel(['read'], ['改名了的工具']).includes('剔除')).toBe(true)
+    expect(cageLabel(['read'], [], true).includes('未核对')).toBe(true)
+  })
+
+  it('执行期 guard:scope-local 的 subagent 拦掉,普通读工具放行', () => {
+    // restrict/allow 只动全局层,scoped 注册随后合并——这类名字必须执行时再拦一道。
+    expect(typeof scopedToolGuard({ name: 'subagent' })).toBe('string')
+    expect(scopedToolGuard({ name: 'read' })).toBe(undefined)
+    expect(scopedToolGuard({ name: 'write' })).toBe(undefined)
   })
 })

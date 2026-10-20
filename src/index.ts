@@ -95,6 +95,12 @@ interface DebateSession {
   /** 常驻建对失败原因(成功回退时也记,便于面板/探针看清为什么没走常驻)。 */
   residentError: string | null
   /**
+   * 生效笼型(S16):常驻建对时 schemas 核对的结果(剔除失效名/未核对),并入已启动进度行。
+   * one-shot 无核对挂载点,记 null(种子名单仍生效,见 askSubagent)。
+   * 落盘:重启后仍可回答"这局跑在什么笼子里"。
+   */
+  cageNote: string | null
+  /**
    * 实时流:正在写的各方当前 turn 流式累计文本(key=role),面板 2s 轮询即见打字机效果。
    * turn 落 transcript 即清对应项;synthesizer 走 one-shot 无流,只有进度文案。
    * kind=text 是 assistant 文本增量;kind=tools 是工具心跳(读文件阶段文本还没出来时)。
@@ -462,6 +468,7 @@ async function loadPersisted(ctx: Context): Promise<number> {
         rounds: fixed.rounds,
         mode: fixed.mode,
         residentError: fixed.residentError,
+        cageNote: fixed.cageNote ?? null,
         streaming: {},
         decisionSummary: fixed.decisionSummary,
         reportRel: fixed.reportRel,
@@ -701,6 +708,8 @@ export interface ResidentSetupCtx {
   }
   tools: {
     restrict(filter: { allow?: string[]; deny?: string[] }): unknown
+    schemas?: (scope?: unknown) => Array<{ name?: unknown }>
+    guard?: (guard: (execution: { name: string }) => string | undefined) => () => void
   }
 }
 
@@ -867,6 +876,20 @@ export async function runHostDebate(
         pair = await createResidentPair(ctx, agents, parent, session.id, session.config.builder, session.config.challenger, signal, session.config.targetCwd)
         session.mode = 'resident'
         session.residentError = null
+        // S16:生效笼型并入已启动行。核对源 = parent 的 schemas 全局视图(与 debug-agent 同源);
+        // 取不到按种子先发、标未核对(挑战者终轮结论:不把可选接口当启动硬依赖)。
+        try {
+          const tools = (parent as unknown as { ctx?: { get(name: string): unknown } }).ctx?.get('tools') as
+            | { schemas?: (scope?: unknown) => Array<{ name?: unknown }> }
+            | undefined
+          const all = tools?.schemas?.(parent) as Array<{ name?: unknown }> | undefined
+          const resolved = resolveToolAllow(DEBATER_TOOL_ALLOW, all === undefined ? undefined : visibleNamesOf(all))
+          session.cageNote = cageLabel(resolved.allow, resolved.dropped, resolved.unverified)
+        } catch {
+          session.cageNote = cageLabel(DEBATER_TOOL_ALLOW, [], true)
+        }
+        // 笼标签进已启动行:会话可见生效笼型,不只写日志(辩论结论,开局挂一次,不必每轮刷新)。
+        setProgress(session, `已启动:「${auto.question}」(建构 ${session.config.builder.model} vs 挑战 ${session.config.challenger.model},共 ${session.config.maxRounds} 轮)。${session.cageNote}。建构者开写中…`)
       } catch (e) {
         if (signal.aborted) throw new Error('aborted')
         // 回退必须可观测:面板/探针要能回答"为什么这局不是常驻"。
@@ -1046,29 +1069,76 @@ function textOf(blocks: TextContentBlock[]): string {
 }
 
 /**
- * 辩论子 agent 工具笼(只读论证员):
- * - 留:read/glob/grep(读文件找证据)、web_fetch/web_search(联网查证)。
- * - 禁:ask_user_question(会等人点, one-shot 直接 hang,轮次 -1 卡死的元凶);
- *   write/edit(辩论只读不写);pwsh(不给执行,只留读);
- *   subagent_fork/workflow/ralph(防套娃);
- *   present/create_goal/todo 系列(论证用不上,防跑偏)。
- * 注意:deny 只能点全局名。`subagent` 是 preset 层的 scope-local 名,
- * restrict 明确拒绝(scope-local names fail),实测 unknown 抛错,所以不列;
- * fork 的全局名就是 subagent_fork,可以禁。
- * 新版本(0.2.0)全局工具表里已无 ralph:deny 列它会 unknown 抛错整场毙掉,故不列(防套娃靠 subagent_fork + workflow 已够)。
- * 制图员同笼(只读实录,不参辩,工具更少也够)。
+ * 辩论子 agent 工具笼(S16 白名单:只读论证员):
+ * - 辩手(建构/挑战):读文件找证据 + 联网查证,六项。
+ *   名单依据:2026-10-20 线上 scope 实测(standard preset,31 个全局工具) +
+ *   白名单辩论结论(辩手六项、制图员三项)。
+ * - 制图员:只读实录,不参辩,三项(读 + 找文件,不联网)。
+ * - 白名单语义(工具注册表文档):allow 只留点名的,后来出现的新工具一律排除;
+ *   deny 则相反,新工具默认放行——只读角色必须用 allow,否则每加一个新工具都是一次敞口。
+ * - allow 只能点全局名:scope-local(如 preset 层的 `subagent`)列了就 unknown 抛错
+ *   (deny 同理,沿用旧注释的实测结论);这类名字走执行期 guard 拦,不进名单。
  */
-const DEBATE_TOOL_DENY = [
-  'ask_user_question',
-  'write', 'edit',
-  'pwsh',
-  'subagent_fork', 'workflow',
-  'present', 'create_goal', 'update_goal', 'get_goal',
-  'todo_write',
-  'interrupt_agent', 'send_message', 'list_agents',
-  'job_kill',
-  'exit_plan_mode',
-]
+export const DEBATER_TOOL_ALLOW = ['read', 'read_image', 'glob', 'grep', 'web_fetch', 'web_search']
+export const SYNTH_TOOL_ALLOW = ['read', 'read_image', 'glob']
+
+/** 角色取名单:辩手六项,制图员三项(两处挂载点同源,不各写一份)。 */
+export function toolAllowFor(role: 'builder' | 'challenger' | 'synthesizer'): string[] {
+  return role === 'synthesizer' ? [...SYNTH_TOOL_ALLOW] : [...DEBATER_TOOL_ALLOW]
+}
+
+/**
+ * 启动核对(S16):种子名单与宿主实际工具表取交集,失效名剔掉并留痕。
+ * - 交集源 = host 侧 `schemas(parent)` 的全局视图(已有 debug-agent 路由在用,见 :2125)。
+ * - 取不到实际表(undefined,接口不存在/抛错) → 按种子先发、标 unverified,
+ *   让系统自己的 unknown 校验报错(挑战者终轮结论:不把可选接口当启动硬依赖)。
+ * - 交集为空 → 显式抛 `empty-allow`,不无笼裸奔(建构者终轮:终态定为直接失败)。
+ * 纯函数,可单测;IO(读 schemas)在调用方。
+ */
+export function resolveToolAllow(seed: string[], visible: string[] | undefined): { allow: string[]; dropped: string[]; unverified: boolean } {
+  if (visible === undefined) return { allow: [...seed], dropped: [], unverified: true }
+  const set = new Set(visible)
+  const allow = seed.filter((n) => set.has(n))
+  const dropped = seed.filter((n) => !set.has(n))
+  if (allow.length === 0) throw new Error(`empty-allow:种子名单 ${seed.join(',')} 与宿主实际工具表无交集(实际:${visible.join(',')}),不无笼裸奔`)
+  return { allow, dropped, unverified: false }
+}
+
+/**
+ * 从 schemas 原始形状里抽全局工具名(非字符串一律丢掉,不猜不编)。
+ * schemas 条目形状 `{ name?: unknown }`,与 debug-agent 路由同源(见 :2126)。
+ */
+export function visibleNamesOf(all: Array<{ name?: unknown }> | undefined): string[] {
+  if (!Array.isArray(all)) return []
+  return all.map((t) => t.name).filter((n): n is string => typeof n === 'string')
+}
+
+/**
+ * 笼标签(S16):生效笼型并入已启动进度行,会话可见,不只写日志。
+ * 辩论结论:开局那一行挂笼,不必每轮刷新。
+ */
+export function cageLabel(allow: string[], dropped: string[], unverified = false): string {
+  const base = `工具笼·白名单${allow.length}项(${allow.join('/')})`
+  if (unverified) return `${base},实际表未核对(按种子先发)`
+  if (dropped.length > 0) return `${base},剔除失效${dropped.length}项(${dropped.join('/')})`
+  return base
+}
+
+/** scope-local 工具名(allow/restrict 都拦不住,filter 只影响全局层):执行期 guard 拦。 */
+const SCOPED_TOOL_GUARD_DENY = ['subagent']
+
+/**
+ * 执行期 guard(S16):拦 scope-local 工具(如 preset 层的 `subagent`)。
+ * 白名单与 restrict 都只动全局层,scoped 注册随后合并、不受影响(工具注册表文档),
+ * 所以这类名字必须在执行时再拦一道。同步函数,返串即拒、返 undefined 即放行。
+ * one-shot 链路无挂载点(子 agent 由 subagents.start 内部组装),只挂常驻 setup。
+ */
+export function scopedToolGuard(execution: { name: string }): string | undefined {
+  if (SCOPED_TOOL_GUARD_DENY.includes(execution.name)) {
+    return `debate-guard:subagent 类 scope-local 工具不许辩手调用(${execution.name})`
+  }
+  return undefined
+}
 
 /** 一次性子 agent 单步超时:6 分钟。子 agent hang 住(等人点/大海捞针)时直接失败,不无限卡轮次。 */
 const STEP_TIMEOUT_MS = 6 * 60 * 1000
@@ -1113,13 +1183,15 @@ export async function askSubagent(
   if (signal.aborted) onAbort()
   else signal.addEventListener('abort', onAbort, { once: true })
   try {
+    // S16 白名单:one-shot 无 schemas 核对挂载点(spawn 内部组装,父进程表未必是子表),
+    // 按种子先发、交系统 unknown 校验(挑战者终轮结论);scope-local 敞口见笼注释。
     const run = await subagents.start('spawn', {
       parent,
       prompt: [{ type: 'text', text: prompt } as TextContentBlock],
       label: `debate-${sessionId}-${role}`,
       signal: timeout.signal,
       agentOptions: { provider: route.provider, model: route.model },
-      toolFilter: { deny: DEBATE_TOOL_DENY },
+      toolFilter: { allow: toolAllowFor(role) },
     })
     try {
       let result: { output: TextContentBlock[]; stopReason: string }
@@ -1145,17 +1217,6 @@ export async function askSubagent(
   }
 }
 
-/**
- * 辩论子 agent 工具笼(只读论证员):
- * - 留:read/glob/grep(读文件找证据)、web_fetch/web_search(联网查证)。
- * - 禁:ask_user_question(会等人点, one-shot 直接 hang,轮次 -1 卡死的元凶);
- *   write/edit(辩论只读不写);pwsh(不给执行,只留读);
- *   subagent_fork/workflow/ralph(防套娃);
- *   present/create_goal/todo 系列(论证用不上,防跑偏)。
- * 注意:deny 只能点全局名。`subagent` 是 preset 层的 scope-local 名,
- * restrict 明确拒绝(scope-local names fail),实测 unknown 抛错,所以不列;
- * fork 的全局名就是 subagent_fork,可以禁。
- */
 /**
  * 子 agent 固定 delegation 声明(照抄 dsh-subagent/child-agent 的 SUBAGENT_DELEGATION_CONTEXT):
  * runtime-context 贡献,不是 system section,所以部署的 system prompt 在 parent/child 间保持一致。
@@ -1327,7 +1388,7 @@ export async function createResidentPair(
   const inheritCwd = (parent as any)?.session?.header?.cwd as string | undefined
   const cwd = targetCwd !== undefined && targetCwd !== '' ? targetCwd
     : inheritCwd !== undefined && inheritCwd !== '' ? inheritCwd : process.cwd()
-  const setupFor = (): ((agentCtx: any) => void | Promise<void>) => async (agentCtx: any) => {
+  const setupFor = (role: 'builder' | 'challenger'): ((agentCtx: any) => void | Promise<void>) => async (agentCtx: any) => {
     // 1) join parent 生成(同步 bind,无 roster 读取失败模式);parentCtx 拿不到才回落 mount 默认。
     try {
       if (presets?.composeFrom && parentCtx) {
@@ -1344,10 +1405,30 @@ export async function createResidentPair(
         text: SUBAGENT_DELEGATION_CONTEXT,
       })
     } catch { /* 上下文挂不上不拦创建 */ }
-    // 3) 工具笼(整场有效,创建时 restrict 一次)。
+    // 3) 工具笼(S16 白名单,整场有效,创建时 restrict 一次)。
+    // 启动核对:用 agentCtx 自己的 schemas 视图与种子取交集,失效名剔掉;
+    // 取不到(undefined)按种子先发、交 restrict 的 unknown 校验(挑战者终轮结论)。
+    // 交集为空 → 显式失败,不无笼裸奔(建构者终轮)。
     try {
-      agentCtx.tools.restrict({ deny: DEBATE_TOOL_DENY })
-    } catch { /* restrict 失败时抛给创建事务回滚 */ throw new Error('resident-restrict-failed') }
+      let visible: string[] | undefined
+      try {
+        const all = agentCtx.tools?.schemas?.(agentCtx) as Array<{ name?: unknown }> | undefined
+        visible = all === undefined ? undefined : visibleNamesOf(all)
+      } catch { visible = undefined }
+      const resolved = resolveToolAllow(toolAllowFor(role), visible)
+      agentCtx.tools.restrict({ allow: resolved.allow })
+      if (resolved.dropped.length > 0 || resolved.unverified) {
+        try { agentCtx.systemPrompt.context({ name: 'debate:cage', order: 0, text: cageLabel(resolved.allow, resolved.dropped, resolved.unverified) }) } catch { /* 笼标签挂不上不拦创建 */ }
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith('empty-allow')) throw e
+      /* restrict 失败时抛给创建事务回滚 */ throw new Error('resident-restrict-failed')
+    }
+    // 4) 执行期 guard:拦 scope-local(如 `subagent`),restrict/allow 都动不到它们。
+    // one-shot 无挂载点,只挂常驻;guard 抛错不拦创建(拦不住也比建不起来强)。
+    try {
+      agentCtx.tools?.guard?.(scopedToolGuard)
+    } catch { /* guard 挂不上不拦创建 */ }
   }
   // 子会话血统:parent 层级 +1(ParentAgent 面无 header,取不到则按 0 算,不拦创建)。
   const parentDepthRaw = (parent as { session?: { header?: { delegationDepth?: unknown } } })?.session?.header?.delegationDepth
@@ -1366,7 +1447,7 @@ export async function createResidentPair(
       },
       agentOptions: { provider: route.provider, model: route.model },
       signal,
-      setup: setupFor(),
+      setup: setupFor(role),
     })
     return { agent: handle.agent as ResidentAgent, dispose: handle.dispose }
   }
@@ -1881,6 +1962,7 @@ export default {
             rounds: [],
             mode: 'oneShot',
             residentError: 'not-attempted',
+            cageNote: null,
             streaming: {},
             decisionSummary: null,
             reportRel: null,
@@ -1960,6 +2042,7 @@ export default {
             rounds: session.rounds,
             mode: session.mode,
             residentError: session.residentError,
+            cageNote: session.cageNote,
             streaming: session.streaming,
             decisionSummary: session.decisionSummary,
             // 持久化可观测性:结论文档路径 + 两条独立的失败原因(null=没出问题)。
@@ -2020,6 +2103,8 @@ export default {
           // 读注册表只能看到 host 视角,子 agent 的真实工具集以它自己的回答为准。
           // body: { sid } (parent 会话 id;不传则用第一个活体;无活体则自建满血 parent)。
           // 零业务成本:只问工具表,不跑辩论。自建 parent 用完即 dispose。
+          // S16 带笼模式:body.caged=true 时挂辩手白名单起,子 agent 报的是笼内视角
+          // (辩论结论"先跑一次带笼探针定出最小工具集"的落点);不传则裸起(全量对照)。
           let owned: { dispose(): Promise<void> } | null = null
           try {
             const body = await readJsonBody(req)
@@ -2044,6 +2129,7 @@ export default {
             if (!parent || !parent.session) return writeJson(res, { ok: false, error: 'no live parent' })
             const ctl = new AbortController()
             const timer = setTimeout(() => ctl.abort(), 120000)
+            const caged = (body as { caged?: unknown }).caged === true
             try {
               const run = await subagents.start('spawn', {
                 parent,
@@ -2053,6 +2139,7 @@ export default {
                 } as TextContentBlock],
                 label: 'debate-debug-child-tools',
                 signal: ctl.signal,
+                ...(caged ? { toolFilter: { allow: DEBATER_TOOL_ALLOW } } : {}),
               })
               try {
                 const result = await run.result
@@ -2061,6 +2148,8 @@ export default {
                   parentSid: parent.session.id,
                   selfBuilt,
                   presetId,
+                  caged,
+                  cage: caged ? cageLabel(DEBATER_TOOL_ALLOW, []) : null,
                   stopReason: result.stopReason,
                   childTools: textOf(result.output),
                 })
@@ -2366,6 +2455,7 @@ export default {
             rounds: [],
             mode: 'oneShot',
             residentError: 'not-attempted',
+            cageNote: null,
             streaming: {},
             decisionSummary: null,
             reportRel: null,

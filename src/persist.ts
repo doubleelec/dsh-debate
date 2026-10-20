@@ -71,6 +71,8 @@ export interface SessionRecord {
   decisionSummary: string | null
   /** 结论文档相对工作区的路径(写过才有);绝对路径由 targetCwd + 它拼出来,移动工作区也不失效。 */
   reportRel: string | null
+  /** 生效笼型(S16,可选审计字段:老记录缺它即按 null 恢复,不 bump 版本,见 ADR-0021)。 */
+  cageNote?: string | null
 }
 
 /** `toRecord` 的入参面:内存会话只要形状对得上即可(结构子类型,不比 index.ts 的私有接口耦合)。 */
@@ -102,6 +104,7 @@ export function toRecord(s: PersistableSession): SessionRecord {
     residentError: s.residentError,
     decisionSummary: s.decisionSummary,
     reportRel: s.reportRel ?? null,
+    cageNote: s.cageNote ?? null,
   }
 }
 
@@ -148,6 +151,7 @@ export function fromRecord(raw: unknown): SessionRecord | null {
     residentError: typeof raw.residentError === 'string' ? raw.residentError : null,
     decisionSummary: typeof raw.decisionSummary === 'string' ? raw.decisionSummary : null,
     reportRel: typeof raw.reportRel === 'string' ? raw.reportRel : null,
+    cageNote: typeof raw.cageNote === 'string' ? raw.cageNote : null,
   }
 }
 

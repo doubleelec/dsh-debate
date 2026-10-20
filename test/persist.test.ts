@@ -65,6 +65,17 @@ describe('记录白名单(toRecord)', () => {
   it('显式补 v:磁盘上的每条记录都带格式版本,升级时才判断得出能不能读', () => {
     expect(toRecord(mkSession()).v).toBe(RECORD_VERSION)
   })
+
+  it('S16 笼签往返:toRecord 带 cageNote,老记录缺它按 null 恢复(不 bump 版本)', () => {
+    // ADR-0021:可选审计字段缺即 unknown,只审计不 gate,不 bump RECORD_VERSION。
+    const rec = toRecord(mkSession({ cageNote: '工具笼·白名单6项(read/glob)' }))
+    expect(rec.cageNote).toBe('工具笼·白名单6项(read/glob)')
+    expect(fromRecord(rec)?.cageNote).toBe('工具笼·白名单6项(read/glob)')
+    // 老记录没有 cageNote → 宽容补 null,不判坏记录。
+    const old = { ...rec } as Record<string, unknown>
+    delete old.cageNote
+    expect(fromRecord(old)?.cageNote).toBe(null)
+  })
 })
 
 describe('记录往返(toRecord → fromRecord)', () => {
