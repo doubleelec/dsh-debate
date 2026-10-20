@@ -1,17 +1,18 @@
 # src/module.toml
-# Module-level manifest (arch retrofit baseline + S19 reconcile).
-# Governs direct children of src/. TS sources are not counted by the
-# vendored orphan check (only .py/.ps1 + dirs), so submodules lists only
-# the nested governed directories; TS files are documented in architecture.md §4.2.
-# Debate vs task share this module: pure logic already splits at file level
-# (debate.ts vs task/), wiring stays in index.ts (single tsdown entry,
-# route table registered in apply(); see ADR-0025 §7 for why not split).
+# Module-level manifest (arch retrofit baseline + S19/S21/S22 reconcile).
+# Host wiring module: src/index.ts (single tsdown entry, route table in apply()).
+# Pure logic lives in peer submodules debate/ (protocol/lenses/persist) and
+# task/ (scan/materials/ensure-session); src/version.ts is shared (host/client).
+# TS sources are not counted by the vendored orphan check (only .py/.ps1 + dirs),
+# so submodules lists only the nested governed directories; wiring vs pure split
+# is documented in architecture.md §4.2 (see ADR-0025 §7 for why wiring is not split).
 
 [module]
 name = "src"
 description = "Debate host, protocol, lenses, browser bundle, and cross-repo task launcher."
 submodules = [
     "client",
+    "debate",
     "task",
 ]
 require_invariants = true
@@ -20,7 +21,8 @@ require_invariants = true
 exposed = []
 reason = "No cross-module facade: single-module plugin, host/client wired via dsh.plugin.json and cordis.patch.yml."
 
-# Semantic red lines for the host half (S20: placeholders replaced by live binds).
+# Semantic red lines for the host half (S20: placeholders replaced by live binds;
+# S22: debate pure guards moved to src/debate/module.toml DEBATE-01).
 # Host route/tool surface must not drift without a guard failing.
 [[invariant.wiring.rules]]
 id = "WIRE-01"
@@ -31,3 +33,8 @@ test_ref = "tests/src/test_invariants.py::test_src_registered_tools_match_manife
 id = "CAGE-01"
 desc = "Debater allowlist is exactly the six read-only tools, synth three; closed by construction."
 test_ref = "tests/src/test_invariants.py::test_src_debater_tool_allowlist_is_closed"
+
+[[invariant.symmetry.rules]]
+id = "SYM-01"
+desc = "debate/ vs task/ stay peer pure-logic submodules; host wiring stays in index.ts."
+test_ref = "tests/src/test_invariants.py::test_src_peer_symmetry"

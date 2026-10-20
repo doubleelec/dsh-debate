@@ -1,0 +1,22 @@
+# src/debate/module.toml
+# Debate pure-logic module (S22: promoted from flat src/*.ts to peer of task/).
+# Protocol/classification/prompts (debate.ts), lenses (lenses.ts),
+# persistence pure functions (persist.ts). No IO: host wiring stays in src/index.ts.
+# TS sources are not counted by vendored orphan checks (only .py/.ps1 + dirs),
+# so submodules stays empty; TS files are documented in architecture.md §4.2.
+
+[module]
+name = "src/debate"
+description = "Debate pure logic: protocol, lenses, persistence functions. No IO."
+submodules = []
+require_invariants = true
+
+[public_api]
+exposed = []
+reason = "No facade: src/index.ts imports these modules directly (same-process wiring)."
+
+# Semantic red lines for the debate pure modules (S22: moved with the files).
+[[invariant.pure.rules]]
+id = "DEBATE-01"
+desc = "Protocol/lenses/persist keep their exported entry points; every module keeps a vitest mirror."
+test_ref = "tests/src/debate/test_invariants.py::test_debate_pure_surface_exists"

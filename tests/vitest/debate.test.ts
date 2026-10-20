@@ -43,10 +43,10 @@ import {
   gapAge,
   type DebateRound,
   type TranscriptEntry,
-} from '../../src/debate'
+} from '../../src/debate/debate'
 import { normalizeConfig, extractModelEcho, isRouteIneffective, resolveAuto, settledDefsOf, settledItemsOfSession, stepOpen, stepRound, stepSynthesize, sessions, extractHandoffConclusion, heartbeatOf, epochStopReason, epochStopDetail, stepOpenResident, stepRoundResident, stepOpenSingle, stepRoundSingle, buildDebateForkSeed, createSingleThread, turnVerdict, isRetriableTurnError, recordRoundAndJudge, driveResidentTurn, createResidentPair, toolAllowFor, resolveToolAllow, cageLabel, visibleNamesOf, scopedToolGuard, interruptMarkOf, parentBusyOf, interruptPlanOf, DEBATER_TOOL_ALLOW, SYNTH_TOOL_ALLOW, STEP_STALL_MS, STEP_HARD_CAP_MS } from '../../src/index'
-import { settledItemsOf } from '../../src/debate'
-import { defaultLensIds, findLens, LENS_TEMPLATES } from '../../src/lenses'
+import { settledItemsOf } from '../../src/debate/debate'
+import { defaultLensIds, findLens, LENS_TEMPLATES } from '../../src/debate/lenses'
 import { splitSections } from '../../src/client/sections'
 
 describe('panel sections', () => {

@@ -33,13 +33,13 @@ export interface TextContentBlock {
   readonly text?: unknown
   [key: string]: unknown
 }
-import type { DebateConfig, DebateMap, DebateRound, DebateStatus, TranscriptEntry } from './debate'
-import { DEFAULT_CONFIG, normalizeAnswer, isContinuationHint, SETTLED_DEFS_MAX, isOneSidedAccept, isTopicLoop, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscriptForSynthesizer, toDebateRound, roundConverged, convergedAtCap, isSaturated, pendingStalled, slimHandoff, formatPendingFocus, sectionText, parseAnswer, parseGaps, gapAge, extractDecisionSummary, buildFallbackSummary, DECISION_SECTION } from './debate'
+import type { DebateConfig, DebateMap, DebateRound, DebateStatus, TranscriptEntry } from './debate/debate'
+import { DEFAULT_CONFIG, normalizeAnswer, isContinuationHint, SETTLED_DEFS_MAX, isOneSidedAccept, isTopicLoop, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscriptForSynthesizer, toDebateRound, roundConverged, convergedAtCap, isSaturated, pendingStalled, slimHandoff, formatPendingFocus, sectionText, parseAnswer, parseGaps, gapAge, extractDecisionSummary, buildFallbackSummary, DECISION_SECTION } from './debate/debate'
 export { isTopicLoop }
-export { renderTranscriptForSynthesizer, answerShapeOf, answerSpecOf } from './debate'
+export { renderTranscriptForSynthesizer, answerShapeOf, answerSpecOf } from './debate/debate'
 import { BUILD_VERSION, assessVersions, type VersionFacts } from './version'
-import { fromRecord, markInterrupted, renderReport, reportRelPath, STORAGE_TABLE, STORAGE_UNIT, toRecord } from './persist'
-import { findLens, type LensTemplate } from './lenses'
+import { fromRecord, markInterrupted, renderReport, reportRelPath, STORAGE_TABLE, STORAGE_UNIT, toRecord } from './debate/persist'
+import { findLens, type LensTemplate } from './debate/lenses'
 // 跨仓任务(task):scan/build/launch/report/collect/stop —— 从 dsh-task-launcher 移植(ADR-0025)。
 import { scanParent, defaultDeps as taskDefaultDeps } from './task/scan'
 import { buildMaterials, handoffText, reportFileName, reportMarkdown, assertAscii as assertTaskAscii, leftoverPlaceholders } from './task/materials'
@@ -158,7 +158,7 @@ interface DebateSession {
  * transcript 按 round 聚合(两侧输出拼一起抽);开题轮(round 0)也参与——
  * R0 点名、R10 还没补的缺口,正是"一致没覆盖什么"。
  */
-export function gapSpansOf(session: DebateSession): import('./debate').GapSpan[] {
+export function gapSpansOf(session: DebateSession): import('./debate/debate').GapSpan[] {
   const byRound = new Map<number, string[]>()
   for (const e of session.transcript) {
     if (e.round < 0) continue
@@ -307,7 +307,7 @@ export const SETTLED_ITEMS_MAX = 3
  * 纯收集缝在 debate.ts(同名函数,收 transcript 数组);这里是 session 版,供 focusBlockOf 用。
  */
 export function settledItemsOfSession(session: DebateSession): string[] {
-  const { settledItemsOf } = require('./debate') as typeof import('./debate')
+  const { settledItemsOf } = require('./debate/debate') as typeof import('./debate/debate')
   return settledItemsOf(session.transcript)
 }
 

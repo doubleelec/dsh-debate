@@ -44,9 +44,12 @@ One row per test function in each `tests/<module>/test_invariants.py`. Placehold
 | `test_invariants.py::test_src_synth_tool_allowlist_is_closed` | src synth allowlist closed at three tools (ADR-0022) | the allowlist gains/loses an entry |
 | `test_invariants.py::test_src_registered_tools_match_manifest` | src registration matches manifest tools | registration and `dsh.plugin.json` disagree |
 | `test_invariants.py::test_src_task_routes_are_seven` | src task wiring keeps seven routes (ADR-0025) | a task route is added/removed/renamed |
+| `test_invariants.py::test_src_peer_symmetry` | src debate/ vs task/ peer symmetry (S22) | a peer dir loses module.toml, flat leftovers return, or wiring leaks into peers |
 | `test_invariants.py::test_client_pure_surface_exists` | src/client pure modules keep entry points | an exported pure function disappears |
 | `test_invariants.py::test_client_task_dialog_wired` | src/client TaskDialog wired to task calls | dialog or a task/* call disappears |
 | `test_invariants.py::test_client_no_send_key_intercept` | src/client send key stays unwired (ADR-0025) | panel code touches `inputActions`/`actions` beyond `setDraft` |
+| `test_invariants.py::test_debate_pure_surface_exists` | src/debate pure modules keep entry points (S22) | an exported pure function disappears |
+| `test_invariants.py::test_debate_vitest_mirrors_exist` | src/debate every module keeps vitest mirror (S22) | a debate vitest file is missing |
 | `test_invariants.py::test_task_pure_surface_exists` | src/task pure modules keep entry points | an exported pure function disappears |
 | `test_invariants.py::test_task_vitest_mirrors_exist` | src/task every module keeps vitest mirror | a task vitest file is missing |
 
