@@ -66,9 +66,13 @@ export interface SessionRecord {
   parentSid: string | null
   stopReason: StopReason | null
   rounds: DebateRound[]
-  mode: 'resident' | 'oneShot'
+  mode: 'single' | 'resident' | 'oneShot'
   residentError: string | null
   decisionSummary: string | null
+  /** 单线分叉清扫失败原因(null=清干净或本局没走单线)。可选审计字段,老记录缺它即 null。 */
+  sweepError?: string | null
+  /** 本局清掉的分叉会话 id。可选审计字段,老记录缺它即 []。 */
+  sweptSessions?: string[]
   /** 结论文档相对工作区的路径(写过才有);绝对路径由 targetCwd + 它拼出来,移动工作区也不失效。 */
   reportRel: string | null
   /** 生效笼型(S16,可选审计字段:老记录缺它即按 null 恢复,不 bump 版本,见 ADR-0021)。 */
@@ -111,6 +115,10 @@ export function toRecord(s: PersistableSession): SessionRecord {
     cageNote: s.cageNote ?? null,
     interruptedAt: s.interruptedAt ?? null,
     parentBusy: s.parentBusy ?? null,
+    sweepError: (s as { sweepError?: string | null }).sweepError ?? null,
+    sweptSessions: Array.isArray((s as { sweptSessions?: unknown }).sweptSessions)
+      ? (s as { sweptSessions: string[] }).sweptSessions
+      : [],
   }
 }
 
@@ -153,7 +161,7 @@ export function fromRecord(raw: unknown): SessionRecord | null {
     parentSid: typeof raw.parentSid === 'string' ? raw.parentSid : null,
     stopReason: (STOP_REASONS as readonly string[]).includes(stop) ? (stop as StopReason) : null,
     rounds: arr<DebateRound>(raw.rounds),
-    mode: str(raw.mode) === 'resident' ? 'resident' : 'oneShot',
+    mode: str(raw.mode) === 'resident' ? 'resident' : str(raw.mode) === 'single' ? 'single' : 'oneShot',
     residentError: typeof raw.residentError === 'string' ? raw.residentError : null,
     decisionSummary: typeof raw.decisionSummary === 'string' ? raw.decisionSummary : null,
     reportRel: typeof raw.reportRel === 'string' ? raw.reportRel : null,
@@ -162,6 +170,8 @@ export function fromRecord(raw: unknown): SessionRecord | null {
       ? { round: raw.interruptedAt.round as number, seq: raw.interruptedAt.seq as number }
       : null,
     parentBusy: raw.parentBusy === true ? true : raw.parentBusy === false ? false : null,
+    sweepError: typeof raw.sweepError === 'string' ? raw.sweepError : null,
+    sweptSessions: arr<string>(raw.sweptSessions),
   }
 }
 

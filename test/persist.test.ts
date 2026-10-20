@@ -158,6 +158,21 @@ describe('坏记录不拖垮整表(fromRecord)', () => {
     expect(fromRecord({ v: 1, id: 'x', config: cfg(), stopReason: 'weird' })?.stopReason).toBeNull()
     expect(fromRecord({ v: 1, id: 'x', config: cfg(), stopReason: 'manual' })?.stopReason).toBe('manual')
   })
+
+  it('mode 三态往返:single/resident 保真,未知值回落 oneShot', () => {
+    expect(fromRecord({ v: 1, id: 'x', config: cfg(), mode: 'single' })?.mode).toBe('single')
+    expect(fromRecord({ v: 1, id: 'x', config: cfg(), mode: 'resident' })?.mode).toBe('resident')
+    expect(fromRecord({ v: 1, id: 'x', config: cfg(), mode: 'weird' })?.mode).toBe('oneShot')
+  })
+
+  it('sweep 字段往返:清扫失败原因与已清 id 落盘,老记录缺即 null/[]', () => {
+    const back = fromRecord({ v: 1, id: 'x', config: cfg(), sweepError: 'rm boom', sweptSessions: ['debate-x-single'] })
+    expect(back?.sweepError).toBe('rm boom')
+    expect(back?.sweptSessions).toEqual(['debate-x-single'])
+    const old = fromRecord({ v: 1, id: 'x', config: cfg() })
+    expect(old?.sweepError).toBeNull()
+    expect(old?.sweptSessions).toEqual([])
+  })
 })
 
 describe('恢复后的收尾(markInterrupted)', () => {

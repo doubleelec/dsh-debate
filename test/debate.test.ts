@@ -44,7 +44,7 @@ import {
   type DebateRound,
   type TranscriptEntry,
 } from '../src/debate'
-import { normalizeConfig, extractModelEcho, isRouteIneffective, resolveAuto, settledDefsOf, settledItemsOfSession, stepOpen, stepRound, stepSynthesize, sessions, extractHandoffConclusion, heartbeatOf, epochStopReason, epochStopDetail, stepOpenResident, stepRoundResident, turnVerdict, isRetriableTurnError, recordRoundAndJudge, driveResidentTurn, createResidentPair, toolAllowFor, resolveToolAllow, cageLabel, visibleNamesOf, scopedToolGuard, interruptMarkOf, parentBusyOf, interruptPlanOf, DEBATER_TOOL_ALLOW, SYNTH_TOOL_ALLOW, STEP_STALL_MS, STEP_HARD_CAP_MS } from '../src/index'
+import { normalizeConfig, extractModelEcho, isRouteIneffective, resolveAuto, settledDefsOf, settledItemsOfSession, stepOpen, stepRound, stepSynthesize, sessions, extractHandoffConclusion, heartbeatOf, epochStopReason, epochStopDetail, stepOpenResident, stepRoundResident, stepOpenSingle, stepRoundSingle, buildDebateForkSeed, createSingleThread, turnVerdict, isRetriableTurnError, recordRoundAndJudge, driveResidentTurn, createResidentPair, toolAllowFor, resolveToolAllow, cageLabel, visibleNamesOf, scopedToolGuard, interruptMarkOf, parentBusyOf, interruptPlanOf, DEBATER_TOOL_ALLOW, SYNTH_TOOL_ALLOW, STEP_STALL_MS, STEP_HARD_CAP_MS } from '../src/index'
 import { settledItemsOf } from '../src/debate'
 import { defaultLensIds, findLens, LENS_TEMPLATES } from '../src/lenses'
 import { splitSections } from '../src/client/sections'
@@ -481,7 +481,7 @@ describe('stepwise loop', () => {
       transcript: [] as TranscriptEntry[], map: null, mapText: null, error: null, mirrorToChat: false,
       progress: '', mirrorCount: 0, mirrorError: null, parentSid: null, stopReason: null, rounds: [] as DebateRound[],
       mode: 'oneShot' as const, residentError: null, cageNote: null, interruptedAt: null, parentBusy: null, streaming: {}, decisionSummary: null,
-      reportRel: null, persistError: null, reportError: null, restored: false,
+      reportRel: null, persistError: null, reportError: null, sweepError: null, sweptSessions: [], restored: false,
       createdAt: 0, updatedAt: 0,
     }
   }
@@ -519,7 +519,7 @@ describe('resident relay', () => {
       transcript: [] as TranscriptEntry[], map: null, mapText: null, error: null, mirrorToChat: false,
       progress: '', mirrorCount: 0, mirrorError: null, parentSid: null, stopReason: null, rounds: [] as DebateRound[],
       mode: 'oneShot' as const, residentError: null, cageNote: null, interruptedAt: null, parentBusy: null, streaming: {}, decisionSummary: null,
-      reportRel: null, persistError: null, reportError: null, restored: false,
+      reportRel: null, persistError: null, reportError: null, sweepError: null, sweptSessions: [], restored: false,
       createdAt: 0, updatedAt: 0,
     }
   }
@@ -703,6 +703,127 @@ describe('resident relay', () => {
     }
     const pair = { builder: bad, challenger: fakeResident(['MODEL:local-proxy/a']), dispose: async () => {} } as never
     await expect(stepOpenResident(pair, s, signal)).rejects.toThrow('open-failed: builder=')
+  })
+})
+
+// 单线分叉(分叉载体 + 串行交替,无互盲)
+describe('single thread', () => {
+  const signal = new AbortController().signal
+  const makeSession = () => {
+    const r = normalizeConfig({ maxRounds: 2 })
+    if (!('config' in r)) throw new Error('bad config')
+    r.config.auto = resolveAuto([{ type: 'user/message', data: { content: '上 K8s?' } }], '')
+    return {
+      id: 't', config: r.config, status: 'running' as const, round: -1,
+      transcript: [] as TranscriptEntry[], map: null, mapText: null, error: null, mirrorToChat: false,
+      progress: '', mirrorCount: 0, mirrorError: null, parentSid: null, stopReason: null, rounds: [] as DebateRound[],
+      mode: 'single' as const, residentError: null, cageNote: null, interruptedAt: null, parentBusy: null, streaming: {}, decisionSummary: null,
+      reportRel: null, persistError: null, reportError: null, sweepError: null, sweptSessions: [], restored: false,
+      createdAt: 0, updatedAt: 0,
+    }
+  }
+  const ev = (type: string, data: unknown) => ({ type, data })
+  it('fork 种子:切源事件前缀 + session/end-seed 标记,inherited 标记带上', () => {
+    const src = [ev('user/message', { a: 1 }), ev('assistant/message', { b: 2 }), ev('turn/end', { c: 3 })]
+    const seed = buildDebateForkSeed(src as never, 1)
+    // 前缀 + end-seed,无开尾 turn 不补 closer。
+    expect(seed.length).toBe(3)
+    expect(seed[0]).toBe(src[0])
+    expect(seed[1]).toBe(src[1])
+    expect(seed[2].type).toBe('session/end-seed')
+    expect((seed[2].data as { inherited: boolean }).inherited).toBe(true)
+  })
+  it('fork 种子:开尾 turn 补 forked closer(种子里的开 turn 不能污染新会话首 turn 边界)', () => {
+    const src = [
+      ev('turn/start', { turn: 3 }),
+      ev('assistant/message', { x: 1 }),
+    ]
+    const seed = buildDebateForkSeed(src as never, 1)
+    // 前缀 2 + end-seed + turn/end(forked)。
+    expect(seed.length).toBe(4)
+    expect(seed[2].type).toBe('session/end-seed')
+    expect(seed[3].type).toBe('turn/end')
+    expect((seed[3].data as { reason: { kind: string } }).reason.kind).toBe('forked')
+    // 已闭合的 turn 不补 closer。
+    const closed = [ev('turn/start', { turn: 1 }), ev('turn/end', { turn: 1, reason: { kind: 'completed' } })]
+    expect(buildDebateForkSeed(closed as never, 1).length).toBe(3)
+  })
+  it('单线创建:分叉带种子 + parentSession 血统 + isSeeded=true(继承上下文,非互盲)', async () => {
+    const created: Array<{ sessionId: string; meta?: Record<string, unknown>; seed?: unknown[]; inheritedEventCount?: number; agentOptions?: unknown }> = []
+    const fakeAgents = {
+      get: () => undefined,
+      list: () => [],
+      create: async (options: { sessionId: string; meta?: Record<string, unknown>; seed?: unknown[]; inheritedEventCount?: number; agentOptions?: unknown }) => {
+        created.push({ sessionId: options.sessionId, meta: options.meta, seed: options.seed, inheritedEventCount: options.inheritedEventCount, agentOptions: options.agentOptions })
+        return {
+          agent: {
+            session: { id: options.sessionId, snapshotEvents: () => [] },
+            followup: () => {},
+            whenIdle: async () => {},
+          },
+          dispose: async () => {},
+        }
+      },
+    }
+    const parent = { session: { id: 'parent-1', snapshotEvents: () => [{ type: 'user/message', data: {} }] } }
+    const fakeCtx = {
+      get: (name: string) => name === 'agentDefaultModel'
+        ? { currentSelection: () => ({ provider: 'p', model: 'm-parent' }) }
+        : undefined,
+    }
+    const line = await createSingleThread(
+      fakeCtx as never,
+      fakeAgents as never,
+      parent as never,
+      'debate-x',
+      new AbortController().signal,
+      '/tmp/ws',
+    )
+    await line.dispose()
+    expect(created.length).toBe(1)
+    expect(created[0].sessionId).toBe('debate-debate-x-single')
+    // 分叉血统:parentSession 指向发起会话,isSeeded=true 继承上下文(无互盲);
+    // origin 不带 subagent(与常驻对区分,分叉在侧边栏可见、可回看)。
+    expect(created[0].meta?.parentSession).toBe('parent-1')
+    expect(created[0].meta?.isSeeded).toBe(true)
+    expect(created[0].meta?.origin).toBeUndefined()
+    // 种子透传:源事件前缀 + end-seed,inheritedEventCount 对齐。
+    expect(Array.isArray(created[0].seed)).toBe(true)
+    expect((created[0].seed as unknown[]).length).toBe(2)
+    expect(created[0].inheritedEventCount).toBe(1)
+    // 模型锁定:单线是单模型双角色,分叉跑发起会话当前模型。
+    expect(created[0].agentOptions).toEqual({ provider: 'p', model: 'm-parent' })
+    // 载体直接给 ResidentAgent(不再经 SingleThread 中转,drive 直调不崩)。
+    expect(line.agent.session.id).toBe('debate-debate-x-single')
+  })
+  it('开题→一轮串行交替,transcript 结构与常驻同形', async () => {
+    const s = makeSession()
+    let log: { type: string; data?: unknown }[] = []
+    let i = 0
+    const texts = ['开题立场 A', '开题挑战 B(见建构原文)', 'b1', 'c1']
+    const agent = {
+      session: { id: 'single', snapshotEvents: () => [...log] },
+      followup: () => {
+        const text = texts[i++] ?? 'x'
+        log = [
+          ...log,
+          { type: 'turn/start', data: { turn: 1 } },
+          { type: 'assistant/message', data: { message: { content: [{ type: 'text', text }] }, stream: [] } },
+          { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+        ]
+      },
+      whenIdle: async () => {},
+      cancel: () => {},
+    }
+    const line = { sessionId: 'single', agent, dispose: async () => {} } as never
+    // 同一 agent 连续 drive 两段:driveResidentTurn 用 suffix 切分,天然有序。
+    const { round } = await (async () => {
+      await stepOpenSingle(line, s, signal)
+      return stepRoundSingle(line, s, signal)
+    })()
+    expect(round).toBe(1)
+    expect(s.transcript.length).toBe(4)
+    expect(s.transcript.map((e: { role: string }) => e.role)).toEqual(['builder', 'challenger', 'builder', 'challenger'])
   })
 })
 

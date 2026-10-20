@@ -11,6 +11,7 @@
  * v0.3:host 直驱(parent 取自 ctx.agents.get(sessionId),agentOptions 锁定辩手模型)。
  */
 import type { Context } from 'cordis'
+import { rm } from 'node:fs/promises'
 
 /** 最小 Agent 面:runDebateLoop 需要 parent 身份 + 会话事件读取 + 进度镜像。 */
 export interface ParentAgent {
@@ -90,9 +91,9 @@ interface DebateSession {
   stopReason: 'convergence' | 'saturation' | 'maxRounds' | 'manual' | null
   /** 每轮判定的解析输入(agree/answer/hasNewInfo)——停机理由可审计,不只给结论(ADR-0014)。 */
   rounds: DebateRound[]
-  /** 实际驱动方式(resident=常驻交棒,oneShot=一次性起辩回退)。 */
-  mode: 'resident' | 'oneShot'
-  /** 常驻建对失败原因(成功回退时也记,便于面板/探针看清为什么没走常驻)。 */
+  /** 实际驱动方式(single=单线分叉交替,resident=常驻交棒,oneShot=一次性起辩回退)。 */
+  mode: 'single' | 'resident' | 'oneShot'
+  /** 单线/常驻建对失败原因(成功回退时也记,便于面板/探针看清为什么没走单线)。 */
   residentError: string | null
   /**
    * 生效笼型(S16):常驻建对时 schemas 核对的结果(剔除失效名/未核对),并入已启动进度行。
@@ -132,6 +133,10 @@ interface DebateSession {
   persistError: string | null
   /** 结论文档写入失败原因(null=成功或还没试过)。 */
   reportError: string | null
+  /** 单线分叉清扫失败原因(null=清干净或本局没走单线)。清扫失败不掩盖辩论结果,只留痕。 */
+  sweepError: string | null
+  /** 本局清掉的分叉会话 id(文档已落盘,草稿纸已撕)。 */
+  sweptSessions: string[]
   /** 本局是从磁盘恢复的(宿主重启后仍打得开),不是本进程新建的。 */
   restored: boolean
   /**
@@ -488,6 +493,8 @@ async function loadPersisted(ctx: Context): Promise<number> {
         reportRel: fixed.reportRel,
         persistError: null,
         reportError: null,
+        sweepError: null,
+        sweptSessions: [],
         restored: true,
       }
       restored.flush = () => schedulePersist(ctx, restored)
@@ -677,7 +684,187 @@ export interface AgentsLike {
     agentOptions?: { provider?: string; model?: string }
     signal?: AbortSignal
     setup?: (agentCtx: any, agent?: any) => void | Promise<void>
+    /** fork 种子(照抄原生 fork:buildForkSeed 切源会话事件前缀 + session/end-seed 标记)。 */
+    seed?: Array<{ type: string; seq?: number; time?: number; data?: unknown }>
+    inheritedEventCount?: number
   }): Promise<{ agent: unknown; dispose(): Promise<void> }>
+}
+
+/** fork 种子事件面(自实现 buildForkSeed 的输入输出同形,不引宿主内部包)。 */
+export interface SeedEvent {
+  type: string
+  seq?: number
+  time?: number
+  data?: unknown
+}
+
+/**
+ * fork 种子自实现(照抄 dsh-session/fork.ts buildForkSeed,不引宿主内部包):
+ * 切源事件 inclusive 前缀 + session/end-seed 标记,再补开尾 turn 的 forked closer
+ * (openTurnClosers 同形:turn/start 未配对 turn/end 即开尾,补 tool 回收结果 + step/end + turn/end;
+ * 开尾 turn 由新会话自然收敛不成立——种子里的开 turn 会污染新会话首 turn 边界,必须闭合)。
+ */
+export function buildDebateForkSeed(
+  events: SeedEvent[],
+  boundary: number,
+): SeedEvent[] {
+  const prefix = events.slice(0, boundary + 1)
+  const last = events[boundary]
+  const at = last?.time ?? Date.now()
+  const seqBase = (typeof last?.seq === 'number' ? last.seq : boundary) + 1
+  const out: SeedEvent[] = [...prefix]
+  out.push({ type: 'session/end-seed', seq: seqBase, time: at, data: { inherited: true } })
+  // 开尾检测:最后一个 turn/start 之后有没有配对的 turn/end。
+  let openTurn: unknown = null
+  let openStep: unknown = null
+  for (const e of prefix) {
+    if (e.type === 'turn/start') { openTurn = (e.data as { turn?: unknown } | undefined)?.turn ?? true; openStep = null }
+    else if (e.type === 'turn/end') { openTurn = null; openStep = null }
+    else if (e.type === 'step/start') { openStep = (e.data as { step?: unknown } | undefined)?.step ?? true }
+    else if (e.type === 'step/end') { openStep = null }
+  }
+  let seq = seqBase + 1
+  if (openTurn !== null) {
+    if (openStep !== null) {
+      out.push({ type: 'step/end', seq: seq++, time: at, data: { turn: openTurn, step: openStep } })
+    }
+    out.push({ type: 'turn/end', seq: seq++, time: at, data: { turn: openTurn, reason: { kind: 'forked' } } })
+  }
+  return out
+}
+
+/** 单线交替载体:分叉会话 = 可直接 driveResidentTurn 的 ResidentAgent + 会话 id + dispose。 */
+export interface SingleThread {
+  readonly sessionId: string
+  readonly agent: ResidentAgent
+  dispose(): Promise<void>
+}
+
+/**
+ * 单线分叉创建:从发起会话 fork 一个子会话当交替线(种子=发起会话当前上下文)。
+ * 照抄原生 fork 链:seed + inheritedEventCount + meta(parentSession/isSeeded=true)
+ * + agentOptions(发起会话当前模型,单模型双角色:agentDefaultModel.currentSelection,
+ * 与 fork 链同源;拿不到则不带,让 preset 默认模型接管) + setup(join preset 生成)。
+ * cwd 三级:显式目标工作区 > 发起会话 cwd > 进程目录(与 createResidentPair 同序)。
+ * 注意:分叉 origin 不带 subagent(与常驻对区分,分叉在侧边栏可见、可回看)。
+ */
+export async function createSingleThread(
+  ctx: Context,
+  agents: AgentsLike,
+  parent: ParentAgent,
+  debateId: string,
+  signal: AbortSignal,
+  targetCwd?: string,
+): Promise<SingleThread> {
+  const get = (ctx as unknown as { get(name: string): unknown }).get.bind(ctx)
+  const presets = get('agentPresets') as AgentPresetsLike | undefined
+  const presetId = presets?.defaultId ?? null
+  const parentCtx = (parent as any)?.ctx as unknown | undefined
+  const inheritCwd = (parent as any)?.session?.header?.cwd as string | undefined
+  const cwd = targetCwd !== undefined && targetCwd !== '' ? targetCwd
+    : inheritCwd !== undefined && inheritCwd !== '' ? inheritCwd : process.cwd()
+  // 种子:发起会话当前事件前缀(全量,boundary=末尾)。
+  const sourceEvents = readParentEvents(parent) as SeedEvent[]
+  const boundary = sourceEvents.length - 1
+  const seed = boundary >= 0 ? buildDebateForkSeed(sourceEvents, boundary) : undefined
+  const sessionId = `debate-${debateId}-single`
+  // 模型锁定:单线是单模型双角色,分叉跑发起会话当前模型(与 fork 链同源)。
+  let agentOptions: { provider: string; model: string } | undefined
+  try {
+    const dm = get('agentDefaultModel') as { currentSelection?: () => { provider: string; model: string } } | undefined
+    const sel = dm?.currentSelection?.()
+    if (sel && typeof sel.provider === 'string' && typeof sel.model === 'string') {
+      agentOptions = { provider: sel.provider, model: sel.model }
+    }
+  } catch { /* 拿不到则不带,让 preset 默认模型接管 */ }
+  const handle = await agents.create({
+    sessionId,
+    parentAgent: parent,
+    meta: {
+      cwd,
+      parentSession: parent.session.id,
+      isSeeded: true,
+      ...(presetId !== null && presetId !== '' ? { agentPreset: presetId } : {}),
+    },
+    ...(seed ? { seed, inheritedEventCount: boundary + 1 } : {}),
+    ...(agentOptions ? { agentOptions } : {}),
+    setup: async (agentCtx: unknown) => {
+      try {
+        if (presets?.composeFrom && parentCtx) {
+          presets.composeFrom(agentCtx, parentCtx)
+        } else if (presets && presetId !== null && presetId !== '') {
+          await presets.mount(agentCtx, presetId)
+        }
+      } catch { /* join 失败不拦创建 */ }
+      try {
+        (agentCtx as ResidentSetupCtx).systemPrompt.context({
+          name: 'subagent:delegation',
+          order: (agentCtx as ResidentSetupCtx).systemPrompt.getContextOrder('SUBAGENT_DELEGATION'),
+          text: SUBAGENT_DELEGATION_CONTEXT,
+        })
+      } catch { /* 上下文挂不上不拦创建 */ }
+    },
+  })
+  const agent = handle.agent as ResidentAgent
+  return { sessionId, agent, dispose: handle.dispose }
+}
+
+/**
+ * 单线分叉落盘清扫(辩论结束四步收尾的后三步,文档已落盘之后才调,顺序不能反)。
+ * 临时会话+文档存档:分叉是计算草稿纸,结论全在文档里,盘文件不留。
+ * 只删 `debate-<debateId>-single` 一个确定性 id,不碰别的(卡死前缀,不误删)。
+ * ① detach:从 workspace 注册表摘引用(分叉建时可能已挂进去,幂等空跑居多)
+ * ② rm:删会话目录(宿主无删会话 API,插件跑在宿主进程里直接走文件系统)
+ * 失败只留痕不抛:清扫失败不掩盖辩论结果,只记 session.sweepError。
+ */
+export async function sweepSingleThread(
+  ctx: Context,
+  debateId: string,
+): Promise<{ detached: string[]; removed: string[]; errors: string[] }> {
+  const detached: string[] = []
+  const removed: string[] = []
+  const errors: string[] = []
+  const sid = `debate-${debateId}-single`
+  const get = (ctx as unknown as { get(name: string): unknown }).get.bind(ctx)
+  try {
+    const registry = get('workspaceRegistry') as
+      | { list(): Array<{ detachSession(sid: string): Promise<void> }> }
+      | undefined
+    if (registry) {
+      for (const ws of registry.list()) {
+        try { await ws.detachSession(sid); detached.push(sid) } catch (e) {
+          errors.push(`detach ${sid}: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      }
+    }
+  } catch (e) {
+    errors.push(`registry: ${e instanceof Error ? e.message : String(e)}`)
+  }
+  try {
+    const persistence = get('sessionPersistence') as
+      | { locate(meta: { cwd?: string; id: string }): { path: string } }
+      | undefined
+    if (persistence) {
+      try {
+        const ss = get('sessions') as unknown as
+          | { store?: { get?: (k: string) => { session?: { header?: { cwd?: string } } } } }
+          | undefined
+        const header = ss?.store?.get?.(sid)?.session?.header
+          ?? (get('agents') as { get(id: string): { session?: { header?: { cwd?: string } } } | undefined } | undefined)?.get(sid)?.session?.header
+        const { path } = persistence.locate({ cwd: header?.cwd, id: sid })
+        const { dirname } = await import('node:path')
+        await rm(dirname(path), { recursive: true, force: true })
+        removed.push(sid)
+      } catch (e) {
+        errors.push(`rm ${sid}: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    } else {
+      errors.push('sessionPersistence unavailable')
+    }
+  } catch (e) {
+    errors.push(`locate: ${e instanceof Error ? e.message : String(e)}`)
+  }
+  return { detached, removed, errors }
 }
 
 /** 常驻辩手 live 面(resident_debater):followup 交棒 + whenIdle 等 turn + 读自有事件。 */
@@ -810,6 +997,7 @@ export async function runHostDebate(
   }
   let owned: { dispose(): Promise<void> } | null = null
   let pair: ResidentPair | null = null
+  let single: SingleThread | null = null
   try {
     const get = (ctx as unknown as { get(name: string): unknown }).get.bind(ctx)
     const subagents = get('subagents') as SubagentsLike | undefined
@@ -886,9 +1074,9 @@ export async function runHostDebate(
     // 建对失败(agents 不可用/setup 被拒)才回退一次性起辩,transcript 为空时才可退。
     if (agents) {
       try {
-        setProgress(session, `常驻辩手建对中(建构 ${session.config.builder.model} vs 挑战 ${session.config.challenger.model})…`)
-        pair = await createResidentPair(ctx, agents, parent, session.id, session.config.builder, session.config.challenger, signal, session.config.targetCwd)
-        session.mode = 'resident'
+        setProgress(session, `单线分叉创建中(交替线,种子=当前上下文)…`)
+        single = await createSingleThread(ctx, agents, parent, session.id, signal, session.config.targetCwd)
+        session.mode = 'single'
         session.residentError = null
         // S16:生效笼型并入已启动行。核对源 = parent 的 schemas 全局视图(与 debug-agent 同源);
         // 取不到按种子先发、标未核对(挑战者终轮结论:不把可选接口当启动硬依赖)。
@@ -903,22 +1091,40 @@ export async function runHostDebate(
           session.cageNote = cageLabel(DEBATER_TOOL_ALLOW, [], true)
         }
         // 笼标签进已启动行:会话可见生效笼型,不只写日志(辩论结论,开局挂一次,不必每轮刷新)。
-        setProgress(session, `已启动:「${auto.question}」(建构 ${session.config.builder.model} vs 挑战 ${session.config.challenger.model},共 ${session.config.maxRounds} 轮)。${session.cageNote}。建构者开写中…`)
+        setProgress(session, `已启动:「${auto.question}」(单线交替,共 ${session.config.maxRounds} 轮)。${session.cageNote}。建构者开写中…`)
       } catch (e) {
         if (signal.aborted) throw new Error('aborted')
-        // 回退必须可观测:面板/探针要能回答"为什么这局不是常驻"。
-        session.residentError = (e as Error)?.message ?? String(e)
-        session.mode = 'oneShot'
-        setProgress(session, `常驻建对失败(${session.residentError}),回退一次性起辩…`)
-        mirror(parent, session, `⚠ 常驻辩手建对失败,已回退一次性起辩。原因:${session.residentError}`)
-        pair = null
+        // 单线失败原因先留着(面板/探针要能回答"为什么这局不是单线");常驻再失败才覆盖。
+        const singleError = (e as Error)?.message ?? String(e)
+        try {
+          setProgress(session, `常驻辩手建对中(建构 ${session.config.builder.model} vs 挑战 ${session.config.challenger.model})…`)
+          pair = await createResidentPair(ctx, agents, parent, session.id, session.config.builder, session.config.challenger, signal, session.config.targetCwd)
+          session.mode = 'resident'
+          // 笼标签进已启动行:会话可见生效笼型,不只写日志(辩论结论,开局挂一次,不必每轮刷新)。
+          setProgress(session, `已启动:「${auto.question}」(建构 ${session.config.builder.model} vs 挑战 ${session.config.challenger.model},共 ${session.config.maxRounds} 轮)。${session.cageNote}。建构者开写中…`)
+        } catch (e2) {
+          if (signal.aborted) throw new Error('aborted')
+          // 回退必须可观测:单线、常驻两段失败原因都留(分号隔开),面板/探针能回答整条回退链。
+          session.residentError = `single:${singleError}; resident:${(e2 as Error)?.message ?? String(e2)}`
+          session.mode = 'oneShot'
+          setProgress(session, `单线/常驻均失败(${session.residentError}),回退一次性起辩…`)
+          mirror(parent, session, `⚠ 单线分叉与常驻建对均失败,已回退一次性起辩。原因:${session.residentError}`)
+          pair = null
+        }
       }
     } else {
       session.mode = 'oneShot'
       session.residentError = 'agents service unavailable'
     }
     try {
-      if (pair) {
+      if (single) {
+        await stepOpenSingle(single, session, signal, {
+          onStart: () => live.onStart('建构者开写中(单线)…'),
+          onSide: (role, text) => live.onSide(role,
+            role === 'builder' ? '建构者开题(单线)' : '挑战者开题(单线·见建构原文)',
+            `问题:${auto.question}\n题型:${auto.questionType}\n\n${text}`),
+        })
+      } else if (pair) {
         await stepOpenResident(pair, session, signal, {
           onStart: () => live.onStart('建构者与挑战者互盲开写中(常驻)…'),
           onSide: (role, text) => live.onSide(role,
@@ -934,10 +1140,14 @@ export async function runHostDebate(
         })
       }
     } finally {
-      // 开题即失败且走的是常驻:成对回收,不留孤儿会话。
+      // 开题即失败且走的是常驻/单线:成对回收,不留孤儿会话。
       if (pair && session.round < 0) {
         try { await pair.dispose() } catch { /* 回收失败不掩盖开题错 */ }
         pair = null
+      }
+      if (single && session.round < 0) {
+        try { await single.dispose() } catch { /* 回收失败不掩盖开题错 */ }
+        single = null
       }
     }
     setProgress(session, `开题完成,进入第 1/${session.config.maxRounds} 轮交锋`)
@@ -950,7 +1160,17 @@ export async function runHostDebate(
       let bOut: string
       let cOut: string
       let relayChars = 0
-      if (pair) {
+      if (single) {
+        const out = await stepRoundSingle(single, session, signal, {
+          onStart: (role) => live.onStart(role === 'builder' ? `第 ${r} 轮建构方开写中(单线)…` : `第 ${r} 轮挑战方开写中(单线)…`),
+          onSide: (role, text) => live.onSide(role,
+            role === 'builder' ? `交锋第 ${r}/${session.config.maxRounds} 轮·建构方(单线)` : `交锋第 ${r}/${session.config.maxRounds} 轮·挑战方(单线)`,
+            text),
+        })
+        bOut = out.builderOut
+        cOut = out.challengerOut
+        relayChars = out.builderRelayChars
+      } else if (pair) {
         const out = await stepRoundResident(pair, session, signal, {
           onStart: (role) => live.onStart(role === 'builder' ? `第 ${r} 轮建构方开写中(常驻)…` : `第 ${r} 轮挑战方开写中(常驻)…`),
           onSide: (role, text) => live.onSide(role,
@@ -1053,6 +1273,20 @@ export async function runHostDebate(
     await persist(ctx, session)
     done()
   } finally {
+    if (single) {
+      try { await single.dispose() } catch { /* 单线回收失败不影响结果 */ }
+      // 临时会话+文档存档:文档已落盘(persist 在 try/catch 里做了),分叉盘文件清掉不留。
+      // 清扫失败只留痕(记 session.sweepError,面板可见),不掩盖辩论结果。
+      try {
+        const sweep = await sweepSingleThread(ctx, session.id)
+        if (sweep.errors.length > 0) {
+          session.sweepError = sweep.errors.join('; ')
+        }
+        session.sweptSessions = sweep.removed
+      } catch (e) {
+        session.sweepError = e instanceof Error ? e.message : String(e)
+      }
+    }
     if (pair) {
       try { await pair.dispose() } catch { /* 常驻回收失败不影响结果 */ }
     }
@@ -1837,6 +2071,80 @@ export async function stepRoundResident(
 }
 
 /**
+ * 单线开题:分叉会话里建构先写、挑战再写(串行,无互盲——挑战方能看到建构方原文)。
+ * 驱动复用 driveResidentTurn(事件边界归因,同一会话里两段 turn 天然有序);
+ * prompt 与 stepRoundResident 同形,只是载体从双会话换成单分叉。
+ */
+export async function stepOpenSingle(
+  line: SingleThread,
+  session: DebateSession,
+  signal: AbortSignal,
+  live?: StepLive,
+): Promise<{ builderOpen: string; challengerOpen: string }> {
+  const auto = requireAuto(session)
+  const lensObjs = lensObjsOf(session)
+  const ctxText = auto.context ?? ''
+  const agent = line.agent
+  live?.onStart?.('builder')
+  const builderOpen = await driveResidentTurn(agent, buildBuilderPrompt(auto.question, lensObjs, auto.questionType, ctxText), 'builder', signal,
+    (p) => { session.streaming.builder = { round: 0, kind: p.kind, text: p.text } })
+  delete session.streaming.builder
+  pushEntry(session, 'builder', 0, builderOpen)
+  live?.onSide?.('builder', builderOpen)
+  live?.onStart?.('challenger')
+  // 无互盲:挑战开题直接用地建构原文(同轮全文,逐条反驳有据可依)。
+  const challengerOpen = await driveResidentTurn(agent, buildChallengerPrompt(auto.question, builderOpen, '', 0, session.config.maxRounds, ctxText, ''), 'challenger', signal,
+    (p) => { session.streaming.challenger = { round: 0, kind: p.kind, text: p.text } })
+  delete session.streaming.challenger
+  pushEntry(session, 'challenger', 0, challengerOpen)
+  live?.onSide?.('challenger', challengerOpen)
+  session.round = 0
+  // 单线防呆豁免:同一会话单模型双角色,自报一致是必然(不是路由失效)。
+  // 常驻/ one-shot 才查 isRouteIneffective(双路不同模型还报一致才是事故)。
+  return { builderOpen, challengerOpen }
+}
+
+/**
+ * 单线交锋一轮(串行 建构→挑战,同一分叉)。prompt 与 stepRoundResident 同形,
+ * 只换载体:交棒载荷照样瘦身(ADR-0015),记忆在分叉事件流里,transcript 照落。
+ */
+export async function stepRoundSingle(
+  line: SingleThread,
+  session: DebateSession,
+  signal: AbortSignal,
+  live?: StepLive,
+): Promise<{ round: number; builderOut: string; challengerOut: string; builderRelayChars: number }> {
+  const cfg = session.config
+  const auto = requireAuto(session)
+  const next = session.round + 1
+  if (next > cfg.maxRounds) throw new Error(`rounds-exhausted: maxRounds=${cfg.maxRounds}`)
+  if (signal.aborted) throw new Error('aborted')
+  const ctxText = auto.context ?? ''
+  const prevRound = session.round
+  const builderPrevRaw = prevRound === 0
+    ? lastBy(session, 'builder', 0)
+    : lastBy(session, 'challenger', prevRound)
+  const brief = prevRound === 0 ? { text: builderPrevRaw, briefChars: builderPrevRaw.length } : slimHandoff(builderPrevRaw)
+  const builderPrev = brief.text
+  const focus = focusBlockOf(session)
+  const agent = line.agent
+  live?.onStart?.('builder')
+  const bOut = await driveResidentTurn(agent, buildBuilderRoundPrompt(auto.question, builderPrev, next, cfg.maxRounds, ctxText, focus), 'builder', signal,
+    (p) => { session.streaming.builder = { round: next, kind: p.kind, text: p.text } })
+  delete session.streaming.builder
+  pushEntry(session, 'builder', next, bOut)
+  live?.onSide?.('builder', bOut)
+  live?.onStart?.('challenger')
+  const cOut = await driveResidentTurn(agent, buildChallengerPrompt(auto.question, bOut, '', next, cfg.maxRounds, ctxText, focus), 'challenger', signal,
+    (p) => { session.streaming.challenger = { round: next, kind: p.kind, text: p.text } })
+  delete session.streaming.challenger
+  pushEntry(session, 'challenger', next, cOut)
+  live?.onSide?.('challenger', cOut)
+  session.round = next
+  return { round: next, builderOut: bOut, challengerOut: cOut, builderRelayChars: brief.briefChars }
+}
+
+/**
  * 记一轮判定输入并给出停机结论(host 直驱与工具分步共用,ADR-0014 判定同源)。
  * 返回 'convergence'/'saturation' 表示应停机;null 表示继续。
  */
@@ -2018,6 +2326,8 @@ export default {
             reportRel: null,
             persistError: null,
             reportError: null,
+        sweepError: null,
+        sweptSessions: [],
             restored: false,
           }
           session.flush = () => schedulePersist(ctx, session)
@@ -2558,6 +2868,8 @@ export default {
             reportRel: null,
             persistError: null,
             reportError: null,
+        sweepError: null,
+        sweptSessions: [],
             restored: false,
           }
           session.flush = () => schedulePersist(ctx, session)
