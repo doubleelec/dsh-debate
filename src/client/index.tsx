@@ -320,7 +320,9 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
   const [builder, setBuilder] = useState(0)
   const [challenger, setChallenger] = useState(2)
   const [synth, setSynth] = useState(0)
-  const [rounds, setRounds] = useState(5)
+  // 轮数输入存字符串:空串就是空串,backspace 删得掉;提交时再转数字(空/非法回落默认 5,钳到 1~20)。
+  // 存 number 会 Number('')===0 回填,删出 0 后再也删不掉(线上实测:5→backspace→0→删不掉)。
+  const [roundsText, setRoundsText] = useState('5')
   // 跟局 id:聊天开局后模型返回的会话 id,面板粘贴即看实况。
   const [followId, setFollowId] = useState('')
   // targetCwd 面板不再露:聊天开局(debate_start)自动继承会话 cwd;HTTP 建单默认进程目录。
@@ -530,6 +532,13 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
   useEffect(() => () => {
     if (timer.current !== null) window.clearInterval(timer.current)  }, [])
 
+  /** 轮数提交值:空/非法回落默认 5,钳到 1~20(host 侧 normalizeConfig 同口径再兜底)。 */
+  const roundsToSubmit = (): number => {
+    const n = Math.floor(Number(roundsText))
+    if (!Number.isFinite(n)) return 5
+    return Math.min(20, Math.max(1, n))
+  }
+
   const start = async (): Promise<void> => {
     setError(null); setTurns([]); setCopied(false); setResolved(null); setProgress('')
     setStopReason(null); setRoundAudits([]); setMode(''); setMirrorCount(0); setMirrorError(null); setStreams({}); setDecision(null)
@@ -545,7 +554,7 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
         builder: MODELS[builder],
         challenger: MODELS[challenger],
         synthesizer: MODELS[synth],
-        maxRounds: rounds,
+        maxRounds: roundsToSubmit(),
         hint,
         sid: liveSid,
         cwd: liveCwd,
@@ -746,7 +755,7 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
         </div>
         <div className={C('dshd-field')}>
           <span>{tr('rounds.label')}</span>
-          <input type="number" min={1} max={20} value={rounds} onChange={(e) => setRounds(Number(e.target.value))} disabled={status === 'running'} />
+          <input type="number" min={1} max={20} value={roundsText} placeholder="5(默认)" onChange={(e) => setRoundsText(e.target.value)} disabled={status === 'running'} />
         </div>
         <div className={C('dshd-note')}>输入框写问题 → 点开始辩论即开(工作区自动取当前会话,不用填)。实况在本面板看,跑完点"复制成果地图"并回对话。</div>
         {resolved !== null && (
