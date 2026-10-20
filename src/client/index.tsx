@@ -22,6 +22,10 @@ import { splitSections } from './sections'
 import { resolveSessionId } from './session'
 import { roleName, roundLabel, roundSummary, stopKey } from './labels'
 import {
+  parseInvolvedLines, suggestTasksRoot, validateTaskBuild,
+  loadTaskPrefs, saveTaskPrefs,
+} from './task'
+import {
   DIALOG_DEFAULT_H, DIALOG_DEFAULT_W,
   clampDialogHeight, clampDialogWidth, clampStoredHeight, clampStoredWidth,
   loadManualHeight, loadManualWidth, saveManualHeight, saveManualWidth,
@@ -230,6 +234,13 @@ const openListeners = new Set<(v: boolean) => void>()
 let panelOpen = false
 const subscribeOpen = (fn: (v: boolean) => void): (() => void) => { openListeners.add(fn); return () => { openListeners.delete(fn) } }
 const setPanelOpen = (v: boolean): void => { panelOpen = v; openListeners.forEach((fn) => fn(v)) }
+// 多仓任务面板(ADR-0025):与辩论面板同为 shell.overlay 对话框,独立开关。
+// 原生发送键不可拦截(inputActions 全仓只有 setDraft),任务启动必须走面板显式按钮。
+let openTaskPanel: (() => void) | null = null
+const openTaskListeners = new Set<(v: boolean) => void>()
+let taskPanelOpen = false
+const subscribeTaskOpen = (fn: (v: boolean) => void): (() => void) => { openTaskListeners.add(fn); return () => { openTaskListeners.delete(fn) } }
+const setTaskPanelOpen = (v: boolean): void => { taskPanelOpen = v; openTaskListeners.forEach((fn) => fn(v)) }
 let prefillQuestion = ''
 // 当前会话 id(input.right 是 session scope,标准 props 自带 sessionId,入口每次渲染更新)。
 let currentSid = ''
@@ -975,13 +986,23 @@ function TurnCard(props: { turn: Turn }): React.ReactNode {
 }
 function DebateRoot(props: { useSessions?: (s: unknown) => unknown }): React.ReactNode {
   const [open, setOpen] = useState(panelOpen)
+  const [taskOpen, setTaskOpen] = useState(taskPanelOpen)
   useEffect(() => subscribeOpen(setOpen), [])
+  useEffect(() => subscribeTaskOpen(setTaskOpen), [])
   useEffect(() => {
     openPanel = () => setPanelOpen(true)
     return () => { if (openPanel !== null) openPanel = null }
   }, [])
-  if (!open) return null
-  return <DebateDialog onClose={() => setPanelOpen(false)} useSessions={props.useSessions} />
+  useEffect(() => {
+    openTaskPanel = () => setTaskPanelOpen(true)
+    return () => { if (openTaskPanel !== null) openTaskPanel = null }
+  }, [])
+  return (
+    <>
+      {open && <DebateDialog onClose={() => setPanelOpen(false)} useSessions={props.useSessions} />}
+      {taskOpen && <TaskDialog onClose={() => setTaskPanelOpen(false)} />}
+    </>
+  )
 }
 
 function InputButton(props: { useInput?: (s: unknown) => unknown; inputActions?: InputActs }): React.ReactNode {
@@ -992,20 +1013,60 @@ function InputButton(props: { useInput?: (s: unknown) => unknown; inputActions?:
     if (typeof input?.draft === 'string') draft = input.draft
   } catch { /* store 不可用时按空处理 */ }
   const ready = draft.trim() !== ''
-  const actions = props.inputActions
+  const [menu, setMenu] = useState(false)
+  // 增强菜单(ADR-0025):按钮常亮(置灰只对"以草稿开辩/建任务"有意义,菜单两项各走各的门)。
+  // - 辩论:草稿是辩题起点,无草稿点开面板会提示"先写问题"。
+  // - 多仓任务:标题/仓都走面板表单,无草稿也能开,所以不禁用。
+  const openDebate = (): void => {
+    setMenu(false)
+    if (!ready) {
+      // 无草稿也开面板,面板会提示先写问题(比按钮置灰更可达)。
+      prefillQuestion = ''
+      openPanel?.()
+      return
+    }
+    // 只读不清空:内容进对话框起点展示,等点"开始辩论"建单成功后才清空输入框。
+    prefillQuestion = draft.trim()
+    openPanel?.()
+  }
+  const openTask = (): void => {
+    setMenu(false)
+    // 草稿不清:任务标题走面板表单,草稿留给用户自己发。
+    openTaskPanel?.()
+  }
+  useEffect(() => {
+    if (!menu) return
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') setMenu(false) }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [menu])
   return (
-    <button
-      type="button"
-      className={C('dshd-dockbtn') + (ready ? '' : ` ${C('dshd-dockbtn-off')}`)}
-      title={ready ? '以输入框内容为起点开辩' : '先在输入框写下要辩的问题'}
-      disabled={!ready}
-      onClick={() => {
-        if (!ready) return
-        // 只读不清空:内容进对话框起点展示,等点"开始辩论"建单成功后才清空输入框。
-        prefillQuestion = draft.trim()
-        openPanel?.()
-      }}
-    ><span>⚔ 辩论</span></button>
+    <span className={C('dshd-enhance')}>
+      <button
+        type="button"
+        className={C('dshd-dockbtn')}
+        title="增强:开辩论 / 建多仓任务"
+        aria-haspopup="menu"
+        aria-expanded={menu}
+        onClick={() => setMenu((v) => !v)}
+      ><span>✦ 增强</span></button>
+      {menu && (
+        <span className={C('dshd-menu')} role="menu">
+          <button
+            type="button" role="menuitem"
+            className={C('dshd-menuitem')}
+            title={ready ? '以输入框内容为起点开辩' : '开辩论面板(先在输入框写下要辩的问题)'}
+            onClick={openDebate}
+          ><span>{ready ? '⚔ 以草稿开辩论' : '⚔ 开辩论'}</span></button>
+          <button
+            type="button" role="menuitem"
+            className={C('dshd-menuitem')}
+            title="建多仓任务:扫描结构 → 建任务目录 → 拉起执行会话"
+            onClick={openTask}
+          ><span>📦 建多仓任务</span></button>
+        </span>
+      )}
+    </span>
   )
 }
 
@@ -1028,6 +1089,228 @@ function InputEntry(props: { useInput?: (s: unknown) => unknown; inputActions?: 
     return () => { bridgeInsert = null; clearDraftOnStart = null }
   }, [actions])
   return <InputButton useInput={props.useInput} inputActions={props.inputActions} />
+}
+
+/** 扫描条目(host /api/task/scan 原样)。 */
+interface TaskRepo {
+  relPath: string
+  kind: 'repo' | 'part' | 'external' | 'unknown'
+  gitRoot?: string | null
+  reason?: string
+  aliases?: string[]
+}
+
+/**
+ * 多仓任务面板(ADR-0025):scan → build → launch 三步,全走显式按钮。
+ * - 原生发送键不可拦截:任务启动必须点面板里的「建任务并拉起执行会话」。
+ * - 草稿不收走:任务标题走面板表单,草稿留给用户自己发。
+ */
+function TaskDialog(props: { onClose: () => void }): React.ReactNode {
+  const prefs = loadTaskPrefs()
+  const [parentRoot, setParentRoot] = useState(prefs.parentRoot)
+  const [repos, setRepos] = useState<TaskRepo[] | null>(null)
+  const [checked, setChecked] = useState<string[]>([])
+  const [lead, setLead] = useState('')
+  const [slug, setSlug] = useState('')
+  const [title, setTitle] = useState('')
+  const [tasksRoot, setTasksRoot] = useState(prefs.tasksRoot)
+  const [templateDir, setTemplateDir] = useState(prefs.templateDir)
+  const [provider, setProvider] = useState(prefs.provider)
+  const [model, setModel] = useState(prefs.model)
+  const [taskDir, setTaskDir] = useState<string | null>(null)
+  const [sessions, setSessions] = useState<Array<{ repo: string; ok: boolean; sessionId?: string; error?: string }> | null>(null)
+  const [backs, setBacks] = useState<Array<{ file: string; text: string }> | null>(null)
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const toggle = (rel: string): void => {
+    setChecked((prev) => (prev.includes(rel) ? prev.filter((r) => r !== rel) : [...prev, rel]))
+  }
+
+  const scan = async (): Promise<void> => {
+    const root = parentRoot.trim()
+    if (root === '') { setError('先填父目录(多个仓的共同父目录)'); return }
+    setBusy('扫描中…'); setError(null); setRepos(null); setChecked([]); setLead('')
+    try {
+      const r = await api<{ ok: boolean; repos?: TaskRepo[]; error?: string }>('task/scan', { parentRoot: root })
+      if (!r.ok) { setError(r.error ?? 'scan failed'); return }
+      setRepos(r.repos ?? [])
+      // 偏好存一下:下次打开不用重填。
+      saveTaskPrefs({ parentRoot: root, tasksRoot, templateDir, provider, model })
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const build = async (): Promise<void> => {
+    const involved = checked.length > 0 ? checked : parseInvolvedLines('')
+    const err = validateTaskBuild({ slug, lead, involved, tasksRoot: tasksRoot.trim() !== '' ? tasksRoot.trim() : suggestTasksRoot(parentRoot.trim()) })
+    if (err !== null) { setError(err); return }
+    const finalTasksRoot = tasksRoot.trim() !== '' ? tasksRoot.trim() : suggestTasksRoot(parentRoot.trim())
+    setBusy('建任务目录中…'); setError(null); setTaskDir(null); setSessions(null); setBacks(null)
+    try {
+      const r = await api<{ ok: boolean; taskDir?: string; error?: string }>('task/build', {
+        slug: slug.trim(), lead: lead.trim(), involved, title: title.trim() !== '' ? title.trim() : slug.trim(),
+        tasksRoot: finalTasksRoot,
+        parentRoot: parentRoot.trim() !== '' ? parentRoot.trim() : undefined,
+        templateDir: templateDir.trim() !== '' ? templateDir.trim() : undefined,
+        ...(provider.trim() !== '' || model.trim() !== '' ? {} : {}),
+      })
+      if (!r.ok || !r.taskDir) { setError(r.error ?? 'build failed'); return }
+      setTaskDir(r.taskDir)
+      setTasksRoot(finalTasksRoot)
+      saveTaskPrefs({ parentRoot: parentRoot.trim(), tasksRoot: finalTasksRoot, templateDir, provider, model })
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const launch = async (): Promise<void> => {
+    if (taskDir === null) { setError('先建任务目录'); return }
+    setBusy('拉起执行会话中…(directive 须已改成 issued)'); setError(null); setSessions(null)
+    try {
+      const r = await api<{ ok: boolean; sessions?: Array<{ repo: string; ok: boolean; sessionId?: string; error?: string }>; error?: string }>('task/launch', {
+        taskDir, involved: checked, parentRoot: parentRoot.trim(),
+        lead: lead.trim() !== '' ? lead.trim() : undefined,
+        provider: provider.trim() !== '' ? provider.trim() : undefined,
+        model: model.trim() !== '' ? model.trim() : undefined,
+      })
+      if (!r.ok) { setError(r.error ?? 'launch failed'); return }
+      setSessions(r.sessions ?? [])
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const collect = async (): Promise<void> => {
+    if (taskDir === null) { setError('先建任务目录'); return }
+    setBusy('汇总回信中…'); setError(null); setBacks(null)
+    try {
+      const r = await api<{ ok: boolean; backs?: Array<{ file: string; text: string }>; error?: string }>('task/collect', { taskDir })
+      if (!r.ok) { setError(r.error ?? 'collect failed'); return }
+      setBacks(r.backs ?? [])
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const verdict = validateTaskBuild({
+    slug, lead,
+    involved: checked,
+    tasksRoot: tasksRoot.trim() !== '' ? tasksRoot.trim() : suggestTasksRoot(parentRoot.trim()),
+  })
+  return (
+    <div className={C('dshd-overlay')} role="dialog" aria-label="多仓任务">
+      <div className={C('dshd-header')}>
+        <span>📦 多仓任务</span>
+        <span className={C('spacer')} />
+        <button className={C('dshd-close')} onClick={props.onClose} aria-label="关闭">✕</button>
+      </div>
+      <div className={C('dshd-body')}>
+        <div className={C('dshd-note')}>扫描结构 → 勾仓建任务目录 → 人审改 issued → 点按钮拉起执行会话(原生回车只发消息,不触发任务)。</div>
+        <div className={C('dshd-field')}>
+          <span>父目录(多个仓的共同父目录)</span>
+          <input type="text" value={parentRoot} onChange={(e) => setParentRoot(e.target.value)} placeholder="如 D:/Users/xxx/Documents/finance" />
+          <div className={C('dshd-actions')}>
+            <button className={C('dshd-start')} onClick={() => { void scan() }} disabled={busy !== ''}>{busy === '扫描中…' ? busy : '扫描结构'}</button>
+          </div>
+        </div>
+        {repos !== null && (
+          <div className={C('dshd-field')}>
+            <span>扫描结果(勾选参任务仓)</span>
+            {repos.map((r) => (
+              <label key={r.relPath} className={C('dshd-checkrow')}>
+                <input type="checkbox" checked={checked.includes(r.relPath)} onChange={() => toggle(r.relPath)} />
+                <span>{r.relPath}</span>
+                <span className={C('dshd-note')}>{r.kind}{r.kind === 'external' && r.reason ? ` · ${r.reason}` : ''}</span>
+                {r.kind !== 'external' && r.kind !== 'unknown' && lead !== r.relPath && (
+                  <button type="button" className={C('dshd-copybtn')} onClick={() => setLead(r.relPath)}>牵头</button>
+                )}
+              </label>
+            ))}
+            {repos.length === 0 && <div className={C('dshd-note')}>空目录:换个父目录再扫。</div>}
+          </div>
+        )}
+        <div className={C('dshd-row')}>
+          <div className={C('dshd-field')}>
+            <span>slug(小写短横线)</span>
+            <input type="text" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="如 broker-empty-semantics" />
+          </div>
+          <div className={C('dshd-field')}>
+            <span>牵头仓</span>
+            <input type="text" value={lead} onChange={(e) => setLead(e.target.value)} placeholder="点扫描结果的「牵头」填入" />
+          </div>
+        </div>
+        <div className={C('dshd-field')}>
+          <span>一句话标题</span>
+          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="如 空语义 broker 试点" />
+        </div>
+        <div className={C('dshd-field')}>
+          <span>任务根目录(.tasks)</span>
+          <input type="text" value={tasksRoot} onChange={(e) => setTasksRoot(e.target.value)} placeholder={suggestTasksRoot(parentRoot.trim()) || '如 D:/…/cross-tasks/.tasks'} />
+          <div className={C('dshd-actions')}>
+            <button type="button" className={C('dshd-copybtn')} onClick={() => setTasksRoot(suggestTasksRoot(parentRoot.trim()))} disabled={parentRoot.trim() === ''}>默认 .tasks</button>
+          </div>
+        </div>
+        <div className={C('dshd-field')}>
+          <span>模板目录(可选,缺省任务根上一级)</span>
+          <input type="text" value={templateDir} onChange={(e) => setTemplateDir(e.target.value)} placeholder="含 directive_template.md / to_template.md 的编排库" />
+        </div>
+        <div className={C('dshd-row')}>
+          <div className={C('dshd-field')}>
+            <span>provider(可选)</span>
+            <input type="text" value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="缺省读宿主默认" />
+          </div>
+          <div className={C('dshd-field')}>
+            <span>model(可选)</span>
+            <input type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="缺省读宿主默认" />
+          </div>
+        </div>
+        {verdict !== null && <div className={C('dshd-note')}>待填:{verdict}</div>}
+        <div className={C('dshd-actions')}>
+          <button className={C('dshd-start')} onClick={() => { void build() }} disabled={busy !== '' || verdict !== null}>{busy !== '' ? busy : '建任务目录'}</button>
+        </div>
+        {taskDir !== null && (
+          <div className={C('dshd-resolved')}>
+            <div><b>任务目录:</b>{taskDir}</div>
+            <div className={C('dshd-note')}>去改 directive.md(填实 + status 改 issued),再点下面拉起。</div>
+          </div>
+        )}
+        <div className={C('dshd-actions')}>
+          <button className={C('dshd-start')} onClick={() => { void launch() }} disabled={busy !== '' || taskDir === null || checked.length === 0}>{busy !== '' ? busy : '建任务并拉起执行会话'}</button>
+        </div>
+        {sessions !== null && (
+          <div className={C('dshd-resolved')}>
+            {sessions.map((s) => (
+              <div key={s.repo}><b>{s.repo}</b>: {s.ok ? `会话 ${s.sessionId ?? ''}(去会话列表跟进)` : `失败:${s.error ?? ''}`}</div>
+            ))}
+          </div>
+        )}
+        {taskDir !== null && (
+          <div className={C('dshd-actions')}>
+            <button className={C('dshd-stop')} onClick={() => { void collect() }} disabled={busy !== ''}>汇总回信</button>
+          </div>
+        )}
+        {backs !== null && (
+          <div className={C('dshd-resolved')}>
+            <div><b>回信 {backs.length} 封</b></div>
+            {backs.map((b) => (
+              <div key={b.file}><b>{b.file}</b><div className={C('dshd-note')}>{b.text.split('\n').slice(0, 3).join('\n')}</div></div>
+            ))}
+          </div>
+        )}
+        {error !== null && <div className={C('dshd-error')}>{error}</div>}
+      </div>
+    </div>
+  )
 }
 
 function SettingsView(): React.ReactNode {
@@ -1088,7 +1371,8 @@ export function apply(ctx: CtxLike): void {
       name: 'conversation.input.right',
       id: 'debate-entry',
       order: 100,
-      label: () => '⚔ 双视角辩论',
+      label: () => '✦ 增强(辩论/多仓任务)',
+      // 增强菜单(ADR-0025):不再独占叫"辩论",两项走 overlay 面板显式按钮。
       // Session scope invokes this with the current session ID. The slot's
       // renderSlot call intentionally has no owner props, so props.sessionId
       // is not populated unless we use the registration injection contract.

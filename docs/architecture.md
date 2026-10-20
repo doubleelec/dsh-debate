@@ -56,7 +56,7 @@ flowchart TD
 
 ### 4.2 Logical Decomposition View
 
-- **Purpose**: 单治理模块 `src`，内部按文件分工；client 是嵌套治理模块。
+- **Purpose**: 单治理模块 `src`，内部按文件分工；client 与 task 是嵌套治理模块。
 - **Model/Diagram**:
 
 ```mermaid
@@ -64,11 +64,13 @@ flowchart TD
     index["src/index.ts<br/>(host: 路由/循环/工具笼/超时)"]
     debate["src/debate.ts<br/>(协议: 分类/背景/prompt/判定)"]
     lenses["src/lenses.ts<br/>(视角模板库 v0.1)"]
-    client["src/client<br/>(overlay 对话框/折叠实录)"]
+    task["src/task/<br/>(跨仓任务: scan/materials/ensure-session)"]
+    client["src/client<br/>(overlay 双面板/折叠实录/增强菜单)"]
 
     index -->|"classify/extract/build*"| debate
     index -->|"findLens"| lenses
-    client -->|"POST start/state/stop"| index
+    index -->|"scan/build/launch/report/collect"| task
+    client -->|"POST start/state/stop<br/>POST task/scan/build/launch"| index
 ```
 
 - **Elements**:
@@ -82,6 +84,8 @@ flowchart TD
   - `src/persist.ts`: 留存层的纯函数（无 IO，故可单测）——`toRecord`（**显式白名单**：实时流/镜像开关/flush 等过程态不落盘）/`fromRecord`（宽容反序列化：关键字段缺失或版本超前则跳过该条，次要字段缺就补默认值）+ `markInterrupted`（把上次记 `running` 的局标成已中断）+ `slugify`/`reportRelPath`（文件名净化：Windows 非法字符、首尾点/连字符、按码点截断、中文保留）+ `renderReport`（结论文档排布：决策摘要 → 成果地图 → 每轮判定表 → 折叠全文；表格转义 `|`、正文中和 `</details>`）+ `STORAGE_UNIT/STORAGE_TABLE`。IO 全在 `src/index.ts`（ADR-0019）。
   - `src/client`: 停机审计块 + 镜像状态行（state 早有字段，S3 才接上）；`sections.ts` 纯分段函数（`splitSections` 从 index.tsx 抽出，可单测不拖 React/CSS）。实况只在辩论框内看（2s 轮询 `TurnCard/StreamCard`），独立实况页已删除（生产环境反向代理下基址推导打偏，只会“连接中…”）。
   - `src/client`: `DebateDialog`（2s 轮询 + 分段折叠 `TurnCard`）、`InputEntry`（草稿门控）、`useSessions.current` 透传（修 `input.right` 空 props 的根子）。
+  - `src/task/`: 跨仓任务纯模块（ADR-0025）——`scan.ts`（结构探针，`FsDeps` 注入可测）、`materials.ts`（模板填充 + ASCII 门 + 回信汇总）、`ensure-session.ts`（分组会话三道门：`meta.cwd` → workspace 注册 → `attachSession` → `followup` 派活，`EnsureDeps` 注入可测）。host 路由 `/dsh-debate/api/task/*` 7 条 + 模型工具 `task_*` 5 个，走同一套注册（逐条 register，显式整壳 Schema）。
+  - `src/client`（任务半区）: `✦ 增强` 菜单（`InputButton` 二选一：辩论/多仓任务，按钮常亮各走各的门）+ `TaskDialog`（scan → build → launch 三步显式按钮，偏好存 localStorage）+ `src/client/task.ts` 纯逻辑（解析/校验/偏好，无 React/CSS，node environment 直测）。原生发送键不可拦截——任务启动必须点面板显式按钮（`inputActions` 全仓只有 `setDraft`）。
 
 ### 4.3 Module Documentation Map
 
@@ -89,6 +93,7 @@ flowchart TD
 | ------ | ----------- | ------ | ---------------- |
 | `src` | top-level only | 单插件单模块，无独立发包/测试节拍 | - |
 | `src/client` | top-level only | 随 host 同构建同发布（tsdown 一次出双 bundle） | - |
+| `src/task` | top-level only | TS 纯模块随 host 同构建；治理树沿 `src` submodule 声明（orphan/phantom 门按 `src/client` 同例） | - |
 
 - **Coverage note**: `arch` TOML 覆盖是全量的；`test/`（vitest 单测）、`scripts/`、`tests/` 不在治理树内，见 `architecture.toml` 注释。
 
@@ -125,7 +130,7 @@ sequenceDiagram
 ### 4.5 Deployment/Physical View
 
 - **Purpose**: 单包双 bundle，dev 联调用 3090。
-- **Elements**: `lib/index.js`（host）+ `lib/client.js`（bundle，经 `dsh.client` 声明）；`cordis.patch.yml` 插入组合；`dsh.plugin.json` 声明 `debate_*` 四工具与三槽位。dev 用 `dsh --profile dev --port 3090 --no-open`，client 硬刷（Ctrl+Shift+R）。
+- **Elements**: `lib/index.js`（host）+ `lib/client.js`（bundle，经 `dsh.client` 声明）；`cordis.patch.yml` 插入组合；`dsh.plugin.json` 声明 `debate_*` 4 工具 + `task_*` 5 工具（+ 常驻 `debate_start`）与三槽位（header/overlay/input.right + 设置节）。dev 用 `dsh --profile dev --port 3090 --no-open`，client 硬刷（Ctrl+Shift+R）。
 
 ## 5. Architecture Decisions
 
@@ -151,6 +156,9 @@ sequenceDiagram
 - [ADR-0020](adr/0020-cap-convergence.md): 压线共识——上限处一致是 convergence 的修饰位（`convergedAtCap`），只改说法不改停机；镜像/兜底收尾/面板审计三处标"压线"并给加轮复验建议。
 - [ADR-0021](adr/0021-optional-audit-versioning.md): 可选审计字段不 bump 记录版本——只有不兼容变更才 +1；`pointerAudit` 为判例（`?` 可选 + 缺即 unknown + 只审计不 gate）。
 - [ADR-0022](adr/0022-tool-cage-allowlist.md): 工具笼改白名单——deny 黑名单 fail-open（新工具默认放行），allow 白名单 fail-closed；辩手 6 项、制图员 3 项；启动交集核对（失效剔除、空集失败）、scope-local 走执行期 guard、生效笼型进已启动行 + 落盘（可选审计字段）。
+- [ADR-0023](adr/0023-session-takeover-plan-b.md): 会话接管 B 方案——忙快照 + 一键双停 + 打断可映射（旧局落盘/新局可见/面板画线）。
+- [ADR-0024](adr/0024-single-thread-fork.md): 单线分叉——单模型双角色交替线（互盲拿掉后仍双会话，`followup` 不带模型参数，fork 分叉保主会话零污染）。
+- [ADR-0025](adr/0025-task-merge.md): 增强入口与跨仓任务并入——输入框按钮改"✦ 增强"弹菜单（辩论/多仓任务），原生发送键不借用（`inputActions` 全仓只有 `setDraft`）；task 三纯模块并入 `src/task/`，路由挂 `/dsh-debate/api/task/*` 7 条，模型工具 `task_*` 5 个，launch 三道门 + issued 门照抄 launcher。
 
 ## 6. Constraints and Risks
 

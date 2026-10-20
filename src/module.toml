@@ -6,9 +6,10 @@
 
 [module]
 name = "src"
-description = "Debate host, protocol, lenses, and browser bundle."
+description = "Debate host, protocol, lenses, browser bundle, and cross-repo task launcher."
 submodules = [
     "client",
+    "task",
 ]
 
 [public_api]

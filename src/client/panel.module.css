@@ -458,6 +458,54 @@
   cursor: default;
 }
 
+/* 增强菜单:输入框 dock 按钮旁的弹出菜单(辩论/多仓任务二选一)。 */
+.dshd-enhance {
+  position: relative;
+  display: inline-flex;
+}
+
+.dshd-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 180px;
+  padding: 6px;
+  background: var(--dsw-alias-bg-layer-2, #262626);
+  border: 1px solid var(--dsw-alias-border-inverted, rgba(128,128,128,.28));
+  border-radius: 12px;
+  box-shadow: var(--dsw-alias-shadow-lv3, 0 12px 40px rgba(0, 0, 0, 0.18));
+}
+
+.dshd-menuitem {
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.dshd-menuitem:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12));
+}
+
+/* 任务面板勾选行:复选框 + 路径 + 类型 + 牵头按钮。 */
+.dshd-checkrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 2px 0;
+}
+
 /* 会话 id 行:裸 id + 复制按钮,小字灰色不抢戏。 */
 .dshd-sid {
   margin-top: 4px;

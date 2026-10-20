@@ -11,7 +11,13 @@
       "debate_open",
       "debate_round",
       "debate_synthesize",
-      "debate_run"
+      "debate_run",
+      "debate_start",
+      "task_scan",
+      "task_build",
+      "task_launch",
+      "task_report",
+      "task_collect"
     ],
     "skills": []
   },

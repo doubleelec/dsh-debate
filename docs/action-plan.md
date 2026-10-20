@@ -73,3 +73,5 @@
 | S15 | 问题保真与中间账本:承接语消解(`isContinuationHint`,hint 无实质问题时回落找真正用户问题)+ slugify 清承接语外壳做纵深 + 已决事项第三本账(`settledItemsOf`纯函数+`settledItemsOfSession`,随焦点块带进下一轮,已决不得重开)+ 协议版本 6→7 | done (2026-10-20) | 真实 vitest 套件 **174/174**(新增 4 条:hint 承接语过滤、slugify 兜底、已决收集分账、焦点块已决段)+ 构建产物断言 9/9 + tsc/build 绿 + pytest 治理门绿 |
 | S16 | 白名单工具笼:deny 黑名单改 allow 白名单(fail-closed)+ 辩手 6 项/制图员 3 项 + 启动交集核对(失效剔除/空集失败)+ scope-local 执行期 guard + 生效笼型进已启动行与落盘(cageNote,可选审计字段,ADR-0022) | done (2026-10-20) | 真实 vitest 套件 **181/181**(新增 7 条:双名单只读、角色取名单、交集剔除/空集失败、visibleNamesOf、笼标签、guard 拦 scope-local、cageNote 往返)+ 构建产物断言 12/12 + tsc/build 绿 + pytest 治理门绿 |
 | S17 | 会话接管 B 方案:忙快照(parentBusy 每轮采样)+ 一键双停(/api/interrupt,parent.cancel keepInbox + abort 后台)+ 打断可映射(interruptedAt 落盘/state/面板画线)(ADR-0023) | done (2026-10-20) | 真实 vitest 套件 **186/186**(新增 5 条:打断标记、落盘往返×2、忙快照、双停计划)+ 构建产物断言 14/14 + tsc/build 绿 + pytest 治理门绿 |
+| S18 | 增强入口与跨仓任务并入(ADR-0025):launcher 三纯模块移植 src/task/ + /api/task/* 7 路由 + task_* 5 工具(host)+ 输入框增强菜单 + TaskDialog 三步面板 + src/client/task.ts 纯逻辑(client,原生发送键不借用) | done (2026-10-20) | 真实 suite 229/229(
+pm run test:sandbox,含新增 task 22 + 增强 label 1)+ tsc/build 绿 + pytest 治理门 17 passed |

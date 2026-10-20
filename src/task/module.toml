@@ -1,0 +1,13 @@
+# src/task/module.toml
+# Task launcher module: scan/build/launch/report/collect (ported from dsh-task-launcher).
+# TS sources are not counted by vendored orphan checks (only .py/.ps1 + dirs),
+# so submodules stays empty; TS files are documented in architecture.md §4.2.
+
+[module]
+name = "src/task"
+description = "Cross-repo task launcher: structure scan, material build, grouped session launch."
+submodules = []
+
+[public_api]
+exposed = []
+reason = "No facade: routes in src/index.ts import these modules directly (same-process wiring)."

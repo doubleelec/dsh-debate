@@ -40,6 +40,8 @@ One row per test function in each `tests/<module>/test_invariants.py`. Use the f
 | Test | Enforces | Fails when |
 |:---|:---|:---|
 | `test_invariants.py::test_module_invariants_placeholder` | src placeholder — TS 行为门在 `test/debate.test.ts` (vitest), 本镜像只满足 kit 完备门 | never; 换成真实红线绑定时同步改本行 |
+| `test_invariants.py::test_task_module_invariants_placeholder` | src/task placeholder — TS 行为门在 `test/task-*.test.ts` (vitest), 本镜像只满足 kit 完备门 | never; 换成真实红线绑定时同步改本行 |
+| `test_invariants.py::test_client_module_invariants_placeholder` | src/client placeholder — TS 行为门在 `test/session.test.ts` + `test/dialogLayout.test.ts` (vitest), 本镜像只满足 kit 完备门 | never; 换成真实红线绑定时同步改本行 |
 
 ## Maintenance rules
 

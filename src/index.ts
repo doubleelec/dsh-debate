@@ -12,6 +12,8 @@
  */
 import type { Context } from 'cordis'
 import { rm } from 'node:fs/promises'
+import fs from 'node:fs'
+import path from 'node:path'
 
 /** 最小 Agent 面:runDebateLoop 需要 parent 身份 + 会话事件读取 + 进度镜像。 */
 export interface ParentAgent {
@@ -38,6 +40,10 @@ export { renderTranscriptForSynthesizer, answerShapeOf, answerSpecOf } from './d
 import { BUILD_VERSION, assessVersions, type VersionFacts } from './version'
 import { fromRecord, markInterrupted, renderReport, reportRelPath, STORAGE_TABLE, STORAGE_UNIT, toRecord } from './persist'
 import { findLens, type LensTemplate } from './lenses'
+// 跨仓任务(task):scan/build/launch/report/collect/stop —— 从 dsh-task-launcher 移植(ADR-0025)。
+import { scanParent, defaultDeps as taskDefaultDeps } from './task/scan'
+import { buildMaterials, handoffText, reportFileName, reportMarkdown, assertAscii as assertTaskAscii, leftoverPlaceholders } from './task/materials'
+import { ensureGroupedSession, clearTempHandles as clearTaskTempHandles } from './task/ensure-session'
 
 /** 请求面(结构子集,镜像 explorer)。 */
 export interface DebateHttpRequest {
@@ -916,6 +922,25 @@ export interface ResidentSetupCtx {
 
 /** 每场辩论的中止器(stop 路由 abort,后台任务退出)。 */
 const controllers = new Map<string, AbortController>()
+
+// ───────────────────────── 跨仓任务(task)辅助(ADR-0025) ─────────────────────────
+// 从 dsh-task-launcher 移植：stamp/created/parentRootOf + taskLaunchControllers。
+// task 路由挂 /dsh-debate/api/task/*，与 debate 路由同文件逐条注册。
+
+/** 每次 launch 一仓一控制器(stop 按 key abort 未完成的拉起；已冒出的不回收)。 */
+const taskLaunchControllers = new Map<string, AbortController>()
+
+function taskStampOf(nowMs: number = Date.now()): string {
+  const d = new Date(nowMs)
+  const p = (n: number, w = 2): string => String(n).padStart(w, '0')
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+}
+
+function taskCreatedOf(nowMs: number = Date.now()): string {
+  const d = new Date(nowMs)
+  const p = (n: number, w = 2): string => String(n).padStart(w, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
 
 /**
  * 自建满血 parent(照抄 webhook 样板):meta.agentPreset + setup 里 mount 默认 preset。
@@ -2676,6 +2701,248 @@ export default {
           }
         },
       },
+      // ── 跨仓任务(task)路由(ADR-0025):scan/build/launch/report/collect/stop + task-version。
+      // 全部参数显式,不从调用会话 cwd 推导;模板真身仍在各编排库(templateDir/模板文本显式传)。
+      {
+        kind: 'exact',
+        path: '/dsh-debate/api/task/version',
+        handler: async (_req, res) => {
+          const facts = await versionFacts()
+          return writeJson(res, { ok: true, version: BUILD_VERSION, ...facts })
+        },
+      },
+      {
+        kind: 'exact',
+        path: '/dsh-debate/api/task/scan',
+        handler: async (req, res) => {
+          try {
+            const body = await readJsonBody(req)
+            const parentRoot = body.parentRoot
+            if (typeof parentRoot !== 'string' || parentRoot === '') throw new Error('parentRoot required')
+            assertTaskAscii(parentRoot, 'parentRoot')
+            const externalNames = Array.isArray(body.externalNames) ? body.externalNames as string[] : undefined
+            const out = await scanParent(parentRoot as string, taskDefaultDeps(), externalNames ? { externalNames } : {})
+            return writeJson(res, { ok: true, ...out })
+          } catch (e) {
+            return writeJson(res, { ok: false, error: e instanceof Error ? e.message : String(e) })
+          }
+        },
+      },
+      {
+        kind: 'exact',
+        path: '/dsh-debate/api/task/build',
+        handler: async (req, res) => {
+          try {
+            const body = await readJsonBody(req)
+            const { slug, lead, title, tasksRoot, baselines, parentRoot: bodyParentRoot } = body as Record<string, unknown>
+            const involved = (body as Record<string, unknown>).involved
+            if (typeof slug !== 'string' || slug === '') throw new Error('slug required')
+            if (typeof lead !== 'string' || lead === '') throw new Error('lead required')
+            if (!Array.isArray(involved) || involved.length === 0) throw new Error('involved required')
+            if (typeof tasksRoot !== 'string' || tasksRoot === '') throw new Error('tasksRoot required')
+            assertTaskAscii(slug, 'slug')
+            assertTaskAscii(lead, 'lead')
+            assertTaskAscii(tasksRoot as string, 'tasksRoot')
+            for (const repo of involved as unknown[]) assertTaskAscii(String(repo), 'involved[]')
+            // parentRoot 显式给出时即验 involved 落点存在(路径映射错第一时间暴露,
+            // 不等到 launch 才发现拉错仓);不给则不验。skipInvolvedCheck 显式绕过(测试用)。
+            if (!(body as Record<string, unknown>).skipInvolvedCheck
+              && typeof bodyParentRoot === 'string' && bodyParentRoot !== '') {
+              assertTaskAscii(bodyParentRoot, 'parentRoot')
+              const missing = [lead as string, ...(involved as unknown[]).map(String)]
+                .filter((r, i, a) => a.indexOf(r) === i)
+                .map((r) => ({ repo: r, cwd: path.join(bodyParentRoot, ...r.split('/')) }))
+                .filter(({ cwd }) => {
+                  try {
+                    return !fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()
+                  } catch { return false }
+                })
+                .map(({ repo }) => repo)
+              if (missing.length > 0) {
+                throw new Error(`involved not found under parentRoot ${bodyParentRoot}: ${missing.join(', ')}`)
+              }
+            }
+            // 同秒重调(时间戳唯一):先定唯一 stamp 再渲染材料,version 与目录名同源不錯位。
+            // fs/path 走顶部静态导入(ESM 构建,禁用动态 require)。
+            let stamp = taskStampOf()
+            const tRoot = tasksRoot as string
+            for (let bump = 0; bump < 60 && fs.existsSync(path.join(tRoot, `${slug as string}-${stamp}`)); bump++) {
+              stamp = taskStampOf(Date.now() + (bump + 1) * 1000)
+            }
+            const taskDirName = `${slug as string}-${stamp}`
+            const taskDir = path.join(tRoot, taskDirName)
+            if (fs.existsSync(taskDir)) throw new Error(`task dir collision under ${tRoot} for slug ${slug as string}`)
+            const created = taskCreatedOf()
+            // 模板真身在编排库:调用方显式传 templateDir,或显式传 directiveTemplate/toTemplate 文本覆盖文件读取;
+            // 都不传才回退 tasksRoot 上一级,回退路径仍做 ASCII 门。
+            const bodyRec = body as Record<string, unknown>
+            let directiveTemplate = typeof bodyRec.directiveTemplate === 'string' ? bodyRec.directiveTemplate : null
+            let toTemplate = typeof bodyRec.toTemplate === 'string' ? bodyRec.toTemplate : null
+            if (!directiveTemplate || !toTemplate) {
+              const templateDir = typeof bodyRec.templateDir === 'string' && bodyRec.templateDir !== ''
+                ? bodyRec.templateDir
+                : path.resolve(tRoot, '..')
+              assertTaskAscii(templateDir, 'templateDir')
+              directiveTemplate = directiveTemplate ?? fs.readFileSync(path.join(templateDir, 'directive_template.md'), 'utf-8')
+              toTemplate = toTemplate ?? fs.readFileSync(path.join(templateDir, 'to_template.md'), 'utf-8')
+            }
+            const baseline = typeof baselines === 'string' ? baselines
+              : (baselines !== null && typeof baselines === 'object' && typeof (baselines as Record<string, unknown>).catalog === 'string'
+                ? (baselines as Record<string, unknown>).catalog as string : '<基线由调用方填>')
+            const out = buildMaterials({
+              slug: slug as string, stamp, lead: lead as string, involved: (involved as unknown[]).map(String),
+              title: typeof title === 'string' && title !== '' ? title : (slug as string),
+              baseline, created,
+              directiveTemplate: directiveTemplate as string, toTemplate: toTemplate as string,
+            })
+            // 占位残留断言:模板没填完就报错,不写半成品目录。
+            const leftover = [...leftoverPlaceholders(out.directive), ...out.toFiles.flatMap((f) => leftoverPlaceholders(f.text))]
+            if (leftover.length > 0) throw new Error(`template placeholders unfilled: ${[...new Set(leftover)].slice(0, 5).join(', ')}`)
+            fs.mkdirSync(taskDir, { recursive: true })
+            fs.writeFileSync(path.join(taskDir, 'directive.md'), out.directive, 'utf-8')
+            for (const f of out.toFiles) fs.writeFileSync(path.join(taskDir, f.fileName), f.text, 'utf-8')
+            return writeJson(res, { ok: true, taskDir, taskDirName: out.taskDirName, files: ['directive.md', ...out.toFiles.map((f) => f.fileName)] })
+          } catch (e) {
+            return writeJson(res, { ok: false, error: e instanceof Error ? e.message : String(e) })
+          }
+        },
+      },
+      {
+        kind: 'exact',
+        path: '/dsh-debate/api/task/launch',
+        handler: async (req, res) => {
+          try {
+            const body = await readJsonBody(req)
+            const { taskDir, parentRoot } = body as Record<string, unknown>
+            const involved = (body as Record<string, unknown>).involved
+            if (typeof taskDir !== 'string' || taskDir === '') throw new Error('taskDir required')
+            if (!Array.isArray(involved) || involved.length === 0) throw new Error('involved required')
+            if (typeof parentRoot !== 'string' || parentRoot === '') throw new Error('parentRoot required')
+            assertTaskAscii(taskDir, 'taskDir')
+            assertTaskAscii(parentRoot, 'parentRoot')
+            for (const repo of involved as unknown[]) assertTaskAscii(String(repo), 'involved[]')
+            // issued 后才调:directive 状态非 issued 直接拒收,不拉空模板会话。
+            // 显式传 skipIssuedCheck:true 可绕过(测试/探针用)。
+            if (!(body as Record<string, unknown>).skipIssuedCheck) {
+              // fs 走顶部静态导入。
+              let directiveText = ''
+              try {
+                directiveText = fs.readFileSync(path.join(taskDir, 'directive.md'), 'utf-8')
+              } catch {
+                throw new Error('directive.md not found under taskDir (build first?)')
+              }
+              if (!/^status:\s*issued\b/m.test(directiveText)) {
+                throw new Error('directive not issued (fill it and flip status: draft → issued first)')
+              }
+            }
+            const agents = ctx.get('agents') as { create(o: unknown): Promise<{ agent?: { followup?: (m: unknown) => void } }> } | undefined
+            if (!agents) throw new Error('agents unavailable')
+            const bodyRec = body as Record<string, unknown>
+            const lead = typeof bodyRec.lead === 'string' ? bodyRec.lead : ''
+            if (lead !== '') assertTaskAscii(lead, 'lead')
+            const provider = typeof bodyRec.provider === 'string' && bodyRec.provider !== '' ? bodyRec.provider : undefined
+            const model = typeof bodyRec.model === 'string' && bodyRec.model !== '' ? bodyRec.model : undefined
+            const taskRef = taskDir.replace(/\\/g, '/')
+            const sessions: Array<Record<string, unknown>> = []
+            for (const repo of (involved as unknown[]).map(String)) {
+              const ctl = new AbortController()
+              const key = `${taskDir}::${repo}::${Date.now()}`
+              taskLaunchControllers.set(key, ctl)
+              try {
+                const cwd = path.join(parentRoot, ...repo.split('/'))
+                const text = handoffText(taskRef, repo, repo === lead)
+                if (ctl.signal.aborted) throw new Error('aborted')
+                const out = await ensureGroupedSession(
+                  { get: ctx.get.bind(ctx) as (name: string) => unknown, agents: agents as never },
+                  { cwd, text, signal: ctl.signal, ...(provider ? { provider } : {}), ...(model ? { model } : {}) },
+                )
+                sessions.push({ repo, ok: true, ...out })
+              } catch (e) {
+                sessions.push({ repo, ok: false, error: e instanceof Error ? e.message : String(e) })
+              } finally {
+                taskLaunchControllers.delete(key)
+              }
+            }
+            return writeJson(res, { ok: true, sessions, taskDir })
+          } catch (e) {
+            return writeJson(res, { ok: false, error: e instanceof Error ? e.message : String(e) })
+          }
+        },
+      },
+      {
+        kind: 'exact',
+        path: '/dsh-debate/api/task/report',
+        handler: async (req, res) => {
+          try {
+            const body = await readJsonBody(req)
+            const { taskDir, from } = body as Record<string, unknown>
+            if (typeof taskDir !== 'string' || taskDir === '') throw new Error('taskDir required')
+            if (typeof from !== 'string' || from === '') throw new Error('from required')
+            assertTaskAscii(taskDir, 'taskDir')
+            assertTaskAscii(from, 'from')
+            const bodyRec = body as Record<string, unknown>
+            const fileName = reportFileName(from)
+            const md = reportMarkdown({
+              from,
+              to: typeof bodyRec.to === 'string' ? bodyRec.to : undefined,
+              slug: typeof bodyRec.slug === 'string' ? bodyRec.slug : '',
+              ticket: typeof bodyRec.ticket === 'string' ? bodyRec.ticket : '',
+              created: taskCreatedOf(),
+              stuck: typeof bodyRec.stuck === 'string' ? bodyRec.stuck : '',
+              change: typeof bodyRec.change === 'string' ? bodyRec.change : '',
+              paths: Array.isArray(bodyRec.paths) ? (bodyRec.paths as unknown[]).map(String) : [],
+            })
+            const outPath = path.join(taskDir, fileName)
+            fs.writeFileSync(outPath, md, 'utf-8')
+            return writeJson(res, { ok: true, path: outPath })
+          } catch (e) {
+            return writeJson(res, { ok: false, error: e instanceof Error ? e.message : String(e) })
+          }
+        },
+      },
+      {
+        kind: 'exact',
+        path: '/dsh-debate/api/task/collect',
+        handler: async (req, res) => {
+          try {
+            const body = await readJsonBody(req)
+            const { taskDir } = body as Record<string, unknown>
+            if (typeof taskDir !== 'string' || taskDir === '') throw new Error('taskDir required')
+            assertTaskAscii(taskDir, 'taskDir')
+            const names = fs.readdirSync(taskDir).filter((n) => n.startsWith('back-') && n.endsWith('.md')).sort()
+            const backs = names.map((n) => ({ file: n, text: fs.readFileSync(path.join(taskDir, n), 'utf-8') }))
+            return writeJson(res, { ok: true, backs })
+          } catch (e) {
+            return writeJson(res, { ok: false, error: e instanceof Error ? e.message : String(e) })
+          }
+        },
+      },
+      {
+        kind: 'exact',
+        path: '/dsh-debate/api/task/stop',
+        handler: async (req, res) => {
+          try {
+            const body = await readJsonBody(req)
+            const ids = (body as Record<string, unknown>).ids
+            let stopped = 0
+            if (Array.isArray(ids) && ids.length > 0) {
+              for (const id of ids.map(String)) {
+                const ctl = taskLaunchControllers.get(id)
+                if (ctl) { try { ctl.abort() } catch { /* 忽略 */ } taskLaunchControllers.delete(id); stopped++ }
+              }
+            } else {
+              for (const ctl of taskLaunchControllers.values()) {
+                try { ctl.abort() } catch { /* 忽略 */ } stopped++
+              }
+              taskLaunchControllers.clear()
+            }
+            clearTaskTempHandles()
+            return writeJson(res, { ok: true, stopped })
+          } catch (e) {
+            return writeJson(res, { ok: false, error: e instanceof Error ? e.message : String(e) })
+          }
+        },
+      },
     ]
     // 真实 webServer.register 只接受单个 route(数组会被静默塞进前缀表导致路由失效,见 explorer 经验)
     for (const route of routes) ctx.webServer.register(route)
@@ -2909,6 +3176,228 @@ export default {
           } catch (err) {
             fail(session, err)
           }
+        },
+      })
+      // ── 跨仓任务(task)模型工具(ADR-0025):与 /api/task/* 路由同源,供模型直接调用。
+      // 全部参数显式,不从调用会话 cwd 推导;模板真身仍在各编排库(templateDir/模板文本显式传)。
+      const taskStr = (desc: string): Record<string, unknown> => ({ type: 'string', description: desc })
+      tools.register({
+        name: 'task_scan',
+        description: '扫描父目录下一层子目录的 git 归属,返回 repo/part/external/unknown 分组(多仓任务建单前先看结构)。',
+        parameters: {
+          type: 'object',
+          properties: {
+            parentRoot: taskStr('父目录绝对路径'),
+            externalNames: { type: 'array', description: '可选:外部名单覆盖(缺省命中 finance .gm_ 一族)' },
+          },
+          required: ['parentRoot'],
+        },
+        output: textOut,
+        execute: async (args) => {
+          const a = (args ?? {}) as Record<string, unknown>
+          const parentRoot = a.parentRoot
+          if (typeof parentRoot !== 'string' || parentRoot === '') throw new Error('parentRoot required')
+          assertTaskAscii(parentRoot, 'parentRoot')
+          const externalNames = Array.isArray(a.externalNames) ? (a.externalNames as unknown[]).map(String) : undefined
+          const out = await scanParent(parentRoot, taskDefaultDeps(), externalNames ? { externalNames } : {})
+          return JSON.stringify(out)
+        },
+      })
+      tools.register({
+        name: 'task_build',
+        description: '按 slug/lead/involved 建任务目录(.tasks/<slug>-<时间戳>/),写 directive.md + to-<目标>.md 草稿(人审完改 issued 再 launch)。',
+        parameters: {
+          type: 'object',
+          properties: {
+            slug: taskStr('任务 slug(全小写英文短横线)'),
+            lead: taskStr('牵头仓相对路径'),
+            involved: { type: 'array', description: '涉及仓相对路径列表' },
+            title: taskStr('可选:一句话中文标题(缺省用 slug)'),
+            tasksRoot: taskStr('任务根目录绝对路径(即 .tasks,写盘落点)'),
+            baselines: taskStr('可选:版本基线文本(缺省由调用方填)'),
+            parentRoot: taskStr('可选:父目录绝对路径,给出即校验 involved 落点存在'),
+            templateDir: taskStr('可选:编排库目录(含 directive_template.md/to_template.md);缺省 tasksRoot 上一级'),
+            directiveTemplate: taskStr('可选:总指示模板文本,覆盖文件读取'),
+            toTemplate: taskStr('可选:派活模板文本,覆盖文件读取'),
+          },
+          required: ['slug', 'lead', 'involved', 'tasksRoot'],
+        },
+        output: textOut,
+        execute: async (args) => {
+          const a = (args ?? {}) as Record<string, unknown>
+          const slug = a.slug, lead = a.lead, tasksRoot = a.tasksRoot
+          const involved = a.involved
+          if (typeof slug !== 'string' || slug === '') throw new Error('slug required')
+          if (typeof lead !== 'string' || lead === '') throw new Error('lead required')
+          if (!Array.isArray(involved) || involved.length === 0) throw new Error('involved required')
+          if (typeof tasksRoot !== 'string' || tasksRoot === '') throw new Error('tasksRoot required')
+          assertTaskAscii(slug, 'slug')
+          assertTaskAscii(lead, 'lead')
+          assertTaskAscii(tasksRoot, 'tasksRoot')
+          for (const repo of involved as unknown[]) assertTaskAscii(String(repo), 'involved[]')
+          let stamp = taskStampOf()
+          const tRoot = tasksRoot
+          for (let bump = 0; bump < 60 && fs.existsSync(path.join(tRoot, `${slug}-${stamp}`)); bump++) {
+            stamp = taskStampOf(Date.now() + (bump + 1) * 1000)
+          }
+          const taskDirName = `${slug}-${stamp}`
+          const taskDir = path.join(tRoot, taskDirName)
+          if (fs.existsSync(taskDir)) throw new Error(`task dir collision under ${tRoot} for slug ${slug}`)
+          const created = taskCreatedOf()
+          let directiveTemplate = typeof a.directiveTemplate === 'string' ? a.directiveTemplate : null
+          let toTemplate = typeof a.toTemplate === 'string' ? a.toTemplate : null
+          if (!directiveTemplate || !toTemplate) {
+            const templateDir = typeof a.templateDir === 'string' && a.templateDir !== ''
+              ? a.templateDir
+              : path.resolve(tRoot, '..')
+            assertTaskAscii(templateDir, 'templateDir')
+            directiveTemplate = directiveTemplate ?? fs.readFileSync(path.join(templateDir, 'directive_template.md'), 'utf-8')
+            toTemplate = toTemplate ?? fs.readFileSync(path.join(templateDir, 'to_template.md'), 'utf-8')
+          }
+          const baselines = a.baselines
+          const baseline = typeof baselines === 'string' ? baselines : '<基线由调用方填>'
+          const out = buildMaterials({
+            slug, stamp, lead, involved: (involved as unknown[]).map(String),
+            title: typeof a.title === 'string' && a.title !== '' ? a.title : slug,
+            baseline, created,
+            directiveTemplate: directiveTemplate as string, toTemplate: toTemplate as string,
+          })
+          const leftover = [...leftoverPlaceholders(out.directive), ...out.toFiles.flatMap((f) => leftoverPlaceholders(f.text))]
+          if (leftover.length > 0) throw new Error(`template placeholders unfilled: ${[...new Set(leftover)].slice(0, 5).join(', ')}`)
+          fs.mkdirSync(taskDir, { recursive: true })
+          fs.writeFileSync(path.join(taskDir, 'directive.md'), out.directive, 'utf-8')
+          for (const f of out.toFiles) fs.writeFileSync(path.join(taskDir, f.fileName), f.text, 'utf-8')
+          return JSON.stringify({ ok: true, taskDir, taskDirName: out.taskDirName, files: ['directive.md', ...out.toFiles.map((f) => f.fileName)] })
+        },
+      })
+      tools.register({
+        name: 'task_launch',
+        description: 'directive issued 后一仓一会话拉起执行会话(首句派活照抄 to-<short>.md 口径),返回各仓 sessionId(面板/人在会话列表里跟进)。',
+        parameters: {
+          type: 'object',
+          properties: {
+            taskDir: taskStr('任务目录绝对路径'),
+            involved: { type: 'array', description: '涉及仓相对路径列表' },
+            parentRoot: taskStr('父目录绝对路径'),
+            lead: taskStr('可选:牵头仓相对路径(派活首句标注牵头)'),
+            provider: taskStr('可选:模型 provider(缺省读宿主 presets 默认)'),
+            model: taskStr('可选:模型名(缺省读宿主 presets 默认)'),
+            skipIssuedCheck: { type: 'boolean', description: '可选:跳过 issued 门(测试/探针用)' },
+          },
+          required: ['taskDir', 'involved', 'parentRoot'],
+        },
+        output: textOut,
+        execute: async (args, exec) => {
+          const a = (args ?? {}) as Record<string, unknown>
+          const taskDir = a.taskDir, parentRoot = a.parentRoot
+          const involved = a.involved
+          if (typeof taskDir !== 'string' || taskDir === '') throw new Error('taskDir required')
+          if (!Array.isArray(involved) || involved.length === 0) throw new Error('involved required')
+          if (typeof parentRoot !== 'string' || parentRoot === '') throw new Error('parentRoot required')
+          assertTaskAscii(taskDir, 'taskDir')
+          assertTaskAscii(parentRoot, 'parentRoot')
+          for (const repo of involved as unknown[]) assertTaskAscii(String(repo), 'involved[]')
+          if (!a.skipIssuedCheck) {
+            let directiveText = ''
+            try {
+              directiveText = fs.readFileSync(path.join(taskDir, 'directive.md'), 'utf-8')
+            } catch {
+              throw new Error('directive.md not found under taskDir (build first?)')
+            }
+            if (!/^status:\s*issued\b/m.test(directiveText)) {
+              throw new Error('directive not issued (fill it and flip status: draft → issued first)')
+            }
+          }
+          const agents = ctx.get('agents') as { create(o: unknown): Promise<{ agent?: { followup?: (m: unknown) => void } }> } | undefined
+          if (!agents) throw new Error('agents unavailable')
+          const lead = typeof a.lead === 'string' ? a.lead : ''
+          if (lead !== '') assertTaskAscii(lead, 'lead')
+          const provider = typeof a.provider === 'string' && a.provider !== '' ? a.provider : undefined
+          const model = typeof a.model === 'string' && a.model !== '' ? a.model : undefined
+          const taskRef = taskDir.replace(/\\/g, '/')
+          const sessions: Array<Record<string, unknown>> = []
+          for (const repo of (involved as unknown[]).map(String)) {
+            const ctl = new AbortController()
+            const key = `${taskDir}::${repo}::${Date.now()}`
+            taskLaunchControllers.set(key, ctl)
+            try {
+              const cwd = path.join(parentRoot, ...repo.split('/'))
+              const text = handoffText(taskRef, repo, repo === lead)
+              if (ctl.signal.aborted) throw new Error('aborted')
+              const out = await ensureGroupedSession(
+                { get: ctx.get.bind(ctx) as (name: string) => unknown, agents: agents as never },
+                { cwd, text, signal: exec.signal ?? ctl.signal, ...(provider ? { provider } : {}), ...(model ? { model } : {}) },
+              )
+              sessions.push({ repo, ok: true, ...out })
+            } catch (e) {
+              sessions.push({ repo, ok: false, error: e instanceof Error ? e.message : String(e) })
+            } finally {
+              taskLaunchControllers.delete(key)
+            }
+          }
+          return JSON.stringify({ ok: true, sessions, taskDir })
+        },
+      })
+      tools.register({
+        name: 'task_report',
+        description: 'host 代写 back-<来源短名>.md 回任务目录(执行会话侧调,干活结论落盘)。',
+        parameters: {
+          type: 'object',
+          properties: {
+            taskDir: taskStr('任务目录绝对路径'),
+            from: taskStr('来源仓相对路径'),
+            to: taskStr('可选:收件仓(缺省空)'),
+            slug: taskStr('可选:任务 slug'),
+            ticket: taskStr('可选:本仓票路径'),
+            stuck: taskStr('可选:卡在哪'),
+            change: taskStr('可选:要改什么'),
+            paths: { type: 'array', description: '可选:真身路径列表' },
+          },
+          required: ['taskDir', 'from'],
+        },
+        output: textOut,
+        execute: async (args) => {
+          const a = (args ?? {}) as Record<string, unknown>
+          const taskDir = a.taskDir, from = a.from
+          if (typeof taskDir !== 'string' || taskDir === '') throw new Error('taskDir required')
+          if (typeof from !== 'string' || from === '') throw new Error('from required')
+          assertTaskAscii(taskDir, 'taskDir')
+          assertTaskAscii(from, 'from')
+          const fileName = reportFileName(from)
+          const md = reportMarkdown({
+            from,
+            to: typeof a.to === 'string' ? a.to : undefined,
+            slug: typeof a.slug === 'string' ? a.slug : '',
+            ticket: typeof a.ticket === 'string' ? a.ticket : '',
+            created: taskCreatedOf(),
+            stuck: typeof a.stuck === 'string' ? a.stuck : '',
+            change: typeof a.change === 'string' ? a.change : '',
+            paths: Array.isArray(a.paths) ? (a.paths as unknown[]).map(String) : [],
+          })
+          const outPath = path.join(taskDir, fileName)
+          fs.writeFileSync(outPath, md, 'utf-8')
+          return JSON.stringify({ ok: true, path: outPath })
+        },
+      })
+      tools.register({
+        name: 'task_collect',
+        description: '读回任务目录全部 back-*.md 汇总(牵头仓收尾用)。',
+        parameters: {
+          type: 'object',
+          properties: {
+            taskDir: taskStr('任务目录绝对路径'),
+          },
+          required: ['taskDir'],
+        },
+        output: textOut,
+        execute: async (args) => {
+          const a = (args ?? {}) as Record<string, unknown>
+          const taskDir = a.taskDir
+          if (typeof taskDir !== 'string' || taskDir === '') throw new Error('taskDir required')
+          assertTaskAscii(taskDir, 'taskDir')
+          const names = fs.readdirSync(taskDir).filter((n) => n.startsWith('back-') && n.endsWith('.md')).sort()
+          const backs = names.map((n) => ({ file: n, text: fs.readFileSync(path.join(taskDir, n), 'utf-8') }))
+          return JSON.stringify({ ok: true, backs })
         },
       })
     } catch {
