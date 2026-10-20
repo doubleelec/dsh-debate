@@ -1,19 +1,25 @@
 # dsh-debate
 
-> DSH native plugin that debates open-ended questions via builder/challenger/synthesizer roles and returns a structured, chat-readable argument map.
-> 双视角辩论:为开放性论证题跑建构 / 挑战 / 制图三角色,产出结构化、可直接在对话里读的论证地图,而非单一结论。
+> DSH native plugin with two functions: debate open-ended questions (builder/challenger/synthesizer → argument map) and run cross-repo tasks (scan → build → launch → report/collect).
+> 双功能原生插件：辩论（建构/挑战/制图三角色产出论证地图）+ 跨仓任务（扫结构→建材料→拉会话→回信汇总）。
+
+## 功能
+
+- **辩论**：输入框 `✦ 增强` 菜单 → 辩论项 → 以草稿为辩题起点，单线分叉跑建构/挑战交替，制图出五件套地图（详见 `docs/architecture.md` §4.4a）。
+- **跨仓任务**：`✦ 增强` 菜单 → 多仓任务项 → `TaskDialog` 走 scan → build → launch 三步（人审改 issued 后拉起），report/collect 汇总回信（详见 §4.4b 与 `docs/adr/0025-task-merge.md`）。
 
 ## 状态
 
-v0.1 架子:面板(全配置对话框)+ host 路由(`/dsh-debate/api/*`)+ `debate_run` 工具 + 协议单测。
-完整辩论循环(双模型路由、制图 schema、饱和检测)按 `docs/debate-design.md` 推进。
+v0.13.0：辩论单线分叉默认（ADR-0024）+ 任务并入（ADR-0025）。完整循环按 `docs/architecture.md` 推进；
+`docs/debate-design.md` 是辩论 v0.1 设计草稿（已冻结，只看起源）。
 
 ## 领域文档
 
-- `CONTEXT.md`:术语表(以此为准)
-- `docs/adr/`:6 个已定决策(地图非结论、三角色、混合视角、饱和停机、断言分层、制图员复用)
-- `docs/debate-design.md`:设计草稿
-- `docs/agents/`:工程 skill 约定(issue tracker / domain)
+- `CONTEXT.md`:术语表（以此为准，含多仓任务词汇）
+- `docs/adr/`:25 个已定决策（辩论 0001~0024 + 任务并入 0025）
+- `docs/architecture.md`:全工程唯一架构描述（双功能）
+- `docs/debate-design.md`:辩论设计草稿（v0.1 冻结）
+- `docs/agents/`:工程 skill 约定（issue tracker / domain）
 
 ## 开发
 

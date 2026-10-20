@@ -1,9 +1,8 @@
 # dsh-debate architecture.toml
-# Top-level Architecture-as-Code manifest (arch retrofit baseline + S18/S19 reconcile).
+# Top-level Architecture-as-Code manifest (arch retrofit baseline + S18/S19/S21 reconcile).
 # Single governed tree: src (host + protocol + task wiring) with nested
 # src/client (browser bundle) and src/task (cross-repo task pure modules).
-# test/ (vitest behavior gates) and scripts/ stay outside governance;
-# tests/ (plural) holds the vendored governance suite + per-module invariant mirrors.
+# tests/ holds the vitest behavior suite + vendored governance suite + per-module invariant mirrors.
 
 submodules = [
     "src",

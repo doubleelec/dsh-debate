@@ -1,6 +1,7 @@
 # 辩论图谱语境
 
 为开放性论证题产出一套成果地图的双视角辩论所用的领域语言。
+跨仓任务（scan/build/launch/report/collect）词汇见末节"多仓任务"。
 
 ## Language
 
@@ -309,3 +310,32 @@ _Avoid_: 中断，强制停止，双杀
 stop/interrupt 时 transcript 停在哪（round/seq），面板在实录对应位置画线。
 transcript 本来就全保留，这个标记是"断在哪"的映射。
 _Avoid_: 断点，中断位置，标记位
+
+### 多仓任务（ADR-0025）
+
+**结构探针（task_scan）**:
+输入父目录，输出旗下直接子目录的 git 归属分组：
+`repo`（独立检出）/ `part`（父库的一部分）/ `external`（名单或 junction，跳过）/
+`unknown`（拿不准，人勾）。
+_Avoid_: 仓扫描，目录探测，仓库发现
+
+**任务材料（task_materials）**:
+`build` 写出的任务目录（`<slug>-<stamp>/`）：`directive.md` 总指示（`status: draft`，
+人审完改 `issued`）+ 一仓一封 `to-<short>.md` 派活草稿。占位没填完就报错，不写半成品。
+_Avoid_: 任务目录，派活材料，build 产物
+
+**总指示签发（directive_issued）**:
+`directive.md` 的 `status: issued` 行。`launch` 前必验：非 issued 拒收，
+不拉空模板会话（草稿直拉会话在 spec 用户故事 3 已否决）。
+_Avoid_: 签发，审批，人审通过
+
+**分组拉起（ensure_grouped）**:
+一仓一会话的拉起编排：workspace 注册存在 → `agents.create` 建会话
+（`meta.cwd` + preset + provider/model 显式）→ `attachSession` 挂进分组 →
+`followup` 派活。缺一不可（见 `ensure-session.ts` 三道门注释）。
+_Avoid_: 会话拉起，建会话，派活
+
+**回信汇总（task_report_collect）**:
+各执行会话的回信（`report`）收拢成汇总（`collect`）。只读回信做呈现，
+不 gate 执行、不改派活。
+_Avoid_: 汇总，收集回信，验收
