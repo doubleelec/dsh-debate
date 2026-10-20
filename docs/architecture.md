@@ -7,7 +7,8 @@
 
 - **System Name**: dsh-debate (doubleelec native DSH plugin `elec-debate`).
 - **Purpose**: 为开放性论证题跑建构 / 挑战 / 制图三角色，产出一套固定五件套成果地图，而非单一结论句。
-- **Scope**: `src/` 下的 host 半区（webServer 路由 + debate 工具 + 辩论循环）与浏览器 bundle（overlay 对话框 + 输入框入口）。`test/`（vitest）、`scripts/`、`tests/governance` 在治理外；部署与发包在圈外（见 spec Out of Scope）。
+- **Scope**: `src/` 下的 host 半区（webServer 路由 + debate/task 工具 + 辩论循环与跨仓任务接线）与浏览器 bundle（overlay 对话框 + 输入框入口 + 任务面板）。`test/`（vitest 行为门）、`scripts/`、`tests/`（pytest 治理门）在治理树外但分工明确（见 §7）；部署与发包在圈外（见 spec Out of Scope）。
+- **Two functions, one seam**: 辩论（`src/index.ts` + `src/debate.ts`）与多仓任务（`src/task/` 三纯模块 + `src/index.ts` 内 task 接线约 480 行）**不分平级目录**——纯逻辑已在同级分开（`debate.ts` vs `task/`），接线层（路由注册/工具注册/控制器）平台强制同文件（tsdown entry 单 `src/index.ts`、路由表在 `apply()` 逐条注册）。硬拆平级目录造 shallow module：删掉它复杂度不消失（deletion test 不过），跨"辩论 vs 任务"没有可变点（two-adapter rule 不过）。减负方向是同模块内抽（`src/task/host.ts`、`src/client/TaskDialog.tsx`），见 ADR-0025 §7。
 
 ## 2. Stakeholders and Concerns
 
@@ -25,6 +26,7 @@
 - **QAS-3 不丢不卡**: 子 agent 调 `ask_user_question` 或大海捞针时必失败、不无限卡 `round=-1`；开题一边挂了另一边的内容保留（`open-failed: builder=… challenger=…`）。**常驻辩手用进度感知超时**：一次性子 agent 走 6 分钟单步超时（无进度可见）；常驻轮次按事件增长判活——4 分钟无新事件判 `stalled`，20 分钟硬顶判 `timeout`（有进度也砍）。实测教训：给常驻轮次套 6 分钟硬顶会误杀"读了两个文件、跑多轮工具"的正常开题。
 - **QAS-4 满血只读**: 辩手能读文件/检索/联网查证（31 工具继承链），但写不了文件、执行不了 shell、套不了娃（白名单笼：辩手 6 项、制图员 3 项，ADR-0022）。
 - **QAS-5 接管可见**: 辩论期间发起会话空闲可说话（host 后台直驱，不占 turn）；忙闲每轮采样可见、一键双停停两边、打断点在实录可指（ADR-0023）。
+- **QAS-6 单线零污染**: 默认单线分叉跑在 fork 子会话里（种子继承上下文，主会话只收转述+摘要）；互盲拿掉后挑战者逐条引用建构原文；辩论结束分叉扫掉，只留结论文档（ADR-0024）。
 
 ## 4. Viewpoints and Views
 
@@ -74,9 +76,10 @@ flowchart TD
 ```
 
 - **Elements**:
-  - `src/index.ts` 宿主侧分两层：
-    - **常驻交棒（默认路径）**：`createResidentPair`（`agents.create` 建双常驻会话 + preset 继承 + `subagent:delegation` 上下文 + 白名单笼：辩手 6 项、交集核对、scope-local guard）、`stepOpenResident/stepRoundResident`（开题互盲、交锋串行）、`driveResidentTurn`（`followup` 投交棒结论 → 进度感知等到 `whenIdle` → 读自有事件后缀 → 校验终止原因 → 取交棒结论；provider `error` 有界重投）、`readResidentEvents/extractHandoffConclusion/epochStopReason/epochStopDetail/turnVerdict`。
-    - **一次性回退**：`askSubagent`（spawn + 工具笼 + 6min 单步超时 + 实报）与 `stepOpen/stepRound/stepSynthesize`；`agents` 缺失或建对失败时整场回退，`mode/residentError` 记录原因。
+  - `src/index.ts` 宿主侧分三层（`mode` 三态，默认单线）：
+    - **单线分叉（默认路径，ADR-0024）**：`createSingleThread`（fork 发起会话：seed=当前上下文 + `isSeeded=true` + 模型锁定发起会话当前模型）+ `stepOpenSingle/stepRoundSingle`（建构先写、挑战再写，串行，无互盲）+ `sweepSingleThread`（文档落盘后删分叉文件，只留结论文档，失败记 `sweepError` 留痕）。
+    - **常驻交棒（回退一）**：`createResidentPair`（`agents.create` 建双常驻会话 + preset 继承 + `subagent:delegation` 上下文 + 白名单笼：辩手 6 项、交集核对、scope-local guard）、`stepOpenResident/stepRoundResident`（开题互盲、交锋串行）、`driveResidentTurn`（`followup` 投交棒结论 → 进度感知等到 `whenIdle` → 读自有事件后缀 → 校验终止原因 → 取交棒结论；provider `error` 有界重投）、`readResidentEvents/extractHandoffConclusion/epochStopReason/epochStopDetail/turnVerdict`。
+    - **一次性回退（回退二）**：`askSubagent`（spawn + 工具笼 + 6min 单步超时 + 实报）与 `stepOpen/stepRound/stepSynthesize`；`agents` 缺失或建对失败时整场回退，`mode/residentError` 记录整条回退链（`single:…; resident:…`）。
     - **共用**：`runHostDebate`（后台直驱 open→round×N→synthesize + 停机三条件）、`createFullParent`（webhook 样板挂 preset）、`mirror`（`user/message` + `surfaceOp:'append'`）。
   - `src/debate.ts`: `classifyQuestion`（关键词启发式）、`extractSessionContext`（4000 字截断）、`buildBuilderPrompt/buildBuilderRoundPrompt/buildChallengerPrompt/buildSynthesizerPrompt`（三段式：结论摘要/详细论证/本轮变化，v4 起带 `focus` 焦点块与篇幅预算；制图要求先出「决策摘要」段）、`parseAgree/parseAnswer/detectNewInfo/isConverged`（停机协议）、`parsePendingItems/normalizePending/pendingStalled/formatPendingFocus`（v4 未决清单焦点账本）、`changesOf/sectionText`（分段取值）、`extractDecisionSummary/stripDecisionSummary/buildFallbackSummary`（v4 收尾陈述）、`isSaturated/normalizeAnswer/containsBannedPhrase`、`STOP_PROTOCOL_VERSION`（B5 解析版本位，v4）、`auditQuotes/QUOTE_FRAG_LEN/QUOTE_HIT_ALERT`（B6 片段级引用审计）、`ROUND_DETAIL_MAX_CHARS/PENDING_MAX_ITEMS`（v4 预算）。
   - `src/lenses.ts`: 四类题型种子模板（selection/review/tradeoff/causal）。
@@ -95,37 +98,37 @@ flowchart TD
 | `src/client` | top-level only | 随 host 同构建同发布（tsdown 一次出双 bundle） | - |
 | `src/task` | top-level only | TS 纯模块随 host 同构建；治理树沿 `src` submodule 声明（orphan/phantom 门按 `src/client` 同例） | - |
 
-- **Coverage note**: `arch` TOML 覆盖是全量的；`test/`（vitest 单测）、`scripts/`、`tests/` 不在治理树内，见 `architecture.toml` 注释。
+- **Coverage note**: `arch` TOML 覆盖是全量的（`src` + 嵌套 `src/client`、`src/task`）；`test/`（vitest 行为门）、`scripts/`、`tests/`（pytest 治理门）在治理树外但分工明确（见 §7）。
 
 ### 4.4 Runtime/Concurrency View
 
-- **Purpose**: 现行一次性起辩（`one_shot_delegation`）的时序；常驻辩手是下一跳（见 §5 ADR-0013 计划）。
+- **Purpose**: 现行单线分叉（`single_thread`，默认；常驻/one-shot 为回退）的时序。
 - **Model/Diagram**:
 
 ```mermaid
 sequenceDiagram
     participant P as 面板
     participant H as runHostDebate
-    participant B as 建构子会话(one-shot)
-    participant C as 挑战子会话(one-shot)
+    participant F as 分叉会话(single)
     participant S as 制图子会话(one-shot)
     P->>H: POST start(hint, sid)
-    H->>B: spawn 开题prompt
-    H->>C: spawn 开题prompt
-    B-->>H: 交棒结论(全文)
-    C-->>H: 交棒结论(全文)
+    H->>F: fork(种子=发起会话上下文)
+    F-->>H: 建构turn
+    H->>F: 挑战prompt(含建构原文)
+    F-->>H: 挑战turn
     loop 每轮 r=1..N
-        H->>B: spawn 挑战者上一段+背景
-        B-->>H: 交棒结论
-        H->>C: spawn 建构本轮+背景
-        C-->>H: 交棒结论
+        H->>F: 建构prompt
+        F-->>H: 建构turn
+        H->>F: 挑战prompt(含建构本轮)
+        F-->>H: 挑战turn
     end
     H->>S: spawn 实录全文
     S-->>H: 成果地图
     H->>P: state(done, transcript, mapText)
+    H->>F: dispose + sweep(删分叉文件)
 ```
 
-- **Elements**: 并发只在开题（`Promise.allSettled` 独立结算）；交锋串行（保证看到最新）；制图只读实录。超时/中止走 `AbortController` 链（外层 stop → 内层 timeout）。接管只做"停两边"（`/api/interrupt`：parent.cancel keepInbox + abort 后台），不做续跑（ADR-0023）。
+- **Elements**: 开题/交锋全串行（同一会话两段 turn 天然有序，无互盲）；交锋串行（保证看到最新）；制图只读实录。超时/中止走 `AbortController` 链（外层 stop → 内层 timeout）。接管只做"停两边"（`/api/interrupt`：parent.cancel keepInbox + abort 后台），不做续跑（ADR-0023）。回退链：单线失败 → 常驻双会话（开题互盲）→ one-shot；`residentError` 记整条链。
 
 ### 4.5 Deployment/Physical View
 
@@ -157,7 +160,7 @@ sequenceDiagram
 - [ADR-0021](adr/0021-optional-audit-versioning.md): 可选审计字段不 bump 记录版本——只有不兼容变更才 +1；`pointerAudit` 为判例（`?` 可选 + 缺即 unknown + 只审计不 gate）。
 - [ADR-0022](adr/0022-tool-cage-allowlist.md): 工具笼改白名单——deny 黑名单 fail-open（新工具默认放行），allow 白名单 fail-closed；辩手 6 项、制图员 3 项；启动交集核对（失效剔除、空集失败）、scope-local 走执行期 guard、生效笼型进已启动行 + 落盘（可选审计字段）。
 - [ADR-0023](adr/0023-session-takeover-plan-b.md): 会话接管 B 方案——忙快照 + 一键双停 + 打断可映射（旧局落盘/新局可见/面板画线）。
-- [ADR-0024](adr/0024-single-thread-fork.md): 单线分叉——单模型双角色交替线（互盲拿掉后仍双会话，`followup` 不带模型参数，fork 分叉保主会话零污染）。
+- [ADR-0024](adr/0024-single-thread-fork.md): 单线分叉——单模型双角色交替线（互盲拿掉：挑战者能看到建构原文逐条反驳；载体用分叉保主会话零污染；种子照抄原生 fork；防呆 `isRouteIneffective` 豁免单线）。
 - [ADR-0025](adr/0025-task-merge.md): 增强入口与跨仓任务并入——输入框按钮改"✦ 增强"弹菜单（辩论/多仓任务），原生发送键不借用（`inputActions` 全仓只有 `setDraft`）；task 三纯模块并入 `src/task/`，路由挂 `/dsh-debate/api/task/*` 7 条，模型工具 `task_*` 5 个，launch 三道门 + issued 门照抄 launcher。
 
 ## 6. Constraints and Risks
@@ -175,7 +178,8 @@ sequenceDiagram
 
 ## 7. Test Architecture
 
-- **Vocabulary**: unit test 管一个 ticket，integration test 管一个 spec，常驻辩手 effort 的 system test 跑“真 1 轮辩论端到端”（两个常驻辩手 + 制图，断言 transcript 结构与交棒链不断）。
-- **Tools**: vitest（`test/debate.test.ts`，53 用例：协议纯函数 + 回合推进 + 面板分段，2026-09-30 本地 53/53）；pytest（`tests/governance` vendored 三件套 + `tests/src` 镜像）；`arch_engine.py check`（TOML/孤儿/幻影/漂移门）；沙箱内 vitest 起不来（spawn EPERM）时用 `.tmp/s{2,3}check_run.cjs` 真跑协议层 + 纯渲染逻辑（tsc 编译后 node 直跑，与 vitest 用例逐条对应）。
-- **Directory layout**: `test/` → vitest；`tests/governance/` → 只读 vendored 门；`tests/src/` → 模块镜像（含 `test_invariants.py` 占位）；`docs/test_index.md` → 治理套件目录；`.tmp/` → 沙箱替代校验脚本与真跑 state（gitignored，可清）。
+- **Vocabulary**: unit test 管一个 ticket，integration test 管一个 spec，常驻辩手 effort 的 system test 跑"真 1 轮辩论端到端"（单线分叉 + 制图，断言 transcript 结构与交替链不断）。
+- **Tools**: vitest（`test/`，192 用例：协议纯函数 + 回合推进 + 单线分叉 + 落盘往返 + 面板分段，2026-10-20 本地 192/192）；pytest（`tests/governance` vendored 三件套 + `tests/src` 镜像）；`arch_engine.py check`（TOML/孤儿/幻影/漂移门）；沙箱内 vitest 起不来（spawn EPERM）时用 `scripts/test-sandbox.mjs` 编译并执行同一份测试文件（垫片遇到未实现的 matcher 抛错而非静默通过）。
+- **Directory layout**: `test/` → vitest 真用例（行为门：协议/回合/单线分叉/落盘/面板）；`tests/governance/` → 只读 vendored 门（架构门，动不得：orphan/phantom/kit 完备/meta-index）；`tests/src/` → 模块镜像占位（只满足 kit 完备门"每个模块必须有镜像目录"，真实行为门在 `test/`）；`docs/test_index.md` → 治理套件目录（只登治理门，不登 vitest）；`.tmp/` → 沙箱替代校验脚本与真跑 state（gitignored，可清）。**`test/` 与 `tests/` 不冗余**：行为对错归前者，架构漂移归后者；删任何一个都丢一扇门。pytest 产物（`__pycache__/`、`.pytest_cache/`）是运行期垃圾，不在治理内（见 `.gitignore` 约束）。
+- **Layer-scope overrides**: 本 effort 单 spec 跨 host+client 双 bundle，其 integration gate 按 system-grade 跑（真起子 agent 读文件，见笼子验证局），已在 `docs/action-plan.md` Wave 1 注记，不静默。
 - **Layer-scope overrides**: 本 effort 单 spec 跨 host+client 双 bundle，其 integration gate 按 system-grade 跑（真起子 agent 读文件，见笼子验证局），已在 `docs/action-plan.md` Wave 1 注记，不静默。

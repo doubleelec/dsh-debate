@@ -1,8 +1,11 @@
 # src/module.toml
-# Module-level manifest (arch retrofit baseline).
+# Module-level manifest (arch retrofit baseline + S19 reconcile).
 # Governs direct children of src/. TS sources are not counted by the
 # vendored orphan check (only .py/.ps1 + dirs), so submodules lists only
-# the nested governed directory; TS files are documented in architecture.md §4.2.
+# the nested governed directories; TS files are documented in architecture.md §4.2.
+# Debate vs task share this module: pure logic already splits at file level
+# (debate.ts vs task/), wiring stays in index.ts (single tsdown entry,
+# route table registered in apply(); see ADR-0025 §7 for why not split).
 
 [module]
 name = "src"

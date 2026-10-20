@@ -1,6 +1,8 @@
 # dsh-debate Action Plan
 
-> Resume point: S7（协议 v4 聚焦与收尾）+ S8（版本真值）+ S9（结论落盘）+ S10（压线共识明示）+ S11（诚实度三件）+ S12（B17 轮数钳制留痕/B18 文件名精练/B19 总结语言铁律）+ S13（B20 打分题收敛三件：定义锁存/议题循环/跑满细分）+ S14（B21 结论答题化：题型结论形状/结论收敛拆行/制图输入清洗/answer收窄/兜底分档）+ S15（B22 文件名与内容双丢问题/B23 中间结论账本）实现完成并本地验证通过——`npm run test:sandbox` 跑真实 vitest 套件 **174/174 全绿、6 个测试文件 0 跳过**、tsc/build 绿、pytest 治理门 15 passed。
+> Resume point: S19（单线分叉：单模型双角色交替线默认驱动）实现完成并本地验证通过——`npm run test:sandbox` 跑真实 vitest 套件 **192/192 全绿、6 个测试文件 0 跳过**、tsc/build 绿、pytest 治理门绿。
+> 单线分叉后一局只产 1 个分叉会话文件（+N×3 个 one-shot 落盘，宿主行为改不了），结束扫掉只留结论文档；用户主会话零污染（转述+摘要才进对话区）。
+> 待线上真跑一局复验：fork→交替→扫盘全链（面板看 `mode:single`）+ 版本号 bump（0.13.0→0.14.0，新功能 minor）。
 > **迁到 v0.5.0 必须先重启宿主进程**：`lib/index.js` 只在宿主启动时加载。准确说不是 DSH 没有热重载，而是本 profile 没开**模块监听**（`dsh-base` 里 `hmr` 的 `root: []`，注释"module roots are opt-in"；ADR-0018 同日更正）。
 > 重启前面板徽标显示 `v?` + 告警（旧宿主没有 `/api/version`，实测 POST 返回 405），这是设计行为不是故障。
 > 重启后徽标应显示 `v0.5.0` 且无告警；随后跑一局真辩论复验两件事：S7（(a) 轮数是否真的下降、(b) 挑战者是否守约输出 `待决清单=` 行、(c) 对话区字数与收尾陈述是否可读）与 S9（(d) `<工作区>/docs/debates/` 下是否真出现结论文档、(e) 再重启一次后粘旧 id 是否仍能取到结论与全文）。
@@ -75,3 +77,4 @@
 | S17 | 会话接管 B 方案:忙快照(parentBusy 每轮采样)+ 一键双停(/api/interrupt,parent.cancel keepInbox + abort 后台)+ 打断可映射(interruptedAt 落盘/state/面板画线)(ADR-0023) | done (2026-10-20) | 真实 vitest 套件 **186/186**(新增 5 条:打断标记、落盘往返×2、忙快照、双停计划)+ 构建产物断言 14/14 + tsc/build 绿 + pytest 治理门绿 |
 | S18 | 增强入口与跨仓任务并入(ADR-0025):launcher 三纯模块移植 src/task/ + /api/task/* 7 路由 + task_* 5 工具(host)+ 输入框增强菜单 + TaskDialog 三步面板 + src/client/task.ts 纯逻辑(client,原生发送键不借用) | done (2026-10-20) | 真实 suite 229/229(
 pm run test:sandbox,含新增 task 22 + 增强 label 1)+ tsc/build 绿 + pytest 治理门 17 passed |
+| S19 | 单线分叉(ADR-0024):单模型双角色交替线默认驱动——fork 发起会话(seed=当前上下文,isSeeded=true,模型锁定发起会话当前模型),建构写完挑战接着写(串行,无互盲);失败回退常驻(开题互盲),再失败回退 one-shot(失败链留痕`single:…; resident:…`);种子补 forked closer(照抄 openTurnClosers);结束扫分叉文件只留结论文档(sweepError/sweptSessions 落盘,可选审计字段不 bump 版本);防呆 isRouteIneffective 豁免单线 | done (2026-10-20) | 真实 vitest 套件 **192/192**(新增 6 条:fork 种子前缀+end-seed/开尾 closer/分叉血统+种子透传+模型锁定/串行交替 transcript 同形/mode 三态往返/sweep 落盘往返)+ 双轴 code-review 复审(Spec 3 硬伤全收:扫盘/模型锁定/失败链; SingleThread 包 ResidentAgent 去 cast)+ tsc/build 绿 |
