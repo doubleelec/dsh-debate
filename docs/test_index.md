@@ -5,7 +5,7 @@ Human-facing catalog of the governance test suite. This file answers two questio
 1. **What does a given test enforce?** — look up any row below.
 2. **Is coverage complete?** — every governance test must have exactly one row; the meta-guard `test_governance_tests_are_indexed` fails on any gap in either direction.
 
-Scope: the **governance suite** (global kit + module-local `test_invariants.py`) **plus the vitest behavior suite** (`tests/vitest/`) — both gates in one catalog. Run them with `npm run test:sandbox` (vitest, 229) and `pytest tests/ -q` (governance + invariants). Unit tests are out of scope.
+Scope: the **governance suite** (global kit + module-local `test_invariants.py`) **plus the vitest behavior suite** (`tests/vitest/`) — both gates in one catalog. Run them with `npm run test:sandbox` (vitest, 233) and `pytest tests/ -q` (governance + invariants). Unit tests are out of scope.
 
 ## Global governance kit
 

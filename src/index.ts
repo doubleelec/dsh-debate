@@ -2101,6 +2101,52 @@ export default {
       },
       {
         kind: 'exact',
+        path: '/dsh-session-enhance/api/debug-followup',
+        handler: async (req, res) => {
+          // T1 探针 P1(一次性,有副作用):对 parent 真调一次 followup,看发起会话
+          // 是否起 turn。只发一条无害心跳文本,不跑模型任务,随时可停。
+          // body: { sid?, text? }。返回 followup 前后 status 快照 + 3s 后的 status。
+          // 用户侧观察:发送按钮是否变停止、有无"深度求索中"蓝字。
+          try {
+            const body = await readJsonBody(req)
+            const agents = ctx.get('agents') as {
+              get(id: string): {
+                followup?: (input: unknown) => void
+                whenIdle?: () => Promise<void>
+                status?: unknown
+                session?: { id: string }
+              } | undefined
+              list(): Array<{ session?: { id: string } }>
+            } | undefined
+            if (!agents) return writeJson(res, { ok: false, error: 'agents service unavailable' })
+            const sid = typeof body.sid === 'string' ? body.sid : ''
+            const live = agents.list().map((a) => a.session?.id ?? '?')
+            const target = sid !== '' ? sid : (live[0] ?? '')
+            if (target === '' || target === '?') return writeJson(res, { ok: true, live, resolved: false })
+            const parent = agents.get(target)
+            if (!parent || typeof parent.followup !== 'function') {
+              return writeJson(res, { ok: true, live, resolved: false, reason: 'no-followup' })
+            }
+            const statusBefore = typeof parent.status === 'string' ? parent.status : String(parent.status)
+            const text = typeof body.text === 'string' && body.text !== ''
+              ? body.text
+              : '【探针】前台占位 turn 测试：这是一条无害心跳，看到请告诉我会话区是否进入运行态。'
+            parent.followup({
+              id: `se-probe-${Date.now().toString(36)}`,
+              role: 'user',
+              content: [{ type: 'text', text }],
+              source: { kind: 'user' },
+            })
+            await new Promise((r) => setTimeout(r, 3000))
+            const statusAfter = typeof parent.status === 'string' ? parent.status : String(parent.status)
+            return writeJson(res, { ok: true, live, resolved: true, sid: target, statusBefore, statusAfter })
+          } catch (e) {
+            return writeJson(res, { ok: false, error: e instanceof Error ? e.message : String(e) })
+          }
+        },
+      },
+      {
+        kind: 'exact',
         path: '/dsh-session-enhance/api/debug-parent',
         handler: async (req, res) => {
           // T1 探针 P0(只读,零副作用):host 如实上报 parent 对象上有哪些可用方法。
