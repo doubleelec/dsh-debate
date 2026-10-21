@@ -87,7 +87,7 @@ flowchart TD
 %%{init: {"flowchart": {"rankSpacing": 24, "nodeSpacing": 24}}}%%
 flowchart TD
     subgraph Entry["入口层"]
-        direction TB
+        direction LR
         composer["Composer 输入框"]
         menu["增强入口<br/>(辩论 任务二选一)"]
         composer --> menu
@@ -103,14 +103,14 @@ flowchart TD
         taskSvc["任务服务<br/>(扫描 构建 拉起 汇总)"]
     end
     subgraph Carry["载体层"]
-        direction TB
+        direction LR
         fork["分叉会话<br/>(默认)"]
         resident["常驻会话对<br/>(回退一)"]
         oneshot["一次会话<br/>(回退二 制图恒用)"]
         taskGroup["执行会话群<br/>(一仓一会话)"]
     end
     subgraph Keep["留存层"]
-        direction TB
+        direction LR
         kv["进行记录<br/>(KV 可续跑)"]
         docs["结论文档<br/>(论证地图 任务回信)"]
         kv --> docs
