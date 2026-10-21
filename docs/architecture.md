@@ -78,42 +78,49 @@ flowchart TD
 
 ### 4.2 Logical Decomposition View
 
-- **Purpose**: 整体架构一张图：host 接线居中，辩论纯逻辑与任务纯逻辑是平级对等目录，面板双半区同 overlay。
+- **Purpose**: 职责分层一张图：入口 / 交互 / 服务 / 载体 / 留存五层。图里只讲职责、不带文件名——"哪个职责落在哪个目录"见 §4.3 映射表，文件名索引见 Elements。
 - **Model/Diagram**:
 
 ```mermaid
 flowchart TD
-    subgraph Shell["外壳 host + 面板"]
+    subgraph Entry["入口层"]
         direction LR
-        index["src/index.ts<br/>(host 路由 循环 工具笼)"]
-        client["src/client<br/>(DebateDialog TaskDialog)"]
-        index --- client
+        composer["Composer 输入框<br/>(用户意图)"]
+        menu["增强入口<br/>(辩论 任务二选一)"]
+        composer --> menu
     end
-    subgraph Debate["辩论纯逻辑 src/debate"]
+    subgraph Face["交互层"]
         direction LR
-        proto["debate.ts<br/>(协议 分类 prompt 判定)"]
-        lens["lenses.ts<br/>(视角模板库)"]
-        pers["persist.ts<br/>(留存纯函数)"]
-        proto --> lens
+        debateUI["辩论面板<br/>(开题 轮次 成果)"]
+        taskUI["任务面板<br/>(扫描 构建 拉起 汇总)"]
     end
-    subgraph Task["任务纯逻辑 src/cross_tasks"]
+    subgraph Service["服务层"]
         direction LR
-        scan["scan.ts<br/>(结构探针)"]
-        mats["materials.ts<br/>(模板填充)"]
-        sess["ensure-session.ts<br/>(分组三道门)"]
+        debateSvc["辩论服务<br/>(建构 挑战 制图)"]
+        taskSvc["任务服务<br/>(扫描 构建 拉起 汇总)"]
     end
-    subgraph Shared["共享"]
+    subgraph Carry["载体层"]
         direction LR
-        ver["src/version.ts<br/>(版本真值)"]
+        fork["分叉会话<br/>(默认)"]
+        resident["常驻会话对<br/>(回退一)"]
+        oneshot["一次会话<br/>(回退二 制图恒用)"]
     end
-    Shell ==> Debate
-    Shell ==> Task
-    Shell --- Shared
+    subgraph Keep["留存层"]
+        direction LR
+        kv["进行记录<br/>(KV 可续跑)"]
+        docs["结论文档<br/>(论证地图 任务回信)"]
+    end
+
+    Entry --> Face
+    Face --> Service
+    Service --> Carry
+    Service --> Keep
+    Carry -.->|"建对失败降级"| Carry
 
     subgraph Legend["Legend"]
         direction LR
-        L1["solid = 同模块调用"]
-        L2["thick = host 调纯逻辑"]
+        L1["solid = 调用"]
+        L2["dashed = 降级"]
     end
 ```
 
@@ -141,10 +148,11 @@ flowchart TD
 
 | Module | Docs bucket | Reason | Module doc paths |
 | ------ | ----------- | ------ | ---------------- |
-| `src` | top-level only | 单插件单模块，无独立发包/测试节拍 | - |
-| `src/client` | top-level only | 随 host 同构建同发布（tsdown 一次出双 bundle） | - |
-| `src/debate` | top-level only | 辩论纯逻辑，与 `src/cross_tasks/` 平级对等（S22）；随 host 同构建，无独立节拍 | - |
-| `src/task` | top-level only | TS 纯模块随 host 同构建；与 `src/debate/` 平级对等（S22 对称） | - |
+| `src` | top-level only | host 接线：路由注册/辩论循环/工具笼 + task 接线（单 tsdown entry，同文件逐条注册） | - |
+| `src/client` | top-level only | 交互层：DebateDialog + TaskDialog 双面板，同 overlay；随 host 同构建同发布 | - |
+| `src/debate` | top-level only | 辩论服务纯逻辑（协议/分类/prompt/判定 + 视角模板 + 留存纯函数），与 `src/cross_tasks/` 平级对等 | - |
+| `src/cross_tasks` | top-level only | 任务服务纯逻辑（scan/materials/ensure-session），与 `src/debate/` 平级对等；`src/task` 旧名 | - |
+| `src/version.ts` | top-level only | 共享：版本真值（host/client 共用，`src` 直属文件） | - |
 
 - **Coverage note**: `arch` TOML 覆盖是全量的（`src` + 嵌套 `src/client`、`src/debate`、`src/cross_tasks`）；测试单列 `tests/`（§7：vitest 行为门 + pytest 治理门，两扇门一处放，不再分 `test/`/`tests/` 两目录）。
 - **Naming (S23)**: 内部目录 `src/cross_tasks/` vs 公开面 `task_*` / `/api/task/*`——目录名取自废弃原型腾出的 `cross-tasks`（snake 式），公开面保持 `task` 前缀（breaking 边界：工具名/路由/manifest 不动）。文档里"跨仓任务"泛指功能，`cross_tasks` 特指代码目录，`cross-tasks`（kebab）仅指被废弃的原型实例目录，不混用。
