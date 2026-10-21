@@ -104,18 +104,26 @@ flowchart TD
         fork["分叉会话<br/>(默认)"]
         resident["常驻会话对<br/>(回退一)"]
         oneshot["一次会话<br/>(回退二 制图恒用)"]
+        taskGroup["执行会话群<br/>(一仓一会话)"]
     end
     subgraph Keep["留存层"]
         direction LR
         kv["进行记录<br/>(KV 可续跑)"]
         docs["结论文档<br/>(论证地图 任务回信)"]
+        kv --> docs
     end
 
-    Entry --> Face
-    Face --> Service
-    Service --> Carry
-    Service --> Keep
-    Carry -.->|"建对失败降级"| Carry
+    menu --> debateUI
+    menu --> taskUI
+    debateUI --> debateSvc
+    taskUI --> taskSvc
+    debateSvc --> fork
+    fork -.->|建对失败降级| resident
+    resident -.->|再失败降级| oneshot
+    debateSvc --> oneshot
+    taskSvc --> taskGroup
+    debateSvc --> kv
+    taskSvc --> kv
 
     subgraph Legend["Legend"]
         direction LR
