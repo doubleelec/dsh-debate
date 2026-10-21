@@ -8,9 +8,13 @@
   Everything needing elevation happens inside this one session:
     1. npm run build (lib/ is what DSH actually loads).
     2. Install the local repo into the web profile as a decoupled copy.
-  The dev profile (3090) is intentionally NOT touched: it is a symlink to
-  this repo, so `npm run build` + refresh 3090 is all dev needs — no
-  install step, no elevation.
+  The dev profile (3090) is intentionally NOT touched: its copy can be
+  refreshed by rebuilding (`npm run build`) and copying lib/ into the dev
+  profile dir + refreshing 3090 — no install step, no elevation.
+  (Note 2026-10-21: dev was once a symlink to this repo, but after the
+  dsh-debate dead-symlink cleanup it is a real directory copy; check with
+  `ls $env:USERPROFILE\.dsh\profiles\dev\node_modules\@doubleelec\`
+  before assuming either layout.)
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts/setup.ps1
