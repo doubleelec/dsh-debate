@@ -86,6 +86,8 @@ flowchart TD
 ```mermaid
 %%{init: {"flowchart": {"rankSpacing": 24, "nodeSpacing": 24, "htmlLabels": true, "useMaxWidth": false}}}%%
 flowchart TD
+    %% 子图内横排走 TB + 无边同 rank（天然横排，零隐形边）；
+    %% LR 对无边叶子是竖排倾向（与直觉相反），见 ai_proxy docs/issues/084 机理。
     subgraph Entry["入口层"]
         direction TB
         composer["Composer 输入框"]
@@ -93,16 +95,14 @@ flowchart TD
         composer --> menu
     end
     subgraph Face["交互层"]
-        direction LR
+        direction TB
         debateUI["辩论面板<br/>(开题 轮次 成果)"]
         taskUI["任务面板<br/>(扫描 构建 拉起 汇总)"]
-        debateUI ~~~ taskUI
     end
     subgraph Service["服务层"]
-        direction LR
+        direction TB
         debateSvc["辩论服务<br/>(建构 挑战 制图)"]
         taskSvc["任务服务<br/>(扫描 构建 拉起 汇总)"]
-        debateSvc ~~~ taskSvc
     end
     subgraph Carry["载体层"]
         direction TB
