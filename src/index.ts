@@ -2099,6 +2099,40 @@ export default {
           }
         },
       },
+      {
+        kind: 'exact',
+        path: '/dsh-session-enhance/api/debug-parent',
+        handler: async (req, res) => {
+          // T1 探针 P0(只读,零副作用):host 如实上报 parent 对象上有哪些可用方法。
+          // 不调用 followup,不起 turn,只枚举能力,决定 P1 是否值得动手。
+          // body: { sid } (发起会话 id;不传则取第一个活体)。
+          try {
+            const body = await readJsonBody(req)
+            const agents = ctx.get('agents') as {
+              get(id: string): Record<string, unknown> | undefined
+              list(): Array<{ session?: { id: string } }>
+            } | undefined
+            if (!agents) return writeJson(res, { ok: false, error: 'agents service unavailable' })
+            const sid = typeof body.sid === 'string' ? body.sid : ''
+            const live = agents.list().map((a) => a.session?.id ?? '?')
+            const target = sid !== '' ? sid : (live[0] ?? '')
+            if (target === '' || target === '?') return writeJson(res, { ok: true, live, resolved: false })
+            const parent = agents.get(target)
+            if (!parent) return writeJson(res, { ok: true, live, resolved: false })
+            const keys = Object.keys(parent).sort()
+            const cap: Record<string, string> = {}
+            for (const k of ['followup', 'cancel', 'whenIdle', 'status', 'dispose', 'session', 'ctx']) {
+              const v = (parent as Record<string, unknown>)[k]
+              cap[k] = typeof v + (typeof v === 'function' ? `(${String(v).slice(0, 80)})` : '')
+            }
+            const sess = (parent as Record<string, unknown>).session as Record<string, unknown> | undefined
+            const sessKeys = sess ? Object.keys(sess).sort() : []
+            return writeJson(res, { ok: true, live, resolved: true, sid: target, keys, cap, sessKeys })
+          } catch (e) {
+            return writeJson(res, { ok: false, error: e instanceof Error ? e.message : String(e) })
+          }
+        },
+      },
       // ── 跨仓任务(task)路由(ADR-0025):scan/build/launch/report/collect/stop + task-version。
       // 全部参数显式,不从调用会话 cwd 推导;模板真身仍在各编排库(templateDir/模板文本显式传)。
       {
