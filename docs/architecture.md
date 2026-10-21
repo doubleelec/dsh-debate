@@ -84,10 +84,11 @@ flowchart TD
 - **Model/Diagram**:
 
 ```mermaid
+%%{init: {"flowchart": {"rankSpacing": 24, "nodeSpacing": 24}}}%%
 flowchart TD
     subgraph Entry["入口层"]
         direction TB
-        composer["Composer 输入框<br/>(用户意图)"]
+        composer["Composer 输入框"]
         menu["增强入口<br/>(辩论 任务二选一)"]
         composer --> menu
     end
