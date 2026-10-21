@@ -41,3 +41,19 @@ session / systemPrompt。
 理论上能让发起会话起一个真实 turn。P1（真调一次看会话区是否进入运行态）值
 得动手。风险：`send(input, "next-turn", true)` 的具体 UI 语义（蓝字？停止按钮？
 用户消息插队？）只能真调看，文档推不出来。
+
+### 维护巡检：debug 路由已超 WIRE-01 基线（2026-10-21）
+
+当前 `src/index.ts` 注册的非 task 路由共 **11 条**（debug / debug-agent /
+debug-child-tools / debug-followup / debug-parent / debug-sessions /
+history / interrupt / start / state / stop / version 取 deliberation 相关），
+而 `src/module.toml` WIRE-01 描述仍写"9 deliberation routes"。
+
+来源：`5a21688`（debug-parent）+ `fdf5d55`（debug-followup）是本 effort
+的探针路由；其余 debug-* 是 S5 旧物。task/* 七路由门不受影响（仍是七条，
+`test_src_task_routes_are_seven` 绿）。
+
+探针路由是临时的，不建议现在改 WIRE-01 数字。T1 收尾时二选一：
+(a) 删探针路由，回到 9；(b) 留作常驻可观测，则把 WIRE-01 改成 11 并在
+`test_src_registered_tools_match_manifest` 旁加条数门。别静默留在 9 对
+11——下次巡检还会报。
