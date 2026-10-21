@@ -84,7 +84,6 @@ flowchart TD
 - **Model/Diagram**:
 
 ```mermaid
-%%{init: {"flowchart": {"rankSpacing": 12, "nodeSpacing": 18}}}%%
 flowchart TD
     subgraph Entry["入口层"]
         direction TB
