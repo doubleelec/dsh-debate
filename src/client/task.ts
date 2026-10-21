@@ -1,5 +1,5 @@
 /**
- * dsh-debate — Client 半区多仓任务面板纯逻辑(无 React/CSS,可单测)。
+ * dsh-session-enhance — Client 半区多仓任务面板纯逻辑(无 React/CSS,可单测)。
  *
  * 收自 ADR-0025 的面板约定:
  * - involved 文本框每行一个相对路径(空行/#注释忽略,首见序去重)。
@@ -63,7 +63,7 @@ export interface TaskPrefs {
   model: string
 }
 
-const PREFS_KEY = 'dshd-task-prefs'
+const PREFS_KEY = 'dshe-task-prefs'
 
 function prefsStore(): { getItem(k: string): string | null; setItem(k: string, v: string): void } | null {
   try {

@@ -21,7 +21,7 @@ v4 把对话区镜像改成摘要（ADR-0017）之后,完整成果地图（实�
 
 ## 决定
 
-### 1. 整局记录进 KV 单元 `dsh_debate`
+### 1. 整局记录进 KV 单元 `dsh_session_enhance`
 
 走存储枢纽 `ctx.get('storage')` → `backend.get('json')` → `kv.open({...})`,
 `per-record` 布局（一局一条文档,每轮保存只重写这一局,不连带整表）。
@@ -29,7 +29,7 @@ v4 把对话区镜像改成摘要（ADR-0017）之后,完整成果地图（实�
 后端名 `json` 有据可查:`dsh-base` 组合包里 `storage-json` 挂在 `dshHomePath('storages')`,
 `storage-domain` 的 config 正是 `backend: json`。
 
-单元名用 **`dsh_debate`（下划线）**:`UNIT_NAME_RE` 实测是 `/^[a-z][a-z0-9_]*$/`,
+单元名用 **`dsh_session_enhance`（下划线）**:`UNIT_NAME_RE` 实测是 `/^[a-z][a-z0-9_]*$/`,
 **连字符非法**。这个坑不查就会在运行时才炸。
 
 ### 2. 刻意**不** import `@deepseek-ai/dsh-storage`
@@ -53,7 +53,7 @@ v4 把对话区镜像改成摘要（ADR-0017）之后,完整成果地图（实�
 `fromRecord` 的判据只到"能不能用"这一层:关键字段缺失 / 版本超前 / 根本不是对象 → 跳过该条;
 次要字段缺失一律补默认值。**多恢复一局胜过少恢复一局**,一条坏记录不该拖垮整张表。
 
-### 5. 结论文档写进 `<targetCwd>/docs/debates/`
+### 5. 结论文档写进 `<targetCwd>/docs/session-enhance/`
 
 文件名:`<日期>-<问题 slug>-<id 尾>.md`。日期+id 尾保证"同一天问同一个问题两次"
 不会互相覆盖,而且能从文件名反查是哪一局。
@@ -108,12 +108,12 @@ v4 把对话区镜像改成摘要（ADR-0017）之后,完整成果地图（实�
 ## Consequences
 
 - `unknown-id` 不再是终点:宿主重启后面板粘旧 id 仍能取到结论与全文。
-- 新增 `/dsh-debate/api/history` 一览,并给 `/api/state` 加了 `reportPath`/`reportRel`/
+- 新增 `/dsh-session-enhance/api/history` 一览,并给 `/api/state` 加了 `reportPath`/`reportRel`/
   `persistError`/`reportError`/`restored` 五个字段。
 - 记录随 transcript 增长（实测一局 10 万字级）,`per-record` 布局把每次写限定在这一局。
 - 白名单的代价:加了内存字段忘了加进 `toRecord`,重启后该字段会静默消失。
   这是刻意的取舍——相容性可审计,比"自动跟随结构"更可控。
 - 结论文档会落在**被评审的工程**里（新增一个未跟踪文件）。这是选定的行为
   （结论属于那个工程,未来的读者在那里找),但用户需要知道:
-  目录固定为 `docs/debates/`,路径每次都会在面板和对话区报出来。
+  目录固定为 `docs/session-enhance/`,路径每次都会在面板和对话区报出来。
 - 恢复的局**不会**继续跑:续跑需要重建常驻对与 parent,那是另一件事,没有冒充。

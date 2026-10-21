@@ -230,15 +230,15 @@ describe('classifyQuestion', () => {
 })
 
 describe('extractSessionContext', () => {
-  it('提取最近 user/assistant 文本,跳过触发语', () => {
+  it('提取最近 user/assistant 文本,跳过面板镜像残留', () => {
     const events = [
       { type: 'user/message', data: { message: { content: 'Redis 压测过了,扛不住' } } },
-      { type: 'user/message', data: { message: { content: '请调用 debate_run 工具执行辩论单 x' } } },
+      { type: 'user/message', data: { message: { content: '思辨开题:执行思辨单 x' } } },
       { type: 'assistant/message', data: { message: { content: '收到' } } },
     ]
     const ctx = extractSessionContext(events)
     expect(ctx).toContain('Redis 压测过了')
-    expect(ctx).not.toContain('debate_run')
+    expect(ctx).not.toContain('思辨开题')
   })
   it('较早的任务背景不应因最近 10 条确认消息而丢失', () => {
     const events = [
@@ -255,10 +255,10 @@ describe('extractSessionContext', () => {
     ]
     expect(extractSessionContext(events)).toContain('PostgreSQL 复制延迟检查')
   })
-  it('对话中提到 debate_run 不应导致整条历史被丢弃', () => {
-    const substantive = '我们前面已经确认：HTTP 硬触发负责启动，且 debate_run 仅是插件里的内部链路名，不是当前用户问题。'
+  it('对话中提到内部链路名不应导致整条历史被丢弃', () => {
+    const substantive = '我们前面已经确认：HTTP 建单负责启动，且 runDebateLoop 仅是插件里的内部函数名，不是当前用户问题。'
     const events = [{ type: 'assistant/message', data: { content: substantive } }]
-    expect(extractSessionContext(events)).toContain('HTTP 硬触发负责启动')
+    expect(extractSessionContext(events)).toContain('HTTP 建单负责启动')
   })
   it('不把单独的继续确认当成背景消息', () => {
     const events = [
@@ -295,12 +295,12 @@ describe('resolveAuto', () => {
     expect(auto?.questionType).toBe('review')
   })
   it('hint 是承接语则视为无 hint,回落到真正的用户问题', () => {
-    // 线上实测:用户在输入框随手写"就以上问题继续辩论",hint 直接当问题,
-    // 整局问题/文件名/结论全跟着错(文件名"就以上问题继续辩论",内容看不出在辩管理架构)。
+    // 线上实测:用户在输入框随手写"就以上问题继续思辨",hint 直接当问题,
+    // 整局问题/文件名/结论全跟着错(文件名"就以上问题继续思辨",内容看不出在谈管理架构)。
     const events = [
       { type: 'user/message', data: { content: '怎样的管理架构更适合 agent 编程' } },
     ]
-    for (const h of ['就以上问题继续辩论', '针对上面的问题继续', '接着刚才的再辩一轮', '以上,继续']) {
+    for (const h of ['就以上问题继续思辨', '针对上面的问题继续', '接着刚才的再谈一轮', '以上,继续']) {
       const auto = resolveAuto(events, h)
       expect(auto?.question).toBe('怎样的管理架构更适合 agent 编程')
     }
@@ -678,14 +678,14 @@ describe('resident relay', () => {
       { get: () => undefined } as never,
       fakeAgents as never,
       parent as never,
-      'debate-x',
+      'se-x',
       { provider: 'p', model: 'b' },
       { provider: 'p', model: 'c' },
       new AbortController().signal,
       '/tmp/ws',
     )
     await pair.dispose()
-    expect(created.map((c) => c.sessionId)).toEqual(['debate-debate-x-builder', 'debate-debate-x-challenger'])
+    expect(created.map((c) => c.sessionId)).toEqual(['se-x-builder', 'se-x-challenger'])
     for (const c of created) {
       // 子会话血统:origin=subagent 让侧边栏隐藏(parent 目录见 subagentCatalog,不进未分组);
       // isSeeded=false 保证互盲(不继承 parent 历史)。
@@ -777,13 +777,13 @@ describe('single thread', () => {
       fakeCtx as never,
       fakeAgents as never,
       parent as never,
-      'debate-x',
+      'se-x',
       new AbortController().signal,
       '/tmp/ws',
     )
     await line.dispose()
     expect(created.length).toBe(1)
-    expect(created[0].sessionId).toBe('debate-debate-x-single')
+    expect(created[0].sessionId).toBe('se-x-single')
     // 分叉血统:parentSession 指向发起会话,isSeeded=true 继承上下文(无互盲);
     // origin 不带 subagent(与常驻对区分,分叉在侧边栏可见、可回看)。
     expect(created[0].meta?.parentSession).toBe('parent-1')
@@ -796,7 +796,7 @@ describe('single thread', () => {
     // 模型锁定:单线是单模型双角色,分叉跑发起会话当前模型。
     expect(created[0].agentOptions).toEqual({ provider: 'p', model: 'm-parent' })
     // 载体直接给 ResidentAgent(不再经 SingleThread 中转,drive 直调不崩)。
-    expect(line.agent.session.id).toBe('debate-debate-x-single')
+    expect(line.agent.session.id).toBe('se-x-single')
   })
   it('开题→一轮串行交替,transcript 结构与常驻同形', async () => {
     const s = makeSession()

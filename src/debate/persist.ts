@@ -16,12 +16,12 @@ import type { DebateConfig, DebateMap, DebateRound, DebateStatus, GapSpan, Trans
 export const RECORD_VERSION = 1
 
 /** 存储单元名。必须匹配 UNIT_NAME_RE `/^[a-z][a-z0-9_]*$/`——**不能用连字符**。 */
-export const STORAGE_UNIT = 'dsh_debate'
+export const STORAGE_UNIT = 'dsh_session_enhance'
 /** 存储表名。 */
 export const STORAGE_TABLE = 'sessions'
 
 /** 结论文档所在目录(相对工作区,posix 分隔符)。 */
-export const REPORT_DIR = 'docs/debates'
+export const REPORT_DIR = 'docs/session-enhance'
 
 /** slug 码点上限。文件名是索引不是复述:12 字 + 日期 + id 尾足够定位,标题全文在文件内第一行。 */
 export const SLUG_MAX_CODEPOINTS = 12
@@ -32,7 +32,7 @@ const SLUG_STOPWORDS = /我现在想|不要太|根据|这个|一个|更好|还�
 /**
  * 承接语外壳(S15):文件名里混进来的指代必须清掉。
  * 纵深:就算 question 里混了承接语(如 hint 和历史拼成的长句),文件名也不该是废话
- * ("就以上问题继续辩论" → 清完剩空 → 回落 debate)。
+ * ("就以上问题继续辩论" → 清完剩空 → 回落 deliberation)。
  * 清掉的是外壳(以上/继续/辩论…),实质问题(如"管理架构")保留。
  */
 const SLUG_CONTINUATION = /(就|请|那请|那么|那|针对|关于|对于|围绕|围绕着)?(以上|上述|前面|之前|刚才|刚刚|先前)(的|这个问题|这些问题|那个问题|讨论|内容|话题)?(继续|接着|再|重新|新开|另起|深入|展开|细化)?(辩论|辩一轮|辩一下|讨论|聊聊|说说|讲讲|来一轮|一轮|一下)?/gu
@@ -207,7 +207,7 @@ export function slugify(q: string): string {
     // Windows 不允许名字以点/空格结尾,连字符开头也容易被当成参数。
     .replace(/^[-.\s]+|[-.\s]+$/g, '')
   const capped = Array.from(cleaned).slice(0, SLUG_MAX_CODEPOINTS).join('')
-  return capped.replace(/[-.\s]+$/g, '') || 'debate'
+  return capped.replace(/[-.\s]+$/g, '') || 'deliberation'
 }
 
 /** 本地时间戳(不用 toLocaleString:输出形状要稳定,不随宿主 locale 变)。 */
@@ -232,7 +232,7 @@ export function duration(ms: number): string {
 }
 
 /**
- * 结论文档的相对路径:`docs/debates/<日期>-<问题 slug>-<id 尾>.md`。
+ * 结论文档的相对路径:`docs/session-enhance/<日期>-<问题 slug>-<id 尾>.md`。
  * 带上 id 尾:同一天问同一个问题两次也不会互相覆盖,而且能从文件名反查到是哪一局。
  */
 export function reportRelPath(createdAt: number, question: string, id: string): string {

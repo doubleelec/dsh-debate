@@ -25,10 +25,12 @@ reason = "No cross-module facade: single-module plugin, host/client wired via ds
 
 # Semantic red lines for the host half (S20: placeholders replaced by live binds;
 # S22: debate pure guards moved to src/debate/module.toml DEBATE-01).
-# Host route/tool surface must not drift without a guard failing.
+# Host route surface must not drift without a guard failing.
+# (S28: model tool registration removed — human-operated plugin, no tools.register;
+# WIRE-01 re-scoped to routes only.)
 [[invariant.wiring.rules]]
 id = "WIRE-01"
-desc = "Host route/tool/task-route surface is locked: 9 debate routes, 7 task routes, 10 tools."
+desc = "Host route surface is locked: 9 deliberation routes, 7 task routes; no model tools registered."
 test_ref = "tests/src/test_invariants.py::test_src_registered_tools_match_manifest"
 
 [[invariant.cage.rules]]

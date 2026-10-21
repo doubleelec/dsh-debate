@@ -1,5 +1,5 @@
 /**
- * dsh-debate task 会话拉起编排 ensureGroupedSession（产品化）。
+ * dsh-session-enhance task 会话拉起编排 ensureGroupedSession（产品化）。
  *
  * 从 dsh-task-launcher 移植（JS→TS 类型化，逻辑逐行同源；原注释保留出处）。
  * 决策骨架（trim 后只留顺序与形状）：

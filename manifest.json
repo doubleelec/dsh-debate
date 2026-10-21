@@ -1,8 +1,8 @@
 {
-  "id": "elec-debate",
-  "name": "双视角辩论 (Debate Map)",
-  "version": "0.13.0",
-  "description": "为开放性论证题跑建构/挑战/制图三角色,产出五件套成果地图,而非单一结论",
+  "id": "elec-session-enhance",
+  "name": "会话增强 (Session Enhance)",
+  "version": "0.14.0",
+  "description": "DSH session-enhance toolkit: open-question deliberation and cross-repo task running.",
   "kind": "dynamic-cordis-plugin",
   "platforms": {
     "host": "src/index.ts",
@@ -10,9 +10,9 @@
   },
   "host": {
     "handlers": [
-      "debate.start",
-      "debate.state",
-      "debate.stop"
+      "session.start",
+      "session.state",
+      "session.stop"
     ],
     "services": []
   },

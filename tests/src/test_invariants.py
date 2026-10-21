@@ -51,19 +51,19 @@ def test_src_synth_tool_allowlist_is_closed():
 
 
 def test_src_registered_tools_match_manifest():
-    """Tool registration matches dsh.plugin.json contributes.tools exactly."""
+    """No model tools: host exposes zero tools.register; manifest contributes.tools is empty."""
     import json
 
     src = _read(SRC_INDEX)
-    registered = sorted(set(re.findall(r"name: '(debate_[a-z_]*|task_[a-z_]*)'", src)))
+    assert "tools.register" not in src, "src/index.ts must not register model tools (human-operated plugin)"
     manifest = sorted(json.loads(_read(MANIFEST))["contributes"]["tools"])
-    assert registered == manifest, f"registered {registered} != manifest {manifest}"
+    assert manifest == [], f"manifest contributes.tools must be empty, got {manifest}"
 
 
 def test_src_task_routes_are_seven():
     """Task wiring (ADR-0025): exactly seven /api/task/* routes registered."""
     src = _read(SRC_INDEX)
-    routes = sorted(set(re.findall(r"path: '/dsh-debate/api/(task/[a-z]+)'", src)))
+    routes = sorted(set(re.findall(r"path: '/dsh-session-enhance/api/(task/[a-z]+)'", src)))
     assert routes == [
         "task/build",
         "task/collect",

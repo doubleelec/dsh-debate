@@ -1,5 +1,5 @@
 /**
- * dsh-debate task 材料构建器（纯函数，零 IO）。
+ * dsh-session-enhance task 材料构建器（纯函数，零 IO）。
  *
  * 从 dsh-task-launcher 移植（JS→TS 类型化，逻辑逐行同源）：
  * fill 表仍对 cross-tasks 的 directive_template.md / to_template.md 占位符，

@@ -1,5 +1,5 @@
-/* dsh-debate 对话框样式:token 系对标 explorer(bg-layer/label/border-l2),深浅色自适应。 */
-.dshd-overlay {
+/* dsh-session-enhance 对话框样式:token 系对标 explorer(bg-layer/label/border-l2),深浅色自适应。 */
+.dshe-overlay {
   position: fixed;
   top: 48px;
   right: 24px;
@@ -18,12 +18,12 @@
 }
 
 /* 全屏:罩会话消息区,几何由行内样式实测(照抄 explorer) */
-.dshd-overlay-full {
+.dshe-overlay-full {
   right: auto !important;
   border-radius: 12px;
 }
 
-.dshd-header {
+.dshe-header {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -33,11 +33,11 @@
   color: var(--dsw-alias-label-primary, #e8e8e8);
 }
 
-.dshd-header .spacer {
+.dshe-header .spacer {
   flex: 1;
 }
 
-.dshd-version {
+.dshe-version {
   font-size: 11px;
   font-weight: 400;
   color: var(--dsw-alias-label-caption, #8a8a8a);
@@ -47,7 +47,7 @@
   white-space: nowrap;
 }
 
-.dshd-close {
+.dshe-close {
   border: 0;
   background: transparent;
   color: var(--dsw-alias-label-secondary, #9a9a9a);
@@ -58,13 +58,13 @@
   border-radius: 8px;
 }
 
-.dshd-close:hover {
+.dshe-close:hover {
   background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.14));
   color: var(--dsw-alias-label-primary, #e8e8e8);
 }
 
 /* 标题栏小按钮:全屏/最小化,与关闭同风格但字号更小 */
-.dshd-hbtn {
+.dshe-hbtn {
   border: 0;
   background: transparent;
   color: var(--dsw-alias-label-secondary, #9a9a9a);
@@ -75,12 +75,12 @@
   border-radius: 8px;
 }
 
-.dshd-hbtn:hover {
+.dshe-hbtn:hover {
   background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.14));
   color: var(--dsw-alias-label-primary, #e8e8e8);
 }
 
-.dshd-body {
+.dshe-body {
   padding: 12px 16px;
   overflow-y: auto;
   display: flex;
@@ -91,12 +91,12 @@
   min-height: 0;
 }
 
-.dshd-note {
+.dshe-note {
   font-size: 12px;
   color: var(--dsw-alias-label-caption, #8a8a8a);
 }
 
-.dshd-resolved {
+.dshe-resolved {
   border: 1px solid var(--dsw-alias-border-l3, rgba(128,128,128,.2));
   background: var(--dsw-alias-bg-layer-1, #222);
   border-radius: 10px;
@@ -113,7 +113,7 @@
  * 结论文档条(ADR-0019):路径要能一眼看全、能复制,所以用等宽 + 溢出省略,
  * 不做换行——路径换行后反而更难核对。
  */
-.dshd-report {
+.dshe-report {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -124,7 +124,7 @@
   font-size: 12px;
 }
 
-.dshd-report > code {
+.dshe-report > code {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -135,7 +135,7 @@
 }
 
 /* 恢复标记:中性色。这是提示不是告警——恢复是正常工作方式,不是故障。 */
-.dshd-restored {
+.dshe-restored {
   padding: 5px 10px;
   border-radius: 10px;
   border-left: 3px solid var(--dsw-alias-brand-primary, #4a8cff);
@@ -149,7 +149,7 @@
  * 版本告警(v0.4):后台不是最新代码时明确提示,别让徽标骗人。
  * 用告警色而非中性色,因为"面板是新的、后台是旧的"是个会让人误判的行为陷阱。
  */
-.dshd-verwarn {
+.dshe-verwarn {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -163,11 +163,11 @@
   color: var(--dsw-alias-label-primary, #e8e8e8);
 }
 
-.dshd-verwarn > b {
+.dshe-verwarn > b {
   color: var(--dsw-alias-danger, #e0784f);
 }
 
-.dshd-version-warn {
+.dshe-version-warn {
   color: var(--dsw-alias-danger, #e0784f);
   font-weight: 600;
 }
@@ -176,7 +176,7 @@
  * 收尾陈述(v4):辩论结束后置顶的决策摘要块。
  * 比一般说明块更显眼(左侧高亮边 + 可滚动上限),因为它就是用户要读的那一段。
  */
-.dshd-decision {
+.dshe-decision {
   border: 1px solid var(--dsw-alias-border-l3, rgba(128,128,128,.3));
   border-left: 3px solid var(--dsw-alias-brand-primary, #4c8dff);
   background: var(--dsw-alias-bg-layer-1, #222);
@@ -186,7 +186,7 @@
   color: var(--dsw-alias-label-primary, #e8e8e8);
 }
 
-.dshd-decision-head {
+.dshe-decision-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -196,7 +196,7 @@
   color: var(--dsw-alias-label-secondary, #9a9a9a);
 }
 
-.dshd-decision-body {
+.dshe-decision-body {
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.55;
@@ -204,19 +204,19 @@
   overflow: auto;
 }
 
-.dshd-field {
+.dshe-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
   font-size: 13px;
   color: var(--dsw-alias-label-primary, #e8e8e8);
-}.dshd-field > span {
+}.dshe-field > span {
   font-weight: 600;
 }
 
-.dshd-field textarea,
-.dshd-field input,
-.dshd-field select {
+.dshe-field textarea,
+.dshe-field input,
+.dshe-field select {
   font: inherit;
   padding: 8px 10px;
   border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.35));
@@ -227,27 +227,27 @@
   box-sizing: border-box;
 }
 
-.dshd-field option {
+.dshe-field option {
   background: var(--dsw-alias-bg-layer-2, #262626);
   color: var(--dsw-alias-label-primary, #e8e8e8);
 }
 
-.dshd-row {
+.dshe-row {
   display: flex;
   gap: 8px;
 }
 
-.dshd-row .dshd-field {
+.dshe-row .dshe-field {
   flex: 1;
 }
 
-.dshd-lensgrid {
+.dshe-lensgrid {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.dshd-lens {
+.dshe-lens {
   border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.35));
   border-radius: 999px;
   padding: 4px 10px;
@@ -257,24 +257,24 @@
   color: var(--dsw-alias-label-secondary, #9a9a9a);
 }
 
-.dshd-lens:hover {
+.dshe-lens:hover {
   color: var(--dsw-alias-label-primary, #e8e8e8);
   background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12));
 }
 
-.dshd-lens.on {
+.dshe-lens.on {
   background: var(--dsw-alias-state-business-primary, #4176e6);
   border-color: var(--dsw-alias-state-business-primary, #4176e6);
   color: #fff;
 }
 
-.dshd-actions {
+.dshe-actions {
   display: flex;
   gap: 8px;
   align-items: center;
 }
 
-.dshd-start {
+.dshe-start {
   flex: 1;
   padding: 10px;
   border: none;
@@ -286,12 +286,12 @@
   font-size: 14px;
 }
 
-.dshd-start:disabled {
+.dshe-start:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-.dshd-stop {
+.dshe-stop {
   padding: 10px 14px;
   border-radius: 10px;
   border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.35));
@@ -300,24 +300,24 @@
   cursor: pointer;
 }
 
-.dshd-stop:hover {
+.dshe-stop:hover {
   color: var(--dsw-alias-label-primary, #e8e8e8);
   background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12));
 }
 
-.dshd-status {
+.dshe-status {
   font-size: 12px;
   color: var(--dsw-alias-label-caption, #8a8a8a);
 }
 
-.dshd-error {
+.dshe-error {
   font-size: 13px;
   color: var(--dsw-alias-danger, #c00);
   white-space: pre-wrap;
 }
 
 /* S17 打断线:停在 transcript 哪,面板照此画线 */
-.dshd-interrupted {
+.dshe-interrupted {
   font-size: 12px;
   color: var(--dsw-alias-warning, #c80);
   border-top: 1px dashed var(--dsw-alias-warning, #c80);
@@ -325,7 +325,7 @@
   margin: 2px 0 6px;
 }
 
-.dshd-transcript {
+.dshe-transcript {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -334,7 +334,7 @@
 }
 
 /* 实况进度条:置顶,running 时绿灯呼吸,结束变灰 */
-.dshd-livebar {
+.dshe-livebar {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -352,7 +352,7 @@
   border-radius: 999px;
   background: #3fb950;
   flex: none;
-  animation: dshd-pulse 1.2s ease-in-out infinite;
+  animation: dshe-pulse 1.2s ease-in-out infinite;
 }
 
 .dot-done {
@@ -363,13 +363,13 @@
   flex: none;
 }
 
-@keyframes dshd-pulse {
+@keyframes dshe-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }
 
 /* 实录滚动区:吃掉窗口剩余高度(窗口拉大多装行,全屏装最多);内容少时不硬撑 */
-.dshd-feed {
+.dshe-feed {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -380,7 +380,7 @@
   overflow-y: auto;
 }
 
-.dshd-turn {
+.dshe-turn {
   border: 1px solid var(--dsw-alias-border-l3, rgba(128,128,128,.2));
   background: var(--dsw-alias-bg-layer-1, #222);
   border-radius: 10px;
@@ -389,19 +389,19 @@
   word-break: break-word;
 }
 
-.dshd-turn .who {
+.dshe-turn .who {
   font-weight: 700;
   margin-bottom: 4px;
 }
 
 /* 分段折叠:摘要默认展开,详细论证折叠 */
-.dshd-summary {
+.dshe-summary {
   white-space: pre-wrap;
   word-break: break-word;
   margin-bottom: 6px;
 }
 
-.dshd-delta {
+.dshe-delta {
   font-size: 12px;
   color: var(--dsw-alias-label-secondary, #9a9a9a);
   margin-bottom: 6px;
@@ -409,7 +409,7 @@
   word-break: break-word;
 }
 
-.dshd-delta-full {
+.dshe-delta-full {
   font-size: 12px;
   color: var(--dsw-alias-label-secondary, #9a9a9a);
   white-space: pre-wrap;
@@ -417,7 +417,7 @@
   margin-top: 6px;
 }
 
-.dshd-foldbtn {
+.dshe-foldbtn {
   border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.35));
   background: transparent;
   color: var(--dsw-alias-label-secondary, #9a9a9a);
@@ -429,12 +429,12 @@
   margin-bottom: 4px;
 }
 
-.dshd-foldbtn:hover {
+.dshe-foldbtn:hover {
   color: var(--dsw-alias-label-primary, #e8e8e8);
   background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12));
 }
 
-.dshd-dockbtn {
+.dshe-dockbtn {
   border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.35));
   background: transparent;
   color: var(--dsw-alias-label-secondary, #9a9a9a);
@@ -448,23 +448,23 @@
   flex: none;
 }
 
-.dshd-dockbtn:hover {
+.dshe-dockbtn:hover {
   color: var(--dsw-alias-label-primary, #e8e8e8);
   background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12));
 }
 
-.dshd-dockbtn-off {
+.dshe-dockbtn-off {
   opacity: 0.45;
   cursor: default;
 }
 
 /* 增强菜单:输入框 dock 按钮旁的弹出菜单(辩论/多仓任务二选一)。 */
-.dshd-enhance {
+.dshe-enhance {
   position: relative;
   display: inline-flex;
 }
 
-.dshd-menu {
+.dshe-menu {
   position: absolute;
   bottom: calc(100% + 6px);
   left: 0;
@@ -480,7 +480,7 @@
   box-shadow: var(--dsw-alias-shadow-lv3, 0 12px 40px rgba(0, 0, 0, 0.18));
 }
 
-.dshd-menuitem {
+.dshe-menuitem {
   border: 0;
   background: transparent;
   color: var(--dsw-alias-label-primary, #e8e8e8);
@@ -493,12 +493,12 @@
   white-space: nowrap;
 }
 
-.dshd-menuitem:hover {
+.dshe-menuitem:hover {
   background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12));
 }
 
 /* 任务面板勾选行:复选框 + 路径 + 类型 + 牵头按钮。 */
-.dshd-checkrow {
+.dshe-checkrow {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -507,14 +507,14 @@
 }
 
 /* 会话 id 行:裸 id + 复制按钮,小字灰色不抢戏。 */
-.dshd-sid {
+.dshe-sid {
   margin-top: 4px;
   font-size: 12px;
   color: var(--dsw-alias-label-secondary, #9a9a9a);
   word-break: break-all;
 }
 
-.dshd-copybtn {
+.dshe-copybtn {
   margin-left: 8px;
   font-size: 12px;
   padding: 2px 8px;
@@ -525,12 +525,12 @@
   cursor: pointer;
 }
 
-.dshd-copybtn:hover {
+.dshe-copybtn:hover {
   background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12));
 }
 
 /* 实时流卡片:虚线边框区别于已落地的正式 TurnCard,光标闪烁表正在写。 */
-.dshd-turn-stream {
+.dshe-turn-stream {
   border: 1px dashed var(--dsw-alias-border-l2, rgba(128,128,128,.45));
   background: transparent;
   border-radius: 10px;
@@ -540,25 +540,25 @@
   white-space: pre-wrap;
 }
 
-.dshd-turn-stream .who {
+.dshe-turn-stream .who {
   font-weight: 700;
   margin-bottom: 6px;
   color: var(--dsw-alias-state-business-primary, #4176e6);
 }
 
-.dshd-turn-stream .caret {
+.dshe-turn-stream .caret {
   display: inline-block;
   margin-left: 2px;
-  animation: dshd-blink 1s steps(2, start) infinite;
+  animation: dshe-blink 1s steps(2, start) infinite;
   color: var(--dsw-alias-state-business-primary, #4176e6);
 }
 
-@keyframes dshd-blink {
+@keyframes dshe-blink {
   to { visibility: hidden; }
 }
 
 /* 右下角拖拽拉手:斜线手感,hover 高亮(照抄 explorer 左下拉手,镜像到右边) */
-.dshd-resize-corner {
+.dshe-resize-corner {
   position: absolute;
   right: 0;
   bottom: 0;
@@ -572,7 +572,7 @@
   touch-action: none;
   z-index: 2;
 }
-.dshd-resize-corner-bar {
+.dshe-resize-corner-bar {
   width: 16px;
   height: 16px;
   border-right: 3px solid var(--dsw-alias-border-l2, rgba(128,128,128,.4));
@@ -580,13 +580,13 @@
   border-bottom-right-radius: 6px;
   opacity: .7;
 }
-.dshd-resize-corner:hover .dshd-resize-corner-bar {
+.dshe-resize-corner:hover .dshe-resize-corner-bar {
   border-color: var(--dsw-alias-state-business-primary, #4176e6);
   opacity: 1;
 }
 
 /* 最小化胶囊:右下角一条,呼吸灯表运行态,点恢复 */
-.dshd-mini {
+.dshe-mini {
   position: fixed;
   right: 24px;
   bottom: 24px;
@@ -603,6 +603,6 @@
   font-size: 13px;
   z-index: 60;
 }
-.dshd-mini:hover {
+.dshe-mini:hover {
   border-color: var(--dsw-alias-state-business-primary, #4176e6);
 }

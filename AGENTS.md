@@ -1,6 +1,6 @@
-# dsh-debate
+# dsh-session-enhance
 
-双视角辩论 Map：面向开放性论证题，用建构 / 挑战 / 制图三角色产出一套成果地图，而非单一结论。
+开放思辨 Map：面向开放性论证题，用建构 / 挑战 / 制图三角色产出一套成果地图，而非单一结论。
 
 ## Commit messages
 
@@ -10,7 +10,7 @@ Examples: `fix(session): preserve earlier context` or `docs: clarify install ste
 
 ## Git remotes
 
-Two remotes: `origin` (git@github.com:doubleelec/dsh-debate.git, public) and `wechat` (git@git.weixin.qq.com:doubleelec/dsh-debate.git, cold backup). Push to both remotes every time: `origin` first, then `git push wechat main`.
+Two remotes: `origin` (git@github.com:doubleelec/dsh-session-enhance.git, public) and `wechat` (git@git.weixin.qq.com:doubleelec/dsh-session-enhance.git, cold backup). Push to both remotes every time: `origin` first, then `git push wechat main`.
 
 ## Agent skills
 

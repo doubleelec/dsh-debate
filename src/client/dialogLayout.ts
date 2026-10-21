@@ -1,21 +1,21 @@
 /**
- * 辩论窗口尺寸纯函数(无 DOM / 无副作用,可单元测试)。
+ * 思辨窗口尺寸纯函数(无 DOM / 无副作用,可单元测试)。
  *
  * 照抄 explorer 的 popupLayout:手动宽高存 localStorage,双击恢复自动;
  * 渲染时钳制旧值(大显示器存的尺寸在小视口上不溢出)。
- * 差异:辩论框默认更大(要装实况流),下限更高;key 前缀 dshd。
+ * 差异:思辨框默认更大(要装实况流),下限更高;key 前缀 dshe。
  */
 
 /** 自动/手动高度下限:保底装下标题栏 + 一块实况。 */
 export const DIALOG_MIN_H = 360
 /** 手动高度 localStorage key。 */
-export const DIALOG_MANUAL_H_KEY = 'dshd.dialogH.v1'
+export const DIALOG_MANUAL_H_KEY = 'dshe.dialogH.v1'
 /** 默认高度:标题栏 + 配置区 + ~10 行实况。 */
 export const DIALOG_DEFAULT_H = 560
 /** 手动宽度下限:再窄实况卡片没法看。 */
 export const DIALOG_MIN_W = 360
 /** 手动宽度 localStorage key。 */
-export const DIALOG_MANUAL_W_KEY = 'dshd.dialogW.v1'
+export const DIALOG_MANUAL_W_KEY = 'dshe.dialogW.v1'
 /** 默认宽度:沿用旧固定宽度 720。 */
 export const DIALOG_DEFAULT_W = 720
 

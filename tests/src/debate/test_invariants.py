@@ -1,5 +1,5 @@
 # tests/src/debate/test_invariants.py — module-local red lines for src/debate.
-# Guards the debate pure-logic half: protocol/lenses/persist surface present,
+# Guards the deliberation pure-logic half: protocol/lenses/persist surface present,
 # each with a vitest behavior mirror. Anti-hollow: real asserts, no bare pass.
 
 from pathlib import Path
@@ -35,6 +35,6 @@ def test_debate_pure_surface_exists():
 
 
 def test_debate_vitest_mirrors_exist():
-    """Every debate pure module has a vitest behavior file."""
+    """Every deliberation pure module has a vitest behavior file."""
     for name in ("debate", "persist"):
         assert (VITEST / f"{name}.test.ts").is_file(), f"missing {name}.test.ts"

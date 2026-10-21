@@ -1,8 +1,12 @@
 # 增强入口与跨仓任务并入
 
 2026-10-20 落地。把 `dsh-task-launcher`（scan/build/launch/report/collect）
-并入 `dsh-debate`，输入框"⚔ 辩论"按钮改为"增强"弹菜单（辩论/多仓任务）；
+并入 `dsh-session-enhance`，输入框"⚔ 辩论"按钮改为"增强"弹菜单（辩论/多仓任务）；
 多仓任务走 overlay 新面板 + 显式"开始任务"按钮启动。
+v0.14.0 修订：全量更名 `dsh-debate` → `dsh-session-enhance`（路由前缀
+`/dsh-session-enhance/api/`，报告目录 `docs/session-enhance/`，KV 单元
+`dsh_session_enhance`）；去模型工具——人工操作插件，不再注册旧工具名，
+面板走 HTTP 路由驱动。
 
 ## 抉择
 
@@ -15,12 +19,10 @@
   三纯模块移植成 TS（`scan.ts`/`materials.ts`/`ensure-session.ts`），
   模板真身仍在各编排库（finance 落点即 cross-tasks 模板文件，
   由 `templateDir`/`directiveTemplate`/`toTemplate` 显式传入，不绑死）。
-- **路由挂 `/dsh-debate/api/task/*`**：7 条（version/scan/build/launch/
-  report/collect/stop），与 debate 路由同文件注册（逐条
+- **路由挂 `/dsh-session-enhance/api/task/*`**：7 条（version/scan/build/launch/
+  report/collect/stop），与 deliberation 路由同文件注册（逐条
   `ctx.webServer.register`，数组静默失效见 explorer 经验）。
-- **模型工具 5 个**：`task_scan/task_build/task_launch/task_report/
-  task_collect`，参数用整壳 JSON Schema（`{type:'object',properties,
-  required}`），与 debate 实码口径一致（DSL 注释已过期勿信）。
+- **模型工具 0 个（v0.14.0 起）**：人工操作插件，不再注册旧 task 系工具名（旧注册名作废），面板走 HTTP 路由驱动。
 - **launch 三道门照抄 ensureGroupedSession**：`meta.cwd` → workspace 注册 →
   `attachSession` → `followup` 派活；`provider/model` 显式优先，
   缺省读宿主 `agentPresets` 默认，都没有则显式报错。

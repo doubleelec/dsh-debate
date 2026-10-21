@@ -12,7 +12,7 @@
 3. 会话读取接口错：`parent.session.events?.(0)` 已无此接口，
    真实面是 `snapshotEvents(fromSeq?, toSeqExclusive?)`。保留 events 作 legacy 兜底。
 
-教训：host 注册失败必须可观测。新增 `/dsh-debate/api/debug`
+教训：host 注册失败必须可观测。新增 `/dsh-session-enhance/api/debug`
 自检路由（返回模型可见的 debate_* 工具名），curl 即判，不用进 GUI。
 另：建单成功后触发语自动填输入框并发送，免手工复制粘贴；
 发送失败才留手动兜底（复制按钮保留）。

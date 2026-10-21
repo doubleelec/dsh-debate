@@ -11,7 +11,7 @@ import { basename, dirname, resolve as resolvePath } from 'node:path'
 import type { UserConfig } from 'tsdown'
 import { transform } from 'lightningcss'
 
-const ID = '@doubleelec/dsh-debate'
+const ID = '@doubleelec/dsh-session-enhance'
 
 /** Loader module-table seed (mirror of apps/web platform.ts). */
 const PLATFORM_MODULES = [

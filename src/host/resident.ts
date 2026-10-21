@@ -224,7 +224,7 @@ export async function createResidentPair(
   const parentDepth = typeof parentDepthRaw === 'number' && Number.isSafeInteger(parentDepthRaw) && parentDepthRaw >= 0 ? parentDepthRaw : 0
   const mkOne = async (role: 'builder' | 'challenger', route: { provider: string; model: string }): Promise<{ agent: ResidentAgent; dispose: () => Promise<void> }> => {
     const handle = await agents.create({
-      sessionId: `debate-${debateId}-${role}`,
+      sessionId: `${debateId}-${role}`,
       parentAgent: parent,
       meta: {
         cwd,
@@ -317,7 +317,7 @@ async function driveResidentOnce(
   if (signal.aborted) throw new Error('aborted')
   const boundary = readResidentEvents(agent).length
   agent.followup({
-    id: `debate-handoff-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+    id: `se-handoff-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
     role: 'user',
     content: [{ type: 'text', text: prompt }],
     source: { kind: 'user' },

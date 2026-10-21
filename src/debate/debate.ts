@@ -1,8 +1,8 @@
 /**
- * dsh-debate — 纯协议层(与载体无关,可单元测试)。
+ * dsh-session-enhance — 思辨纯协议层(与载体无关,可单元测试)。
  *
  * 术语以 CONTEXT.md 为准:开放性论证题(open_question)、建构者(builder)、
- * 挑战者(challenger)、制图员(synthesizer)、视角(lens)、成果地图(debate_map)五件套、
+ * 挑战者(challenger)、制图员(synthesizer)、视角(lens)、成果地图(map)五件套、
  * 断言状态(claim_status 四态)、覆盖饱和(saturation)。
  */
 import type { LensTemplate, QuestionType } from './lenses'
@@ -888,8 +888,7 @@ export function extractSessionContext(events: SessionEventLike[], maxChars = CON
 
 function isDebateContextNoise(text: string): boolean {
   const t = text.trim()
-  if (/^(?:请)?(?:调用|执行)\s*debate_(?:open|round|synthesize|run)\b/i.test(t)) return true
-  if (/^(?:辩论单|⚔\s*辩论|辩论开题|交锋第|成果地图)/.test(t)) return true
+  if (/^(?:思辨单|⚔\s*思辨|思辨开题|交锋第|成果地图)/.test(t)) return true
   return /^(?:(?:那请)?继续(?:处理|吧)?|好|好的|收到|嗯|明白|了解|确认|ok|okay)(?:[，,、\s]*(?:(?:我)?(?:继续(?:处理|吧)?|处理)|收到|好的?))*[。！!，,\s]*$/i.test(t)
 }
 
@@ -920,7 +919,7 @@ export function buildBuilderPrompt(question: string, lenses: LensTemplate[], que
   const ctxBlock = context.trim() !== '' ? `\n背景(前面会话已定,须遵守:已排除的不再铺,已验证的不再争,术语沿用,已决边界不重开):\n${context.trim()}\n` : ''
   return [
     `你是建构者(builder)。任务:为下面的开放性论证题把答案空间铺满,不许提前收敛到单一结论。`,
-    `边界:你是被辩论链路调用的子 agent,首要产出是文本论证。不要调用任何 debate_* 工具(链路 already 在驱动你)。但你手里的文件读取/检索/shell/网络工具该用就用:凡是能外部检验的事实,优先用工具查证再写,查不到才标缺失。`,
+    `边界:你是被思辨链路调用的子 agent,首要产出是文本论证。但你手里的文件读取/检索/shell/网络工具该用就用:凡是能外部检验的事实,优先用工具查证再写,查不到才标缺失。`,
     `找文件预算:用 glob/grep 找目标文件最多试 3 次(含换关键词/换目录),找不到就标"缺失(文件不在工作区)"然后基于题面继续写,不许无限翻目录。`,
     ``,
     `问题: ${question}`,
@@ -971,7 +970,7 @@ export function buildBuilderRoundPrompt(
   const answerSpec = answerSpecOf(classifyQuestion(question).questionType)
   return [
     `你是建构者(builder)。这是第 ${round}/${maxRounds} 轮交锋——挑战者刚给了你上一轮的挑战,你要回应它。`,
-    `边界:你是被辩论链路调用的子 agent,首要产出是文本论证。不要调用任何 debate_* 工具;但你手里的文件读取/检索/网络工具该用就用:守不住的事实断言要用工具查证后再守,查不到就承认并改成缺失。`,
+    `边界:你是被思辨链路调用的子 agent,首要产出是文本论证。但你手里的文件读取/检索/网络工具该用就用:守不住的事实断言要用工具查证后再守,查不到就承认并改成缺失。`,
     `找文件预算:glob/grep 最多试 3 次,找不到就标"缺失(文件不在工作区)"。`,
     ``,
     `问题: ${question}`,
@@ -1013,7 +1012,7 @@ export function buildChallengerPrompt(
   return [
     `你是挑战者(challenger)。任务:打穿建构者的对照,专找四类洞:`,
     `1) 没覆盖的维度 2) 没覆盖的场景(常态/峰值/异常/增长) 3) 没证据的断言 4) 自相矛盾的推理。`,
-    `边界:你是被辩论链路调用的子 agent,首要产出是文本论证。不要调用任何 debate_* 工具(链路 already 在驱动你)。但你手里的文件读取/检索/shell/网络工具该用就用:挑战对方的事实断言时,优先用工具查证,用查到的原文打脸;查不到才标缺失。`,
+    `边界:你是被思辨链路调用的子 agent,首要产出是文本论证。但你手里的文件读取/检索/shell/网络工具该用就用:挑战对方的事实断言时,优先用工具查证,用查到的原文打脸;查不到才标缺失。`,
     `找文件预算:用 glob/grep 找目标文件最多试 3 次,找不到就标"缺失(文件不在工作区)"然后基于对方原文继续挑战,不许无限翻目录。`,
     ``,
     `问题: ${question}`,

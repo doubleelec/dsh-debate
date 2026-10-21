@@ -1,12 +1,11 @@
 /**
- * dsh-debate — Host 半区(原生包)。
+ * dsh-session-enhance — Host 半区(原生包)。
  *
  * 两条线:
- * 1. webServer JSON 路由 /dsh-debate/api/*:面板建单(start,带 sessionId+hint)后
+ * 1. webServer JSON 路由 /dsh-session-enhance/api/*:面板建单(start,带 sessionId+hint)后
  *    host 直接以后台任务跑完全程(open→round×N→synthesize),不再经过输入框触发语;
  *    state 轮询取实况,stop 中止。
- * 2. model 工具 debate_open/round/synthesize/run:兼容入口(模型手动触发时用,
- *    exec.agent 即 parent);主链路不用它们。
+ * 2. 模型工具:无。人工操作插件,不注册任何模型工具(host 直驱走 subagents 服务)。
  *
  * v0.3:host 直驱(parent 取自 ctx.agents.get(sessionId),agentOptions 锁定辩手模型)。
  */
@@ -196,7 +195,7 @@ function mirror(parent: ParentAgent, session: DebateSession, text: string): void
       return
     }
     append.call(parent.session, 'user/message', {
-      id: `debate-mirror-${session.id}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `se-mirror-${session.id}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       role: 'user',
       content: [{ type: 'text', text }],
       source: { kind: 'user' },
@@ -340,7 +339,7 @@ let seq = 0
 
 function newId(): string {
   seq += 1
-  return `debate-${Date.now().toString(36)}-${seq}`
+  return `se-${Date.now().toString(36)}-${seq}`
 }
 
 // ───────────────────────── 持久化:整局记录 + 结论文档(ADR-0019) ─────────────────────────
@@ -559,7 +558,7 @@ async function writeReport(session: DebateSession): Promise<string | null> {
       mapText: session.mapText,
       rounds: session.rounds,
       transcript: session.transcript,
-      generator: `dsh-debate v${BUILD_VERSION}`,
+      generator: `dsh-session-enhance v${BUILD_VERSION}`,
       stopText: stopReasonText(session),
       gapSpans: gapSpansOf(session),
     })
@@ -643,7 +642,7 @@ function lastUserText(events: { type: string; data?: unknown }[]): string {
     const ev = events[i]
     if (ev.type !== 'user/message') continue
     const t = looseText(ev.data).trim()
-    if (t === '' || /^(?:请)?(?:调用|执行)\s*debate_(?:open|round|synthesize|run)\b/i.test(t) || /^(?:辩论单|⚔\s*辩论|辩论开题|交锋第|成果地图)/.test(t) || /^(?:(?:那请)?继续(?:处理|吧)?|好|好的|收到|嗯|明白|了解|确认|ok|okay)(?:[，,、\s]*(?:(?:我)?(?:继续(?:处理|吧)?|处理)|收到|好的?))*[。！!，,\s]*$/i.test(t)) continue
+    if (t === '' || /^(?:思辨单|⚔\s*思辨|思辨开题|交锋第|成果地图)/.test(t) || /^(?:(?:那请)?继续(?:处理|吧)?|好|好的|收到|嗯|明白|了解|确认|ok|okay)(?:[，,、\s]*(?:(?:我)?(?:继续(?:处理|吧)?|处理)|收到|好的?))*[。！!，,\s]*$/i.test(t)) continue
     return t
   }
   return ''
@@ -745,7 +744,7 @@ export async function createSingleThread(
   const sourceEvents = readParentEvents(parent) as SeedEvent[]
   const boundary = sourceEvents.length - 1
   const seed = boundary >= 0 ? buildDebateForkSeed(sourceEvents, boundary) : undefined
-  const sessionId = `debate-${debateId}-single`
+  const sessionId = `${debateId}-single`
   // 模型锁定:单线是单模型双角色,分叉跑发起会话当前模型(与 fork 链同源)。
   let agentOptions: { provider: string; model: string } | undefined
   try {
@@ -790,7 +789,7 @@ export async function createSingleThread(
 /**
  * 单线分叉落盘清扫(辩论结束四步收尾的后三步,文档已落盘之后才调,顺序不能反)。
  * 临时会话+文档存档:分叉是计算草稿纸,结论全在文档里,盘文件不留。
- * 只删 `debate-<debateId>-single` 一个确定性 id,不碰别的(卡死前缀,不误删)。
+ * 只删 `se-<debateId>-single` 一个确定性 id,不碰别的(卡死前缀,不误删)。
  * ① detach:从 workspace 注册表摘引用(分叉建时可能已挂进去,幂等空跑居多)
  * ② rm:删会话目录(宿主无删会话 API,插件跑在宿主进程里直接走文件系统)
  * 失败只留痕不抛:清扫失败不掩盖辩论结果,只记 session.sweepError。
@@ -802,7 +801,7 @@ export async function sweepSingleThread(
   const detached: string[] = []
   const removed: string[] = []
   const errors: string[] = []
-  const sid = `debate-${debateId}-single`
+  const sid = `${debateId}-single`
   const get = (ctx as unknown as { get(name: string): unknown }).get.bind(ctx)
   try {
     const registry = get('workspaceRegistry') as
@@ -852,7 +851,7 @@ const controllers = new Map<string, AbortController>()
 
 // ───────────────────────── 跨仓任务(task)辅助(ADR-0025) ─────────────────────────
 // 从 dsh-task-launcher 移植：stamp/created/parentRootOf + taskLaunchControllers。
-// task 路由挂 /dsh-debate/api/task/*，与 debate 路由同文件逐条注册。
+// task 路由挂 /dsh-session-enhance/api/task/*,与 deliberation 路由同文件逐条注册。
 
 /** 每次 launch 一仓一控制器(stop 按 key abort 未完成的拉起；已冒出的不回收)。 */
 const taskLaunchControllers = new Map<string, AbortController>()
@@ -871,7 +870,7 @@ function taskCreatedOf(nowMs: number = Date.now()): string {
 
 /**
  * 自建满血 parent(照抄 webhook 样板):meta.agentPreset + setup 里 mount 默认 preset。
- * 不挂 preset 的 parent 落在空 global 层,子 agent 继承下来只有 debate_* 四个工具。
+ * 不挂 preset 的 parent 落在空 global 层,子 agent 继承下来只有宿主默认的少量工具。
  * cwd 继承发起会话的工作区(子 agent 再继承它,读得到用户的文件);
  * 发起会话无 cwd 才回落进程目录。主链路与 debug-child-tools 探针共用,行为一致。
  */
@@ -905,7 +904,7 @@ export async function createFullParent(
   return { agent: handle.agent as ParentAgent, dispose: handle.dispose, presetId }
 }
 
-/** 读 parent 会话事件(host 直驱与工具共用,工具内闭包委托到这里)。 */
+/** 读 parent 会话事件(host 直驱用)。 */
 export function readParentEvents(parent: ParentAgent): { type: string; data?: unknown }[] {
   try {
     // 真实会话面是 snapshotEvents(fromSeq?,toSeqExclusive?),旧 events 接口已无。
@@ -919,7 +918,7 @@ export function readParentEvents(parent: ParentAgent): { type: string; data?: un
   return []
 }
 
-/** 标记失败并抛错(host 直驱与工具共用)。 */
+/** 标记失败并抛错(host 直驱用)。 */
 export function failSession(session: DebateSession, err: unknown): never {
   session.status = 'failed'
   session.error = err instanceof Error ? err.message : String(err)
@@ -988,7 +987,7 @@ export async function runHostDebate(
       // 注意这是无活体会话时的兜底:发起会话的 parent 拿不到才走这里,
       // 此时没有发起会话 cwd 可继承,用进程目录(探针/无会话场景)。
       try {
-        const full = await createFullParent(ctx, agents, `debate-parent-${session.id}`, session.config.synthesizer, signal, session.config.targetCwd)
+        const full = await createFullParent(ctx, agents, `se-parent-${session.id}`, session.config.synthesizer, signal, session.config.targetCwd)
         owned = { dispose: full.dispose }
         parent = full.agent
       } catch (e) {
@@ -1330,7 +1329,7 @@ export function interruptPlanOf(_parentSid: string | null): { cancelKind: 'user'
 /** 取自动判断(未 resolve 抛错)。 */
 function requireAuto(session: DebateSession): NonNullable<DebateConfig['auto']> {
   const auto = session.config.auto
-  if (!auto) throw new Error('debate session not resolved: call debate_open first')
+  if (!auto) throw new Error('deliberation session not resolved: auto context missing')
   if (auto.question === '') throw new Error('empty-question: no user message found in parent session')
   return auto
 }
@@ -1681,10 +1680,8 @@ export function isRouteIneffective(
 }
 
 /**
- * 跑完整辩论循环(在工具 execute 内调用,parent 为 exec.agent)。
+ * 跑完整思辨循环(仅供单测:一次跑完开题+交锋+制图)。
  * 通过 ctx 上的 subagents 起 one-shot 子 agent,agentOptions 锁定模型。
- * v0.2:仅供单测/兼容, panel 链路由 debate_open/challenge/synthesize 三工具分步驱动,
- * 每步结果自然进会话(动态显示),面板照常轮询。
  * 停机与 host 直驱同源:每轮 recordRoundAndJudge,convergence/saturation 即停,不跑满。
  */
 export async function runDebateLoop(
@@ -1714,13 +1711,13 @@ export async function runDebateLoop(
 }
 
 export default {
-  // tools/subagents/agents/agentPresets 必须声明 inject,否则属性读取抛错且注册静默失败(09-24 实测根因)。
-  inject: ['webServer', 'tools', 'subagents', 'agents', 'agentPresets'],
+  // tools/subagents/agents/agentPresets 必须声明 inject,否则属性读取抛错(09-24 实测根因)。
+  inject: ['webServer', 'subagents', 'agents', 'agentPresets'],
   apply(ctx: Context) {
     const routes: Array<{ kind: 'exact' | 'prefix'; path: string; handler: (req: DebateHttpRequest, res: DebateHttpResponse) => void | Promise<void> }> = [
       {
         kind: 'exact',
-        path: '/dsh-debate/api/start',
+        path: '/dsh-session-enhance/api/start',
         handler: async (req, res) => {
           const body = await readJsonBody(req)
           const parsed = normalizeConfig(body)
@@ -1788,7 +1785,7 @@ export default {
       },
       {
         kind: 'exact',
-        path: '/dsh-debate/api/version',
+        path: '/dsh-session-enhance/api/version',
         handler: async (_req, res) => {
           // 版本真值:面板拿 running 显示徽标,拿 stale/reason 提示"需重启宿主"。
           // 旧进程没有这条路由(404),面板据此也能判定"后台是旧的"。
@@ -1799,7 +1796,7 @@ export default {
       },
       {
         kind: 'exact',
-        path: '/dsh-debate/api/state',
+        path: '/dsh-session-enhance/api/state',
         handler: async (req, res) => {
           const body = await readJsonBody(req)
           const session = sessions.get(String(body.id ?? ''))
@@ -1847,7 +1844,7 @@ export default {
       },
       {
         kind: 'exact',
-        path: '/dsh-debate/api/history',
+        path: '/dsh-session-enhance/api/history',
         handler: async (_req, res) => {
           // 历史局一览(含磁盘恢复的):id 能被面板重新打开,unknown-id 不再是终点。
           const list = [...sessions.values()]
@@ -1870,7 +1867,7 @@ export default {
       },
       {
         kind: 'exact',
-        path: '/dsh-debate/api/stop',
+        path: '/dsh-session-enhance/api/stop',
         handler: async (req, res) => {
           const body = await readJsonBody(req)
           const session = sessions.get(String(body.id ?? ''))
@@ -1889,7 +1886,7 @@ export default {
       },
       {
         kind: 'exact',
-        path: '/dsh-debate/api/interrupt',
+        path: '/dsh-session-enhance/api/interrupt',
         handler: async (req, res) => {
           // S17 一键双停:先停 parent turn(keepInbox 留住用户刚说的话),后 abort 后台 debate。
           // 只做"停两边",不做"续跑"——续跑是下一跳,本跳只保证停得干净、transcript 可映射。
@@ -1929,7 +1926,7 @@ export default {
       },
       {
         kind: 'exact',
-        path: '/dsh-debate/api/debug-child-tools',
+        path: '/dsh-session-enhance/api/debug-child-tools',
         handler: async (req, res) => {
           // 真探针:起一个一次性子 agent,让它自己报手里有什么工具。
           // 读注册表只能看到 host 视角,子 agent 的真实工具集以它自己的回答为准。
@@ -1952,7 +1949,7 @@ export default {
             let selfBuilt = false
             let presetId: string | null = null
             if (!parent || !parent.session) {
-              const full = await createFullParent(ctx, agents, `debate-probe-${Date.now().toString(36)}`, DEFAULT_CONFIG.synthesizer, AbortSignal.timeout(180000))
+              const full = await createFullParent(ctx, agents, `se-probe-${Date.now().toString(36)}`, DEFAULT_CONFIG.synthesizer, AbortSignal.timeout(180000))
               owned = { dispose: full.dispose }
               parent = full.agent
               selfBuilt = true
@@ -1969,7 +1966,7 @@ export default {
                   type: 'text',
                   text: '你是工具盘点员。只做一件事:列出你当前能调用的所有工具名,一行一个,不要解释,不要调用任何工具,不要输出别的。',
                 } as TextContentBlock],
-                label: 'debate-debug-child-tools',
+                label: 'se-debug-child-tools',
                 signal: ctl.signal,
                 ...(caged ? { toolFilter: { allow: DEBATER_TOOL_ALLOW } } : {}),
               })
@@ -2002,14 +1999,14 @@ export default {
       },
       {
         kind: 'exact',
-        path: '/dsh-debate/api/debug',
+        path: '/dsh-session-enhance/api/debug',
         handler: async (_req, res) => {
-          // 自检:模型可见的 debate_* 工具是否注册上(curl 即判,不用进 GUI)。
+          // 自检:host 视角的工具表(curl 即判,不用进 GUI)。本插件不注册任何模型工具。
           try {
-            const tools = ctx.get('tools') as { schemas?: (scope?: unknown) => Array<{ name?: unknown }> } | undefined
+            const tools = (ctx as unknown as { get(name: string): unknown }).get('tools') as { schemas?: (scope?: unknown) => Array<{ name?: unknown }> } | undefined
             const all = tools?.schemas?.() ?? []
             const names = all.map((t) => t.name).filter((n): n is string => typeof n === 'string')
-            return writeJson(res, { ok: true, tools: names.filter((n) => n.startsWith('debate_')) })
+            return writeJson(res, { ok: true, tools: names })
           } catch (e) {
             return writeJson(res, { ok: false, error: e instanceof Error ? e.message : String(e) })
           }
@@ -2017,12 +2014,11 @@ export default {
       },
       {
         kind: 'exact',
-        path: '/dsh-debate/api/debug-agent',
+        path: '/dsh-session-enhance/api/debug-agent',
         handler: async (req, res) => {
           // 自检:host 能否按 sid 拿到活体 parent(零模型成本,不起子 agent)。
           // 不传 sid 则列出所有活体 agent id,供 curl 探针取一个真实 sid 跑全链路。
-          // 传 sid 则加报 parent 的 composition(preset/cwd)与该 scope 可见工具数:
-          // 子 agent 继承 parent 的 preset 再 restrict 收窄,parent 残则子必残。
+          // 传 sid 则加报 parent 的 composition(preset/cwd):子 agent 继承 parent 的 preset 再收窄,parent 残则子必残。
           try {
             const body = await readJsonBody(req)
             const agents = ctx.get('agents') as {
@@ -2069,7 +2065,7 @@ export default {
       },
       {
         kind: 'exact',
-        path: '/dsh-debate/api/debug-sessions',
+        path: '/dsh-session-enhance/api/debug-sessions',
         handler: async (_req, res) => {
           // 自检:内存里所有 debate 会话的状态一览(定位"面板有局、host 无局"的分叉)。
           try {
@@ -2107,7 +2103,7 @@ export default {
       // 全部参数显式,不从调用会话 cwd 推导;模板真身仍在各编排库(templateDir/模板文本显式传)。
       {
         kind: 'exact',
-        path: '/dsh-debate/api/task/version',
+        path: '/dsh-session-enhance/api/task/version',
         handler: async (_req, res) => {
           const facts = await versionFacts()
           return writeJson(res, { ok: true, version: BUILD_VERSION, ...facts })
@@ -2115,7 +2111,7 @@ export default {
       },
       {
         kind: 'exact',
-        path: '/dsh-debate/api/task/scan',
+        path: '/dsh-session-enhance/api/task/scan',
         handler: async (req, res) => {
           try {
             const body = await readJsonBody(req)
@@ -2132,7 +2128,7 @@ export default {
       },
       {
         kind: 'exact',
-        path: '/dsh-debate/api/task/build',
+        path: '/dsh-session-enhance/api/task/build',
         handler: async (req, res) => {
           try {
             const body = await readJsonBody(req)
@@ -2211,7 +2207,7 @@ export default {
       },
       {
         kind: 'exact',
-        path: '/dsh-debate/api/task/launch',
+        path: '/dsh-session-enhance/api/task/launch',
         handler: async (req, res) => {
           try {
             const body = await readJsonBody(req)
@@ -2273,7 +2269,7 @@ export default {
       },
       {
         kind: 'exact',
-        path: '/dsh-debate/api/task/report',
+        path: '/dsh-session-enhance/api/task/report',
         handler: async (req, res) => {
           try {
             const body = await readJsonBody(req)
@@ -2304,7 +2300,7 @@ export default {
       },
       {
         kind: 'exact',
-        path: '/dsh-debate/api/task/collect',
+        path: '/dsh-session-enhance/api/task/collect',
         handler: async (req, res) => {
           try {
             const body = await readJsonBody(req)
@@ -2321,7 +2317,7 @@ export default {
       },
       {
         kind: 'exact',
-        path: '/dsh-debate/api/task/stop',
+        path: '/dsh-session-enhance/api/task/stop',
         handler: async (req, res) => {
           try {
             const body = await readJsonBody(req)
@@ -2362,451 +2358,6 @@ export default {
       if (unit !== null) void unit.close().catch(() => { /* 关闭失败无补救,进程反正要走了 */ })
     })
 
-    // model 工具(v0.2 三步分调,每步结果自然进会话动态显示,面板照常轮询):
-    // debate_open 建单自动判断+开题 → debate_round 逐轮交锋 → debate_synthesize 制图。
-    // debate_run 保留作兼容(一次跑完,供单测与旧触发语)。
-    //
-    // 注册形态(09-24 实测根因,勿回退):
-    // - 必须走 ctx.tools.register(defineTool({...})) 全 DSL:裸对象缺 output.render
-    //   必被 register 抛 TypeError,外层 try/catch 会静默吞掉,工具从没注册上;
-    // - parameters 用 DSL 写法({ sessionId: { type:'string', required:true } }),
-    //   不能套 JSON Schema 的 { type:'object', properties } 壳;
-    // - ctx.tools / ctx.subagents 走声明式 inject 读取,不做 as unknown 断言。
-    try {
-      const tools = ctx.get('tools') as {
-        register(def: {
-          name: string
-          description: string
-          parameters: Record<string, unknown>
-          output: { schema: Record<string, unknown>; render: (args: unknown, value: unknown) => Array<{ type: string; text: string }> }
-          execute: (args: unknown, exec: { agent?: unknown; signal: AbortSignal }) => Promise<unknown>
-        }): () => void
-      } | undefined
-      if (!tools) throw new Error('tools service unavailable')
-      const subagents = ctx.get('subagents') as SubagentsLike | undefined
-      if (!subagents) throw new Error('subagents service unavailable')
-      const textOut = {
-        schema: { type: 'string' },
-        render: (_args: unknown, value: unknown) => [{ type: 'text', text: String(value) }],
-      }
-      const getSession = (args: { sessionId?: unknown }): DebateSession => {
-        const id = args.sessionId
-        if (typeof id !== 'string') throw new Error('requires sessionId')
-        const session = sessions.get(id)
-        if (!session) throw new Error(`unknown debate session: ${id}`)
-        return session
-      }
-      const readEvents = (parent: ParentAgent): { type: string; data?: unknown }[] => readParentEvents(parent)
-      const fail = (session: DebateSession, err: unknown): never => failSession(session, err)
-      const sidParam = {
-        type: 'object',
-        properties: {
-          sessionId: { type: 'string', description: '面板建单返回的 id' },
-          hint: { type: 'string', description: '可选:用户意图转述(如输入框草稿)。为空则取最近一条 user 消息当问题。' },
-        },
-        required: ['sessionId'],
-      }
-      tools.register({
-        name: 'debate_open',
-        description: '辩论第一步:从当前会话自动提取问题/背景并开题(双方互盲作答)。返回双方开题全文,直接发给用户展示,再调 debate_round 继续。',
-        parameters: sidParam,
-        output: textOut,
-        execute: async (args, exec) => {
-          const parent = exec.agent as ParentAgent | undefined
-          if (!parent) throw new Error('debate_open requires a calling agent')
-          const session = getSession(args as { sessionId?: unknown })
-          try {
-            const a = (args ?? {}) as { hint?: unknown }
-            session.config.auto = resolveAuto(readEvents(parent), typeof a.hint === 'string' ? a.hint : '')
-            const { builderOpen, challengerOpen } = await stepOpen(subagents, parent, session, exec.signal)
-            session.updatedAt = Date.now()
-            return (
-              `## 辩论开题\n\n问题:${session.config.auto.question}\n题型:${session.config.auto.questionType}\n\n` +
-              `### 建构者开题\n${builderOpen}\n\n### 挑战者开题\n${challengerOpen}\n\n` +
-              `(继续调用 debate_round sessionId=${session.id} 进入第 1 轮交锋)`
-            )
-          } catch (err) {
-            fail(session, err)
-          }
-        },
-      })
-      tools.register({
-        name: 'debate_round',
-        description: '辩论第二步:交锋一轮(双方各一次,串行)。返回本轮双方输出,直接发给用户展示;未达最大轮数继续调本工具,达到后调 debate_synthesize 制图。',
-        parameters: sidParam,
-        output: textOut,
-        execute: async (args, exec) => {
-          const parent = exec.agent as ParentAgent | undefined
-          if (!parent) throw new Error('debate_round requires a calling agent')
-          const session = getSession(args as { sessionId?: unknown })
-          try {
-            const { round, builderOut, challengerOut, builderRelayChars } = await stepRound(subagents, parent, session, exec.signal)
-            session.updatedAt = Date.now()
-            // 与 host 直驱同一套判定(ADR-0014):工具分步入口不再"跑完就 done 但没说为什么停"。
-            const verdict = recordRoundAndJudge(session, round, builderOut, challengerOut, builderRelayChars)
-            const more = round < session.config.maxRounds
-            let tail: string
-            if (verdict === 'convergence') {
-              session.stopReason = 'convergence'
-              tail = `(双方本轮 agree 同一答案,已满足共识停机,调用 debate_synthesize sessionId=${session.id} 制图)`
-            } else if (verdict === 'saturation') {
-              session.stopReason = 'saturation'
-              tail = `(本轮无新增信息,已满足覆盖饱和停机,调用 debate_synthesize sessionId=${session.id} 制图)`
-            } else if (more) {
-              tail = `(继续调用 debate_round sessionId=${session.id} 进入下一轮)`
-            } else {
-              session.stopReason = 'maxRounds'
-              tail = `(已达最大轮数,调用 debate_synthesize sessionId=${session.id} 制图)`
-            }
-            return (
-              `## 交锋第 ${round}/${session.config.maxRounds} 轮\n\n### 建构方\n${builderOut}\n\n### 挑战方\n${challengerOut}\n\n` +
-              tail
-            )
-          } catch (err) {
-            fail(session, err)
-          }
-        },
-      })
-      tools.register({
-        name: 'debate_synthesize',
-        description: '辩论第三步:制图员只读实录输出五件套成果地图。返回地图全文,直接发给用户展示,辩论结束。',
-        parameters: sidParam,
-        output: textOut,
-        execute: async (args, exec) => {
-          const parent = exec.agent as ParentAgent | undefined
-          if (!parent) throw new Error('debate_synthesize requires a calling agent')
-          const session = getSession(args as { sessionId?: unknown })
-          try {
-            const { mapText } = await stepSynthesize(subagents, parent, session, exec.signal)
-            // 手动跳到制图也要留痕:stopReason=manual(否则 done 却答不出"为什么停")。
-            if (session.stopReason === null) session.stopReason = 'manual'
-            session.progress = '已完成'
-            session.status = 'done'
-            session.updatedAt = Date.now()
-            return `## 成果地图\n\n${mapText}`
-          } catch (err) {
-            fail(session, err)
-          }
-        },
-      })
-      tools.register({
-        name: 'debate_start',
-        description: '聊天开局:在当前会话直接开一场辩论(问题/背景自动提取,cwd 自动继承本会话工作区,辩手读得到本工程文件)。后台直驱开题+交锋+制图,返回 debate 会话 id,面板用此 id 轮询看实况。',
-        parameters: {
-          type: 'object',
-          properties: {
-            hint: { type: 'string', description: '可选:要辩的问题(如输入框草稿)。为空则取最近一条 user 消息当问题。' },
-            maxRounds: { type: 'number', description: '可选:最大交锋轮数(1~20,默认 5)。超上限按 20 跑并在进度里留痕。' },
-          },
-        },
-        output: textOut,
-        execute: async (args, exec) => {
-          const parent = exec.agent as ParentAgent | undefined
-          if (!parent?.session) throw new Error('debate_start requires a calling agent with session')
-          const a = (args ?? {}) as Record<string, unknown>
-          const parsed = normalizeConfig({ maxRounds: a.maxRounds ?? DEFAULT_CONFIG.maxRounds })
-          if ('error' in parsed) throw new Error(parsed.error)
-          // cwd 天生正确:常驻对直接继承发起会话 cwd,不走 targetCwd 后门。
-          const cwd = (parent.session as unknown as { header?: Record<string, unknown> })?.header?.cwd
-          if (typeof cwd === 'string' && cwd !== '') parsed.config.targetCwd = cwd
-          const session: DebateSession = {
-            id: newId(),
-            config: parsed.config,
-            status: 'running',
-            round: -1,
-            transcript: [],
-            map: null,
-            mapText: null,
-            error: null,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-            mirrorToChat: true,
-            progress: '建单成功(聊天开局),后台启动中…',
-            mirrorCount: 0,
-            mirrorError: null,
-            parentSid: parent.session.id as string,
-            stopReason: null,
-            rounds: [],
-            mode: 'oneShot',
-            residentError: 'not-attempted',
-            cageNote: null,
-            interruptedAt: null,
-            parentBusy: null,
-            streaming: {},
-            decisionSummary: null,
-            reportRel: null,
-            persistError: null,
-            reportError: null,
-        sweepError: null,
-        sweptSessions: [],
-            restored: false,
-          }
-          session.flush = () => schedulePersist(ctx, session)
-          sessions.set(session.id, session)
-          // 钳制留痕(agent 入口同理:runDebateLoop 的第一条 progress 会被覆盖,这里记 note 供 progress 拼接)。
-          if (parsed.config.note !== undefined) {
-            session.progress = parsed.config.note
-          }
-          const hint = typeof a.hint === 'string' ? a.hint : ''
-          const ctl = new AbortController()
-          controllers.set(session.id, ctl)
-          const ctxLike = ctx as unknown as Context
-          void runHostDebate(ctxLike, session, hint, '', ctl.signal, parent)
-          return (
-            `⚔ 辩论已开(会话 ${session.id},工作区 ${parsed.config.targetCwd ?? '默认'}):后台直驱中,` +
-            `面板输入此 id 跟局看实况。进度与实录会同步进本会话。`
-          )
-        },
-      })
-      tools.register({
-        name: 'debate_run',
-        description: '兼容入口:一次跑完开题+交锋+制图(结果只回工具,不分段进会话)。新链路优先用 debate_open/round/synthesize 三步(动态显示)。',
-        parameters: sidParam,
-        output: textOut,
-        execute: async (args, exec) => {
-          const parent = exec.agent as ParentAgent | undefined
-          if (!parent) throw new Error('debate_run requires a calling agent (exec.agent was undefined)')
-          const session = getSession(args as { sessionId?: unknown })
-          try {
-            const a = (args ?? {}) as { hint?: unknown }
-            const auto = resolveAuto(readEvents(parent), typeof a.hint === 'string' ? a.hint : '')
-            session.config.auto = auto
-            const mapText = await runDebateLoop(subagents, parent, session, exec.signal)
-            session.status = 'done'
-            session.updatedAt = Date.now()
-            const stopNote = session.stopReason === 'convergence' ? '(共识收敛,提前停机)'
-              : session.stopReason === 'saturation' ? '(覆盖饱和,提前停机)'
-              : session.stopReason === 'maxRounds' ? `(跑满 ${session.config.maxRounds} 轮)` : ''
-            return `## 成果地图(兼容单步)${stopNote}\n\n问题:${auto.question}\n\n${mapText}`
-          } catch (err) {
-            fail(session, err)
-          }
-        },
-      })
-      // ── 跨仓任务(task)模型工具(ADR-0025):与 /api/task/* 路由同源,供模型直接调用。
-      // 全部参数显式,不从调用会话 cwd 推导;模板真身仍在各编排库(templateDir/模板文本显式传)。
-      const taskStr = (desc: string): Record<string, unknown> => ({ type: 'string', description: desc })
-      tools.register({
-        name: 'task_scan',
-        description: '扫描父目录下一层子目录的 git 归属,返回 repo/part/external/unknown 分组(多仓任务建单前先看结构)。',
-        parameters: {
-          type: 'object',
-          properties: {
-            parentRoot: taskStr('父目录绝对路径'),
-            externalNames: { type: 'array', description: '可选:外部名单覆盖(缺省命中 finance .gm_ 一族)' },
-          },
-          required: ['parentRoot'],
-        },
-        output: textOut,
-        execute: async (args) => {
-          const a = (args ?? {}) as Record<string, unknown>
-          const parentRoot = a.parentRoot
-          if (typeof parentRoot !== 'string' || parentRoot === '') throw new Error('parentRoot required')
-          assertTaskAscii(parentRoot, 'parentRoot')
-          const externalNames = Array.isArray(a.externalNames) ? (a.externalNames as unknown[]).map(String) : undefined
-          const out = await scanParent(parentRoot, taskDefaultDeps(), externalNames ? { externalNames } : {})
-          return JSON.stringify(out)
-        },
-      })
-      tools.register({
-        name: 'task_build',
-        description: '按 slug/lead/involved 建任务目录(.tasks/<slug>-<时间戳>/),写 directive.md + to-<目标>.md 草稿(人审完改 issued 再 launch)。',
-        parameters: {
-          type: 'object',
-          properties: {
-            slug: taskStr('任务 slug(全小写英文短横线)'),
-            lead: taskStr('牵头仓相对路径'),
-            involved: { type: 'array', description: '涉及仓相对路径列表' },
-            title: taskStr('可选:一句话中文标题(缺省用 slug)'),
-            tasksRoot: taskStr('任务根目录绝对路径(即 .tasks,写盘落点)'),
-            baselines: taskStr('可选:版本基线文本(缺省由调用方填)'),
-            parentRoot: taskStr('可选:父目录绝对路径,给出即校验 involved 落点存在'),
-            templateDir: taskStr('可选:编排库目录(含 directive_template.md/to_template.md);缺省 tasksRoot 上一级'),
-            directiveTemplate: taskStr('可选:总指示模板文本,覆盖文件读取'),
-            toTemplate: taskStr('可选:派活模板文本,覆盖文件读取'),
-          },
-          required: ['slug', 'lead', 'involved', 'tasksRoot'],
-        },
-        output: textOut,
-        execute: async (args) => {
-          const a = (args ?? {}) as Record<string, unknown>
-          const slug = a.slug, lead = a.lead, tasksRoot = a.tasksRoot
-          const involved = a.involved
-          if (typeof slug !== 'string' || slug === '') throw new Error('slug required')
-          if (typeof lead !== 'string' || lead === '') throw new Error('lead required')
-          if (!Array.isArray(involved) || involved.length === 0) throw new Error('involved required')
-          if (typeof tasksRoot !== 'string' || tasksRoot === '') throw new Error('tasksRoot required')
-          assertTaskAscii(slug, 'slug')
-          assertTaskAscii(lead, 'lead')
-          assertTaskAscii(tasksRoot, 'tasksRoot')
-          for (const repo of involved as unknown[]) assertTaskAscii(String(repo), 'involved[]')
-          let stamp = taskStampOf()
-          const tRoot = tasksRoot
-          for (let bump = 0; bump < 60 && fs.existsSync(path.join(tRoot, `${slug}-${stamp}`)); bump++) {
-            stamp = taskStampOf(Date.now() + (bump + 1) * 1000)
-          }
-          const taskDirName = `${slug}-${stamp}`
-          const taskDir = path.join(tRoot, taskDirName)
-          if (fs.existsSync(taskDir)) throw new Error(`task dir collision under ${tRoot} for slug ${slug}`)
-          const created = taskCreatedOf()
-          let directiveTemplate = typeof a.directiveTemplate === 'string' ? a.directiveTemplate : null
-          let toTemplate = typeof a.toTemplate === 'string' ? a.toTemplate : null
-          if (!directiveTemplate || !toTemplate) {
-            const templateDir = typeof a.templateDir === 'string' && a.templateDir !== ''
-              ? a.templateDir
-              : path.resolve(tRoot, '..')
-            assertTaskAscii(templateDir, 'templateDir')
-            directiveTemplate = directiveTemplate ?? fs.readFileSync(path.join(templateDir, 'directive_template.md'), 'utf-8')
-            toTemplate = toTemplate ?? fs.readFileSync(path.join(templateDir, 'to_template.md'), 'utf-8')
-          }
-          const baselines = a.baselines
-          const baseline = typeof baselines === 'string' ? baselines : '<基线由调用方填>'
-          const out = buildMaterials({
-            slug, stamp, lead, involved: (involved as unknown[]).map(String),
-            title: typeof a.title === 'string' && a.title !== '' ? a.title : slug,
-            baseline, created,
-            directiveTemplate: directiveTemplate as string, toTemplate: toTemplate as string,
-          })
-          const leftover = [...leftoverPlaceholders(out.directive), ...out.toFiles.flatMap((f) => leftoverPlaceholders(f.text))]
-          if (leftover.length > 0) throw new Error(`template placeholders unfilled: ${[...new Set(leftover)].slice(0, 5).join(', ')}`)
-          fs.mkdirSync(taskDir, { recursive: true })
-          fs.writeFileSync(path.join(taskDir, 'directive.md'), out.directive, 'utf-8')
-          for (const f of out.toFiles) fs.writeFileSync(path.join(taskDir, f.fileName), f.text, 'utf-8')
-          return JSON.stringify({ ok: true, taskDir, taskDirName: out.taskDirName, files: ['directive.md', ...out.toFiles.map((f) => f.fileName)] })
-        },
-      })
-      tools.register({
-        name: 'task_launch',
-        description: 'directive issued 后一仓一会话拉起执行会话(首句派活照抄 to-<short>.md 口径),返回各仓 sessionId(面板/人在会话列表里跟进)。',
-        parameters: {
-          type: 'object',
-          properties: {
-            taskDir: taskStr('任务目录绝对路径'),
-            involved: { type: 'array', description: '涉及仓相对路径列表' },
-            parentRoot: taskStr('父目录绝对路径'),
-            lead: taskStr('可选:牵头仓相对路径(派活首句标注牵头)'),
-            provider: taskStr('可选:模型 provider(缺省读宿主 presets 默认)'),
-            model: taskStr('可选:模型名(缺省读宿主 presets 默认)'),
-            skipIssuedCheck: { type: 'boolean', description: '可选:跳过 issued 门(测试/探针用)' },
-          },
-          required: ['taskDir', 'involved', 'parentRoot'],
-        },
-        output: textOut,
-        execute: async (args, exec) => {
-          const a = (args ?? {}) as Record<string, unknown>
-          const taskDir = a.taskDir, parentRoot = a.parentRoot
-          const involved = a.involved
-          if (typeof taskDir !== 'string' || taskDir === '') throw new Error('taskDir required')
-          if (!Array.isArray(involved) || involved.length === 0) throw new Error('involved required')
-          if (typeof parentRoot !== 'string' || parentRoot === '') throw new Error('parentRoot required')
-          assertTaskAscii(taskDir, 'taskDir')
-          assertTaskAscii(parentRoot, 'parentRoot')
-          for (const repo of involved as unknown[]) assertTaskAscii(String(repo), 'involved[]')
-          if (!a.skipIssuedCheck) {
-            let directiveText = ''
-            try {
-              directiveText = fs.readFileSync(path.join(taskDir, 'directive.md'), 'utf-8')
-            } catch {
-              throw new Error('directive.md not found under taskDir (build first?)')
-            }
-            if (!/^status:\s*issued\b/m.test(directiveText)) {
-              throw new Error('directive not issued (fill it and flip status: draft → issued first)')
-            }
-          }
-          const agents = ctx.get('agents') as { create(o: unknown): Promise<{ agent?: { followup?: (m: unknown) => void } }> } | undefined
-          if (!agents) throw new Error('agents unavailable')
-          const lead = typeof a.lead === 'string' ? a.lead : ''
-          if (lead !== '') assertTaskAscii(lead, 'lead')
-          const provider = typeof a.provider === 'string' && a.provider !== '' ? a.provider : undefined
-          const model = typeof a.model === 'string' && a.model !== '' ? a.model : undefined
-          const taskRef = taskDir.replace(/\\/g, '/')
-          const sessions: Array<Record<string, unknown>> = []
-          for (const repo of (involved as unknown[]).map(String)) {
-            const ctl = new AbortController()
-            const key = `${taskDir}::${repo}::${Date.now()}`
-            taskLaunchControllers.set(key, ctl)
-            try {
-              const cwd = path.join(parentRoot, ...repo.split('/'))
-              const text = handoffText(taskRef, repo, repo === lead)
-              if (ctl.signal.aborted) throw new Error('aborted')
-              const out = await ensureGroupedSession(
-                { get: ctx.get.bind(ctx) as (name: string) => unknown, agents: agents as never },
-                { cwd, text, signal: exec.signal ?? ctl.signal, ...(provider ? { provider } : {}), ...(model ? { model } : {}) },
-              )
-              sessions.push({ repo, ok: true, ...out })
-            } catch (e) {
-              sessions.push({ repo, ok: false, error: e instanceof Error ? e.message : String(e) })
-            } finally {
-              taskLaunchControllers.delete(key)
-            }
-          }
-          return JSON.stringify({ ok: true, sessions, taskDir })
-        },
-      })
-      tools.register({
-        name: 'task_report',
-        description: 'host 代写 back-<来源短名>.md 回任务目录(执行会话侧调,干活结论落盘)。',
-        parameters: {
-          type: 'object',
-          properties: {
-            taskDir: taskStr('任务目录绝对路径'),
-            from: taskStr('来源仓相对路径'),
-            to: taskStr('可选:收件仓(缺省空)'),
-            slug: taskStr('可选:任务 slug'),
-            ticket: taskStr('可选:本仓票路径'),
-            stuck: taskStr('可选:卡在哪'),
-            change: taskStr('可选:要改什么'),
-            paths: { type: 'array', description: '可选:真身路径列表' },
-          },
-          required: ['taskDir', 'from'],
-        },
-        output: textOut,
-        execute: async (args) => {
-          const a = (args ?? {}) as Record<string, unknown>
-          const taskDir = a.taskDir, from = a.from
-          if (typeof taskDir !== 'string' || taskDir === '') throw new Error('taskDir required')
-          if (typeof from !== 'string' || from === '') throw new Error('from required')
-          assertTaskAscii(taskDir, 'taskDir')
-          assertTaskAscii(from, 'from')
-          const fileName = reportFileName(from)
-          const md = reportMarkdown({
-            from,
-            to: typeof a.to === 'string' ? a.to : undefined,
-            slug: typeof a.slug === 'string' ? a.slug : '',
-            ticket: typeof a.ticket === 'string' ? a.ticket : '',
-            created: taskCreatedOf(),
-            stuck: typeof a.stuck === 'string' ? a.stuck : '',
-            change: typeof a.change === 'string' ? a.change : '',
-            paths: Array.isArray(a.paths) ? (a.paths as unknown[]).map(String) : [],
-          })
-          const outPath = path.join(taskDir, fileName)
-          fs.writeFileSync(outPath, md, 'utf-8')
-          return JSON.stringify({ ok: true, path: outPath })
-        },
-      })
-      tools.register({
-        name: 'task_collect',
-        description: '读回任务目录全部 back-*.md 汇总(牵头仓收尾用)。',
-        parameters: {
-          type: 'object',
-          properties: {
-            taskDir: taskStr('任务目录绝对路径'),
-          },
-          required: ['taskDir'],
-        },
-        output: textOut,
-        execute: async (args) => {
-          const a = (args ?? {}) as Record<string, unknown>
-          const taskDir = a.taskDir
-          if (typeof taskDir !== 'string' || taskDir === '') throw new Error('taskDir required')
-          assertTaskAscii(taskDir, 'taskDir')
-          const names = fs.readdirSync(taskDir).filter((n) => n.startsWith('back-') && n.endsWith('.md')).sort()
-          const backs = names.map((n) => ({ file: n, text: fs.readFileSync(path.join(taskDir, n), 'utf-8') }))
-          return JSON.stringify({ ok: true, backs })
-        },
-      })
-    } catch {
-      // tools 服务不可用时 host 路由仍可建单,仅执行不可用
-    }
+    // 模型工具:无。人工操作插件,不注册任何模型工具(host 直驱走 subagents 服务)。
   },
 }

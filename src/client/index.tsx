@@ -1,9 +1,9 @@
 /**
- * dsh-debate — Client 半区。
+ * dsh-session-enhance — Client 半区。
  *
- * 只用按钮,不用命令:输入框 input.right「✦ 增强」菜单(辩论/多仓任务二选一)+
- * shell.overlay 浮层对话框(辩论 Dialog:三模型+轮数,问题/题型/lens 自动判断;任务 TaskDialog 三步)。
- * 建单走 /dsh-debate/api/start,轮询 /dsh-debate/api/state 取实况。
+ * 只用按钮,不用命令:输入框 input.right「✦ 增强」菜单(思辨/多仓任务二选一)+
+ * shell.overlay 浮层对话框(思辨 Dialog:三模型+轮数,问题/题型/lens 自动判断;任务 TaskDialog 三步)。
+ * 建单走 /dsh-session-enhance/api/start,轮询 /dsh-session-enhance/api/state 取实况。
  * 执行由 host 后台直驱完成(ADR-0011,面板点开始即跑,不发触发语)。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -35,7 +35,7 @@ const C = (k: string): string => styles[k] ?? k
 
 // ---------- 与 Host 的 JSON RPC ----------
 async function api<T = unknown>(method: string, payload: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`/dsh-debate/api/${method}`, {
+  const res = await fetch(`/dsh-session-enhance/api/${method}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload),
@@ -44,10 +44,10 @@ async function api<T = unknown>(method: string, payload: Record<string, unknown>
 }
 
 // ---------- 国际化 ----------
-const NS = 'dsh-debate'
+const NS = 'dsh-session-enhance'
 const DICTS: Record<string, Record<string, string>> = {
   zh: {
-    'panel.title': '双视角辩论', 'tip': '为开放性问题跑建构 / 挑战 / 制图,产出成果地图',
+    'panel.title': '开放思辨', 'tip': '为开放性问题跑建构 / 挑战 / 制图,产出成果地图',
     'auto.note': '问题、题型、视角、背景自动从当前会话提取,不用填。',
     'auto.question': '问题:', 'auto.type': '题型:', 'auto.lensesUnit': ' 个视角', 'auto.ctx': '背景 ', 'auto.charsUnit': ' 字',
     'type.selection': '选型 / 方案比较', 'type.review': '评审 / 对照验证',
@@ -69,7 +69,7 @@ const DICTS: Record<string, Record<string, string>> = {
     'trigger.copy': '复制成果地图', 'trigger.copied': '已复制,去输入框粘贴',
     'map.lenses': '视角清单', 'map.args': '论证表', 'map.grounding': '依据表',
     'map.disputes': '分歧地图', 'map.gaps': '缺口清单',
-    'settings.nav': '辩论', 'settings.note': '默认模型与轮数(面板每次可改)。',
+    'settings.nav': '会话增强', 'settings.note': '默认模型与轮数(面板每次可改)。',
     'version': '版本 v{ver}',
     'btn.fullscreen': '全屏', 'btn.unfullscreen': '退出全屏', 'btn.minimize': '最小化',
     'btn.restore': '恢复', 'resize.tip': '右下角拖拽调整大小,双击恢复默认',
@@ -107,7 +107,7 @@ const DICTS: Record<string, Record<string, string>> = {
     'report.restored': '本局是从磁盘恢复的(宿主重启前的记录):结论可读,但不会再继续跑。',
   },
   en: {
-    'panel.title': 'Two-lens debate', 'tip': 'Builder / challenger / synthesizer map for open questions',
+    'panel.title': 'Deliberation', 'tip': 'Builder / challenger / synthesizer map for open questions',
     'auto.note': 'Question, type, lenses and context are auto-extracted from this session.',
     'auto.question': 'Q: ', 'auto.type': 'Type: ', 'auto.lensesUnit': ' lenses', 'auto.ctx': 'ctx ', 'auto.charsUnit': ' chars',
     'type.selection': 'Selection / comparison', 'type.review': 'Review / verification',
@@ -123,17 +123,17 @@ const DICTS: Record<string, Record<string, string>> = {
     'takeover.busy': 'parent busy (user talking)', 'takeover.idle': 'parent idle',
     'btn.start': 'Start debate', 'btn.stop': 'Stop', 'btn.close': 'Close',
     'btn.interrupt': 'Interrupt both', 'btn.interruptTip': 'Stop the parent turn too (keep what the user just said), abort the background debate',
-    'st.idle': 'Ready', 'st.running': 'Debate running… (host drives open → rounds → map into the panel)',
+    'st.idle': 'Ready', 'st.running': 'Deliberation running… (host drives open → rounds → map into the panel)',
     'st.polling': 'Waiting for model…', 'st.done': 'Done', 'st.failed': 'Failed', 'st.stopped': 'Stopped',
     'draft.hint': 'Copy the result map back to the composer when done',
     'trigger.copy': 'Copy result map', 'trigger.copied': 'Copied — paste in composer',
     'map.lenses': 'Lenses', 'map.args': 'Arguments', 'map.grounding': 'Grounding',
     'map.disputes': 'Disputes', 'map.gaps': 'Gaps',
-    'settings.nav': 'Debate', 'settings.note': 'Default models and rounds (overridable per run).',
+    'settings.nav': 'Session Enhance', 'settings.note': 'Default models and rounds (overridable per run).',
     'version': 'Version v{ver}',
     'btn.fullscreen': 'Fullscreen', 'btn.unfullscreen': 'Exit fullscreen', 'btn.minimize': 'Minimize',
     'btn.restore': 'Restore', 'resize.tip': 'Drag from the corner to resize, double-click to reset',
-    'minimized.running': 'Debate running…', 'minimized.done': 'Debate finished',
+    'minimized.running': 'Deliberation running…', 'minimized.done': 'Deliberation finished',
     'role.builder': 'Builder', 'role.challenger': 'Challenger', 'role.synthesizer': 'Synthesizer',
     'round.opening': 'Opening', 'round.map': 'Result map', 'round.n': 'Round {n}',
     'stream.writing': 'writing…', 'stream.tools': 'calling tools…',
@@ -149,7 +149,7 @@ const DICTS: Record<string, Record<string, string>> = {
     'summary.standoff': 'Builder holds "{b}", challenger holds "{c}"',
     'summary.opening': 'Opening: builder argues "{b}", challenger argues "{c}"',
     'summary.quoted': 'quoted {q}/{t} lines',
-    'decision.title': 'Debate conclusion (paste-ready)',
+    'decision.title': 'Deliberation conclusion (paste-ready)',
     'decision.copy': 'Send to composer',
     'summary.pending': '{n} open',
     'ver.tip': 'backend (running) v{host} · UI v{client} · disk v{disk}',
@@ -346,7 +346,7 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
   const [roundsText, setRoundsText] = useState('5')
   // 跟局 id:聊天开局后模型返回的会话 id,面板粘贴即看实况。
   const [followId, setFollowId] = useState('')
-  // targetCwd 面板不再露:聊天开局(debate_start)自动继承会话 cwd;HTTP 建单默认进程目录。
+  // targetCwd 面板不再露:面板开局自动继承会话 cwd;HTTP 建单默认进程目录。
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [status, setStatus] = useState('idle')
   const [resolved, setResolved] = useState<AutoResolved | null>(null)
@@ -534,7 +534,7 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
       try {
         // 不用共享 api():那条路假设响应一定是 JSON。这里非 2xx(旧宿主没这条路由,
         // 实测返回 405)必须当成"后台版本未知",不能静默当成成功。
-        const res = await fetch('/dsh-debate/api/version', {
+        const res = await fetch('/dsh-session-enhance/api/version', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: '{}',
@@ -717,10 +717,10 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
   if (minimized) {
     const miniLabel = status === 'running' ? tr('minimized.running') : status === 'done' ? tr('minimized.done') : tr(`st.${status}`)
     return (
-      <button className={C('dshd-mini')} onClick={() => setMinimized(false)} title={tr('btn.restore')} aria-label={tr('btn.restore')}>
+      <button className={C('dshe-mini')} onClick={() => setMinimized(false)} title={tr('btn.restore')} aria-label={tr('btn.restore')}>
         <span className={C(status === 'running' ? 'dot-live' : 'dot-done')} />
         <span>⚔ {miniLabel}</span>
-        <span className={C('dshd-version') + (versionWarn !== null ? ` ${C('dshd-version-warn')}` : '')} title={versionTip}>{versionText}{versionWarn !== null ? ' ⚠' : ''}</span>
+        <span className={C('dshe-version') + (versionWarn !== null ? ` ${C('dshe-version-warn')}` : '')} title={versionTip}>{versionText}{versionWarn !== null ? ' ⚠' : ''}</span>
       </button>
     )
   }
@@ -732,96 +732,96 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
       }
   return (
     <div
-      className={C('dshd-overlay') + (fullscreen ? ` ${C('dshd-overlay-full')}` : '')}
+      className={C('dshe-overlay') + (fullscreen ? ` ${C('dshe-overlay-full')}` : '')}
       role="dialog" aria-label={tr('panel.title')}
       style={overlayStyle}
     >
-      <div className={C('dshd-header')}>
+      <div className={C('dshe-header')}>
         <span>⚔ {tr('panel.title')}</span>
-        <span className={C('dshd-version') + (versionWarn !== null ? ` ${C('dshd-version-warn')}` : '')} title={versionTip}>{versionText}{versionWarn !== null ? ' ⚠' : ''}</span>
+        <span className={C('dshe-version') + (versionWarn !== null ? ` ${C('dshe-version-warn')}` : '')} title={versionTip}>{versionText}{versionWarn !== null ? ' ⚠' : ''}</span>
         <span className={C('spacer')} />
-        <button className={C('dshd-hbtn')} onClick={toggleFullscreen} title={fullscreen ? tr('btn.unfullscreen') : tr('btn.fullscreen')} aria-label={fullscreen ? tr('btn.unfullscreen') : tr('btn.fullscreen')}>{fullscreen ? '⤢' : '⛶'}</button>
-        <button className={C('dshd-hbtn')} onClick={() => setMinimized(true)} title={tr('btn.minimize')} aria-label={tr('btn.minimize')}>—</button>
-        <button className={C('dshd-close')} onClick={props.onClose} aria-label={tr('btn.close')}>✕</button>
+        <button className={C('dshe-hbtn')} onClick={toggleFullscreen} title={fullscreen ? tr('btn.unfullscreen') : tr('btn.fullscreen')} aria-label={fullscreen ? tr('btn.unfullscreen') : tr('btn.fullscreen')}>{fullscreen ? '⤢' : '⛶'}</button>
+        <button className={C('dshe-hbtn')} onClick={() => setMinimized(true)} title={tr('btn.minimize')} aria-label={tr('btn.minimize')}>—</button>
+        <button className={C('dshe-close')} onClick={props.onClose} aria-label={tr('btn.close')}>✕</button>
       </div>
-      <div className={C('dshd-body')}>
-        <div className={C('dshd-note')}>{tr('auto.note')}</div>
+      <div className={C('dshe-body')}>
+        <div className={C('dshe-note')}>{tr('auto.note')}</div>
         {/* 版本告警(v0.4):后台不是最新代码时明确说清楚,别让徽标骗人。 */}
         {versionWarn !== null && (
-          <div className={C('dshd-verwarn')} role="alert">
+          <div className={C('dshe-verwarn')} role="alert">
             <b>{tr('ver.warnTitle')}</b>
             <span>{versionWarn}</span>
           </div>
         )}
         {/* 实况进度置顶:谁在写一眼可见 */}
         {progress !== '' && (status === 'running' || status === 'done') && (
-          <div className={C('dshd-livebar')}>
+          <div className={C('dshe-livebar')}>
             <span className={C(status === 'running' ? 'dot-live' : 'dot-done')} />
             <span>{progress}</span>
           </div>
         )}
         {status === 'running' && (writing('builder') || writing('challenger') || writing('synthesizer')) && (
-          <div className={C('dshd-note')}>
+          <div className={C('dshe-note')}>
             {writing('builder') && '✍ 建构者正在写…'}
             {writing('challenger') && '✍ 挑战者正在写…'}
             {writing('synthesizer') && '✍ 制图员正在写…'}
           </div>
         )}
         {prefillQuestion.trim() !== '' && (
-          <div className={C('dshd-resolved')}>
+          <div className={C('dshe-resolved')}>
             <div><b>{tr('auto.question')}</b>{prefillQuestion.trim()}</div>
           </div>
         )}
-        <div className={C('dshd-field')}>
+        <div className={C('dshe-field')}>
           <span>{tr('builder.label')}</span>
           <select value={builder} onChange={(e) => setBuilder(Number(e.target.value))} disabled={status === 'running'}>
             {MODELS.map((m, i) => <option key={i} value={i}>{routeLabel(m)}</option>)}
           </select>
         </div>
-        <div className={C('dshd-field')}>
+        <div className={C('dshe-field')}>
           <span>{tr('challenger.label')}</span>
           <select value={challenger} onChange={(e) => setChallenger(Number(e.target.value))} disabled={status === 'running'}>
             {MODELS.map((m, i) => <option key={i} value={i}>{routeLabel(m)}</option>)}
           </select>
         </div>
-        <div className={C('dshd-field')}>
+        <div className={C('dshe-field')}>
           <span>{tr('synth.label')}</span>
           <select value={synth} onChange={(e) => setSynth(Number(e.target.value))} disabled={status === 'running'}>
             {MODELS.map((m, i) => <option key={i} value={i}>{routeLabel(m)}</option>)}
           </select>
         </div>
-        <div className={C('dshd-field')}>
+        <div className={C('dshe-field')}>
           <span>{tr('rounds.label')}</span>
           <input type="number" min={1} max={20} value={roundsText} placeholder="5(默认)" onChange={(e) => setRoundsText(e.target.value)} disabled={status === 'running'} />
         </div>
-        <div className={C('dshd-note')}>输入框写问题 → 点开始辩论即开(工作区自动取当前会话,不用填)。实况在本面板看,跑完点"复制成果地图"并回对话。</div>
+        <div className={C('dshe-note')}>输入框写问题 → 点开始辩论即开(工作区自动取当前会话,不用填)。实况在本面板看,跑完点"复制成果地图"并回对话。</div>
         {resolved !== null && (
-          <div className={C('dshd-resolved')}>
+          <div className={C('dshe-resolved')}>
             <div><b>{tr('auto.question')}</b>{resolved.question}</div>
             <div><b>{tr('auto.type')}</b>{tr(`type.${resolved.questionType}`) ?? resolved.questionType} · {resolved.lenses}{tr('auto.lensesUnit')} · {tr('auto.ctx')}{resolved.contextChars}{tr('auto.charsUnit')}{resolved.targetCwd ? ` · 目标:${resolved.targetCwd}` : ''}</div>
           </div>
         )}
         {/* 收尾陈述(v4):辩论一结束就置顶。这是用户决定下一步的依据,所以单独一块、可一键复制。 */}
         {decision !== null && decision.trim() !== '' && (
-          <div className={C('dshd-decision')}>
-            <div className={C('dshd-decision-head')}>
+          <div className={C('dshe-decision')}>
+            <div className={C('dshe-decision-head')}>
               <span>{tr('decision.title')}</span>
-              <button className={C('dshd-copybtn')} onClick={() => { void copyDecision() }}>{copied ? tr('trigger.copied') : tr('decision.copy')}</button>
+              <button className={C('dshe-copybtn')} onClick={() => { void copyDecision() }}>{copied ? tr('trigger.copied') : tr('decision.copy')}</button>
             </div>
-            <div className={C('dshd-decision-body')}>{decision.replace(/^##\s*[^\n]*\n?/, '').trim()}</div>
+            <div className={C('dshe-decision-body')}>{decision.replace(/^##\s*[^\n]*\n?/, '').trim()}</div>
           </div>
         )}
         {/* 结论文档(ADR-0019):把"有地址的产物"摆出来——路径不给,文件就等于不存在。 */}
         {reportPath !== null && (
-          <div className={C('dshd-report')}>
+          <div className={C('dshe-report')}>
             <span>{tr('report.saved')}</span>
             <code title={reportPath}>{reportPath}</code>
-            <button className={C('dshd-copybtn')} onClick={() => { void copyReportPath() }}>{copiedPath ? tr('trigger.copied') : tr('report.copy')}</button>
+            <button className={C('dshe-copybtn')} onClick={() => { void copyReportPath() }}>{copiedPath ? tr('trigger.copied') : tr('report.copy')}</button>
           </div>
         )}
         {/* 两条失败原因分开显示:落盘失败查存储后端,落文件失败查工作区权限。 */}
         {(persistError !== null || reportError !== null) && (
-          <div className={C('dshd-verwarn')} role="alert">
+          <div className={C('dshe-verwarn')} role="alert">
             <b>{tr('report.warnTitle')}</b>
             {persistError !== null && <span>{tr('report.persistFail', { err: persistError })}</span>}
             {reportError !== null && reportError !== 'no-target-cwd' && <span>{tr('report.fileFail', { err: reportError })}</span>}
@@ -830,45 +830,45 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
         )}
         {/* 恢复标记:宿主重启后旧局仍打得开,但要说清它是恢复的、且不会再跑。 */}
         {restored && (
-          <div className={C('dshd-restored')}>{tr('report.restored')}</div>
+          <div className={C('dshe-restored')}>{tr('report.restored')}</div>
         )}
-        <div className={C('dshd-actions')}>
+        <div className={C('dshe-actions')}>
           {status === 'running' || status === 'polling'
             ? <>
-                <button className={C('dshd-stop')} onClick={() => { void stop() }} disabled={status === 'polling'} title={status === 'polling' ? '等模型开局:输入框回车后自动跟局' : undefined}>{tr('btn.stop')}</button>
+                <button className={C('dshe-stop')} onClick={() => { void stop() }} disabled={status === 'polling'} title={status === 'polling' ? '等模型开局:输入框回车后自动跟局' : undefined}>{tr('btn.stop')}</button>
                 {/* S17 一键双停:连发起会话的 turn 一起停(用户刚说的话留着)。 */}
-                <button className={C('dshd-stop')} onClick={() => { void interrupt() }} disabled={status === 'polling'} title={tr('btn.interruptTip')}>{tr('btn.interrupt')}</button>
+                <button className={C('dshe-stop')} onClick={() => { void interrupt() }} disabled={status === 'polling'} title={tr('btn.interruptTip')}>{tr('btn.interrupt')}</button>
               </>
-            : <button className={C('dshd-start')} onClick={() => { void start() }}>{tr('btn.start')}</button>}
-          <span className={C('dshd-status')}>{tr(`st.${status}`)}</span>
+            : <button className={C('dshe-start')} onClick={() => { void start() }}>{tr('btn.start')}</button>}
+          <span className={C('dshe-status')}>{tr(`st.${status}`)}</span>
         </div>
         {/* 跟局:本局 id(建单自动填);旧局 id 可手动粘贴回来重看。宿主重启后旧局不再作废——
             host 启动时会把磁盘上的整局记录装回内存(ADR-0019),所以粘贴旧 id 仍能取到结论。 */}
         {(status === 'idle' || status === 'polling' || status === 'stopped') && (
-          <div className={C('dshd-field')}>
+          <div className={C('dshe-field')}>
             <span>会话 id</span>
-            <input type="text" value={followId} onChange={(e) => setFollowId(e.target.value)} placeholder="debate-…(本局自动填,旧局可粘贴)" />
-            <div className={C('dshd-actions')}>
-              <button className={C('dshd-start')} onClick={() => { void follow(followId) }} disabled={followId.trim() === ''}>跟局看实况</button>
+            <input type="text" value={followId} onChange={(e) => setFollowId(e.target.value)} placeholder="se-…(本局自动填,旧局可粘贴)" />
+            <div className={C('dshe-actions')}>
+              <button className={C('dshe-start')} onClick={() => { void follow(followId) }} disabled={followId.trim() === ''}>跟局看实况</button>
             </div>
           </div>
         )}
         {sessionId !== null && status === 'running' && (
-          <div className={C('dshd-note')}>
-            <div className={C('dshd-sid')}>会话 {sessionId}{parentBusy === true ? ` · ${tr('takeover.busy')}` : parentBusy === false ? ` · ${tr('takeover.idle')}` : ''}</div>
+          <div className={C('dshe-note')}>
+            <div className={C('dshe-sid')}>会话 {sessionId}{parentBusy === true ? ` · ${tr('takeover.busy')}` : parentBusy === false ? ` · ${tr('takeover.idle')}` : ''}</div>
           </div>
         )}
         {sessionId !== null && status === 'done' && turns.length > 0 && (
-          <div className={C('dshd-field')}>
+          <div className={C('dshe-field')}>
             <span>{tr('draft.hint')}</span>
-            <div className={C('dshd-actions')}>
-              <button className={C('dshd-stop')} onClick={copyMap}>{copied ? tr('trigger.copied') : tr('trigger.copy')}</button>
+            <div className={C('dshe-actions')}>
+              <button className={C('dshe-stop')} onClick={copyMap}>{copied ? tr('trigger.copied') : tr('trigger.copy')}</button>
             </div>
           </div>
         )}
         {/* 停机审计:stopReason + 每轮人话小结(判定数据翻译,不调模型)。 */}
         {(stopReason !== null || roundAudits.length > 0) && (status === 'done' || status === 'running') && (
-          <div className={C('dshd-resolved')}>
+          <div className={C('dshe-resolved')}>
             <div><b>{tr('audit.title')}</b>{stopReason !== null ? tr(stopKey(stopReason, roundAudits, resolved?.maxRounds)) : tr('stop.pending')}{mode !== '' && mode !== 'resident' ? ` · ${mode}` : ''}</div>
             {roundAudits.length > 0 && (
               <div><b>{tr('summary.title')}</b></div>
@@ -884,12 +884,12 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
         )}
         {/* 镜像状态:对话区有没有同步,不再静默(mirrorCount/mirrorError host 早就有)。 */}
         {sessionId !== null && status !== 'idle' && (
-          <div className={C('dshd-note')}>
+          <div className={C('dshe-note')}>
             {mirrorCount > 0 ? `${tr('mirror.on')} ×${mirrorCount}` : tr('mirror.off')}
             {mirrorError !== null ? ` · ${tr('mirror.fail')}:${mirrorError}` : ''}
           </div>
         )}
-        {error !== null && <div className={C('dshd-error')}>{error}</div>}
+        {error !== null && <div className={C('dshe-error')}>{error}</div>}
         {/* 实时流:正在写的各方当前 turn 流式文本,打字机效果(结论落 transcript 即替换成正式 TurnCard)。 */}
         {status === 'running' && Object.keys(streams).map((role) => {
           const st = streams[role]
@@ -897,13 +897,13 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
           return <StreamCard key={`stream-${role}`} role={role} round={st.round} kind={st.kind} text={st.text} />
         })}
         {turns.length > 0 && (
-          <div className={C('dshd-feed')} ref={feedRef} onScroll={onFeedScroll}>
+          <div className={C('dshe-feed')} ref={feedRef} onScroll={onFeedScroll}>
             {turns.map((t) => (
               <span key={t.seq}>
                 <TurnCard turn={t} />
                 {/* S17 打断线:停在 transcript 哪,面板照此画线,不猜不编。 */}
                 {interruptedAt !== null && t.seq === interruptedAt.seq && (
-                  <div className={C('dshd-interrupted')}>{tr('interrupt.mark')}</div>
+                  <div className={C('dshe-interrupted')}>{tr('interrupt.mark')}</div>
                 )}
               </span>
             ))}
@@ -913,10 +913,10 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
       {/* 右下角拉手:拖拽调尺寸(宽高同时),双击恢复默认;全屏时拖动即退全屏 */}
       {!minimized && (
         <div
-          className={C('dshd-resize-corner')}
+          className={C('dshe-resize-corner')}
           onMouseDown={onResizeDown} onTouchStart={onResizeTouchStart} onDoubleClick={onResizeReset}
           title={tr('resize.tip')} role="separator" aria-orientation="horizontal" aria-label={tr('resize.tip')}
-        ><span className={C('dshd-resize-corner-bar')} /></div>
+        ><span className={C('dshe-resize-corner-bar')} /></div>
       )}
     </div>
   )
@@ -931,7 +931,7 @@ function StreamCard(props: { role: string; round: number; kind: 'text' | 'tools'
   // 工具心跳是单行状态,不走三段分段,直接渲染。
   if (props.kind === 'tools') {
     return (
-      <div className={C('dshd-turn-stream')}>
+      <div className={C('dshe-turn-stream')}>
         <div className={C('who')}>{who}{tr('stream.tools')}</div>
         <div>{props.text}<span className={C('caret')}>▍</span></div>
       </div>
@@ -943,13 +943,13 @@ function StreamCard(props: { role: string; round: number; kind: 'text' | 'tools'
     return lines.slice(-8).join('\n')
   }
   return (
-    <div className={C('dshd-turn-stream')}>
+    <div className={C('dshe-turn-stream')}>
       <div className={C('who')}>{who}{tr('stream.writing')}</div>
       {rest !== '' ? <div>{tail(rest)}<span className={C('caret')}>▍</span></div> : (
         <>
-          {summary !== '' && <div className={C('dshd-summary')}>{tail(summary)}<span className={C('caret')}>▍</span></div>}
-          {delta !== '' && <div className={C('dshd-delta')}>Δ {delta.split('\n')[0]}</div>}
-          {detail !== '' && <div className={C('dshd-note')}>{tail(detail)}</div>}
+          {summary !== '' && <div className={C('dshe-summary')}>{tail(summary)}<span className={C('caret')}>▍</span></div>}
+          {delta !== '' && <div className={C('dshe-delta')}>Δ {delta.split('\n')[0]}</div>}
+          {detail !== '' && <div className={C('dshe-note')}>{tail(detail)}</div>}
         </>
       )}
     </div>
@@ -963,20 +963,20 @@ function TurnCard(props: { turn: Turn }): React.ReactNode {
   const { summary, detail, delta, rest } = splitSections(t.text)
   const segmented = rest === ''
   return (
-    <div className={C('dshd-turn')}>
+    <div className={C('dshe-turn')}>
       <div className={C('who')}>{roundLabel(t.round, t.role, tr)} · {roleName(t.role, tr)}</div>
       {!segmented && <div>{t.text}</div>}
       {segmented && (
         <>
-          {summary !== '' && <div className={C('dshd-summary')}>{summary}</div>}
-          {delta !== '' && <div className={C('dshd-delta')}>Δ {delta.split('\n')[0]}</div>}
-          <button className={C('dshd-foldbtn')} onClick={() => setOpen((v) => !v)}>
+          {summary !== '' && <div className={C('dshe-summary')}>{summary}</div>}
+          {delta !== '' && <div className={C('dshe-delta')}>Δ {delta.split('\n')[0]}</div>}
+          <button className={C('dshe-foldbtn')} onClick={() => setOpen((v) => !v)}>
             {open ? '收起详细论证 ▲' : '展开详细论证 ▼'}
           </button>
           {open && (
             <>
               {detail !== '' && <div>{detail}</div>}
-              {delta !== '' && <div className={C('dshd-delta-full')}>{delta}</div>}
+              {delta !== '' && <div className={C('dshe-delta-full')}>{delta}</div>}
             </>
           )}
         </>
@@ -1041,26 +1041,26 @@ function InputButton(props: { useInput?: (s: unknown) => unknown; inputActions?:
     return () => document.removeEventListener('keydown', onKey)
   }, [menu])
   return (
-    <span className={C('dshd-enhance')}>
+    <span className={C('dshe-enhance')}>
       <button
         type="button"
-        className={C('dshd-dockbtn')}
+        className={C('dshe-dockbtn')}
         title="增强:开辩论 / 建多仓任务"
         aria-haspopup="menu"
         aria-expanded={menu}
         onClick={() => setMenu((v) => !v)}
       ><span>✦ 增强</span></button>
       {menu && (
-        <span className={C('dshd-menu')} role="menu">
+        <span className={C('dshe-menu')} role="menu">
           <button
             type="button" role="menuitem"
-            className={C('dshd-menuitem')}
+            className={C('dshe-menuitem')}
             title={ready ? '以输入框内容为起点开辩' : '开辩论面板(先在输入框写下要辩的问题)'}
             onClick={openDebate}
           ><span>{ready ? '⚔ 以草稿开辩论' : '⚔ 开辩论'}</span></button>
           <button
             type="button" role="menuitem"
-            className={C('dshd-menuitem')}
+            className={C('dshe-menuitem')}
             title="建多仓任务:扫描结构 → 建任务目录 → 拉起执行会话"
             onClick={openTask}
           ><span>📦 建多仓任务</span></button>
@@ -1208,106 +1208,106 @@ function TaskDialog(props: { onClose: () => void }): React.ReactNode {
     tasksRoot: tasksRoot.trim() !== '' ? tasksRoot.trim() : suggestTasksRoot(parentRoot.trim()),
   })
   return (
-    <div className={C('dshd-overlay')} role="dialog" aria-label="多仓任务">
-      <div className={C('dshd-header')}>
+    <div className={C('dshe-overlay')} role="dialog" aria-label="多仓任务">
+      <div className={C('dshe-header')}>
         <span>📦 多仓任务</span>
         <span className={C('spacer')} />
-        <button className={C('dshd-close')} onClick={props.onClose} aria-label="关闭">✕</button>
+        <button className={C('dshe-close')} onClick={props.onClose} aria-label="关闭">✕</button>
       </div>
-      <div className={C('dshd-body')}>
-        <div className={C('dshd-note')}>扫描结构 → 勾仓建任务目录 → 人审改 issued → 点按钮拉起执行会话(原生回车只发消息,不触发任务)。</div>
-        <div className={C('dshd-field')}>
+      <div className={C('dshe-body')}>
+        <div className={C('dshe-note')}>扫描结构 → 勾仓建任务目录 → 人审改 issued → 点按钮拉起执行会话(原生回车只发消息,不触发任务)。</div>
+        <div className={C('dshe-field')}>
           <span>父目录(多个仓的共同父目录)</span>
           <input type="text" value={parentRoot} onChange={(e) => setParentRoot(e.target.value)} placeholder="如 D:/Users/xxx/Documents/finance" />
-          <div className={C('dshd-actions')}>
-            <button className={C('dshd-start')} onClick={() => { void scan() }} disabled={busy !== ''}>{busy === '扫描中…' ? busy : '扫描结构'}</button>
+          <div className={C('dshe-actions')}>
+            <button className={C('dshe-start')} onClick={() => { void scan() }} disabled={busy !== ''}>{busy === '扫描中…' ? busy : '扫描结构'}</button>
           </div>
         </div>
         {repos !== null && (
-          <div className={C('dshd-field')}>
+          <div className={C('dshe-field')}>
             <span>扫描结果(勾选参任务仓)</span>
             {repos.map((r) => (
-              <label key={r.relPath} className={C('dshd-checkrow')}>
+              <label key={r.relPath} className={C('dshe-checkrow')}>
                 <input type="checkbox" checked={checked.includes(r.relPath)} onChange={() => toggle(r.relPath)} />
                 <span>{r.relPath}</span>
-                <span className={C('dshd-note')}>{r.kind}{r.kind === 'external' && r.reason ? ` · ${r.reason}` : ''}</span>
+                <span className={C('dshe-note')}>{r.kind}{r.kind === 'external' && r.reason ? ` · ${r.reason}` : ''}</span>
                 {r.kind !== 'external' && r.kind !== 'unknown' && lead !== r.relPath && (
-                  <button type="button" className={C('dshd-copybtn')} onClick={() => setLead(r.relPath)}>牵头</button>
+                  <button type="button" className={C('dshe-copybtn')} onClick={() => setLead(r.relPath)}>牵头</button>
                 )}
               </label>
             ))}
-            {repos.length === 0 && <div className={C('dshd-note')}>空目录:换个父目录再扫。</div>}
+            {repos.length === 0 && <div className={C('dshe-note')}>空目录:换个父目录再扫。</div>}
           </div>
         )}
-        <div className={C('dshd-row')}>
-          <div className={C('dshd-field')}>
+        <div className={C('dshe-row')}>
+          <div className={C('dshe-field')}>
             <span>slug(小写短横线)</span>
             <input type="text" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="如 broker-empty-semantics" />
           </div>
-          <div className={C('dshd-field')}>
+          <div className={C('dshe-field')}>
             <span>牵头仓</span>
             <input type="text" value={lead} onChange={(e) => setLead(e.target.value)} placeholder="点扫描结果的「牵头」填入" />
           </div>
         </div>
-        <div className={C('dshd-field')}>
+        <div className={C('dshe-field')}>
           <span>一句话标题</span>
           <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="如 空语义 broker 试点" />
         </div>
-        <div className={C('dshd-field')}>
+        <div className={C('dshe-field')}>
           <span>任务根目录(.tasks)</span>
           <input type="text" value={tasksRoot} onChange={(e) => setTasksRoot(e.target.value)} placeholder={suggestTasksRoot(parentRoot.trim()) || '如 D:/…/cross-tasks/.tasks'} />
-          <div className={C('dshd-actions')}>
-            <button type="button" className={C('dshd-copybtn')} onClick={() => setTasksRoot(suggestTasksRoot(parentRoot.trim()))} disabled={parentRoot.trim() === ''}>默认 .tasks</button>
+          <div className={C('dshe-actions')}>
+            <button type="button" className={C('dshe-copybtn')} onClick={() => setTasksRoot(suggestTasksRoot(parentRoot.trim()))} disabled={parentRoot.trim() === ''}>默认 .tasks</button>
           </div>
         </div>
-        <div className={C('dshd-field')}>
+        <div className={C('dshe-field')}>
           <span>模板目录(可选,缺省任务根上一级)</span>
           <input type="text" value={templateDir} onChange={(e) => setTemplateDir(e.target.value)} placeholder="含 directive_template.md / to_template.md 的编排库" />
         </div>
-        <div className={C('dshd-row')}>
-          <div className={C('dshd-field')}>
+        <div className={C('dshe-row')}>
+          <div className={C('dshe-field')}>
             <span>provider(可选)</span>
             <input type="text" value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="缺省读宿主默认" />
           </div>
-          <div className={C('dshd-field')}>
+          <div className={C('dshe-field')}>
             <span>model(可选)</span>
             <input type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="缺省读宿主默认" />
           </div>
         </div>
-        {verdict !== null && <div className={C('dshd-note')}>待填:{verdict}</div>}
-        <div className={C('dshd-actions')}>
-          <button className={C('dshd-start')} onClick={() => { void build() }} disabled={busy !== '' || verdict !== null}>{busy !== '' ? busy : '建任务目录'}</button>
+        {verdict !== null && <div className={C('dshe-note')}>待填:{verdict}</div>}
+        <div className={C('dshe-actions')}>
+          <button className={C('dshe-start')} onClick={() => { void build() }} disabled={busy !== '' || verdict !== null}>{busy !== '' ? busy : '建任务目录'}</button>
         </div>
         {taskDir !== null && (
-          <div className={C('dshd-resolved')}>
+          <div className={C('dshe-resolved')}>
             <div><b>任务目录:</b>{taskDir}</div>
-            <div className={C('dshd-note')}>去改 directive.md(填实 + status 改 issued),再点下面拉起。</div>
+            <div className={C('dshe-note')}>去改 directive.md(填实 + status 改 issued),再点下面拉起。</div>
           </div>
         )}
-        <div className={C('dshd-actions')}>
-          <button className={C('dshd-start')} onClick={() => { void launch() }} disabled={busy !== '' || taskDir === null || checked.length === 0}>{busy !== '' ? busy : '建任务并拉起执行会话'}</button>
+        <div className={C('dshe-actions')}>
+          <button className={C('dshe-start')} onClick={() => { void launch() }} disabled={busy !== '' || taskDir === null || checked.length === 0}>{busy !== '' ? busy : '建任务并拉起执行会话'}</button>
         </div>
         {sessions !== null && (
-          <div className={C('dshd-resolved')}>
+          <div className={C('dshe-resolved')}>
             {sessions.map((s) => (
               <div key={s.repo}><b>{s.repo}</b>: {s.ok ? `会话 ${s.sessionId ?? ''}(去会话列表跟进)` : `失败:${s.error ?? ''}`}</div>
             ))}
           </div>
         )}
         {taskDir !== null && (
-          <div className={C('dshd-actions')}>
-            <button className={C('dshd-stop')} onClick={() => { void collect() }} disabled={busy !== ''}>汇总回信</button>
+          <div className={C('dshe-actions')}>
+            <button className={C('dshe-stop')} onClick={() => { void collect() }} disabled={busy !== ''}>汇总回信</button>
           </div>
         )}
         {backs !== null && (
-          <div className={C('dshd-resolved')}>
+          <div className={C('dshe-resolved')}>
             <div><b>回信 {backs.length} 封</b></div>
             {backs.map((b) => (
-              <div key={b.file}><b>{b.file}</b><div className={C('dshd-note')}>{b.text.split('\n').slice(0, 3).join('\n')}</div></div>
+              <div key={b.file}><b>{b.file}</b><div className={C('dshe-note')}>{b.text.split('\n').slice(0, 3).join('\n')}</div></div>
             ))}
           </div>
         )}
-        {error !== null && <div className={C('dshd-error')}>{error}</div>}
+        {error !== null && <div className={C('dshe-error')}>{error}</div>}
       </div>
     </div>
   )
@@ -1363,15 +1363,15 @@ export function apply(ctx: CtxLike): void {
   }
   // 唯一入口:输入框内小按钮(不占整行)+ overlay 浮层对话框。header 胶囊已摘除。
   slots.inject('shell.overlay', () => slots.register(
-    { name: 'shell.overlay', id: 'debate-panel' },
+    { name: 'shell.overlay', id: 'enhance-panel' },
     (props: never) => <DebateRoot {...(props as { useSessions?: (s: unknown) => unknown })} />,
   ))
   slots.inject('conversation.input.right', () => slots.register(
     {
       name: 'conversation.input.right',
-      id: 'debate-entry',
+      id: 'enhance-entry',
       order: 100,
-      label: () => '✦ 增强(辩论/多仓任务)',
+      label: () => '✦ 增强(思辨/多仓任务)',
       // 增强菜单(ADR-0025):不再独占叫"辩论",两项走 overlay 面板显式按钮。
       // Session scope invokes this with the current session ID. The slot's
       // renderSlot call intentionally has no owner props, so props.sessionId
@@ -1381,7 +1381,7 @@ export function apply(ctx: CtxLike): void {
     (props: never) => <InputEntry {...(props as { useInput?: (s: unknown) => unknown; inputActions?: { setDraft(d: string): void }; sessionId?: unknown })} />,
   ))
   slots.inject('settings.section', () => slots.register(
-    { name: 'settings.section', id: 'debate', order: 31, label: () => '辩论' },
+    { name: 'settings.section', id: 'enhance', order: 31, label: () => '会话增强' },
     () => <SettingsView />,
   ))
   // 会话 cwd 服务线直读(照抄 explorer):slot 传的 useSessions 在 0.2.0 已无 current,

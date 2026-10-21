@@ -24,7 +24,7 @@ const cfg = (): DebateConfig => ({
 })
 
 const mkSession = (over: Partial<PersistableSession> = {}): PersistableSession => ({
-  id: 'debate-abc-1',
+  id: 'se-abc-1',
   config: cfg(),
   status: 'done',
   round: 3,
@@ -107,16 +107,16 @@ describe('记录往返(toRecord → fromRecord)', () => {
       quoteAudit: { quotableLines: 4, quotedLines: 2, hitLines: [1], hitRate: 0.5 },
     }]
     const tr: TranscriptEntry[] = [{ seq: 1, role: 'builder', round: 1, text: 'hi' }]
-    const rec = toRecord(mkSession({ rounds, transcript: tr, reportRel: 'docs/debates/x.md' }))
+    const rec = toRecord(mkSession({ rounds, transcript: tr, reportRel: 'docs/session-enhance/x.md' }))
     const back = fromRecord(rec)
     expect(back).not.toBeNull()
-    expect(back?.id).toBe('debate-abc-1')
+    expect(back?.id).toBe('se-abc-1')
     expect(back?.config.auto?.question).toBe('该不该上 K8s?')
     expect(back?.stopReason).toBe('convergence')
     expect(back?.rounds[0]?.pendingItems).toEqual(['x'])
     expect(back?.rounds[0]?.quoteAudit.hitRate).toBe(0.5)
     expect(back?.transcript[0]?.text).toBe('hi')
-    expect(back?.reportRel).toBe('docs/debates/x.md')
+    expect(back?.reportRel).toBe('docs/session-enhance/x.md')
     expect(back?.mode).toBe('resident')
   })
 
@@ -166,9 +166,9 @@ describe('坏记录不拖垮整表(fromRecord)', () => {
   })
 
   it('sweep 字段往返:清扫失败原因与已清 id 落盘,老记录缺即 null/[]', () => {
-    const back = fromRecord({ v: 1, id: 'x', config: cfg(), sweepError: 'rm boom', sweptSessions: ['debate-x-single'] })
+    const back = fromRecord({ v: 1, id: 'x', config: cfg(), sweepError: 'rm boom', sweptSessions: ['se-x-single'] })
     expect(back?.sweepError).toBe('rm boom')
-    expect(back?.sweptSessions).toEqual(['debate-x-single'])
+    expect(back?.sweptSessions).toEqual(['se-x-single'])
     const old = fromRecord({ v: 1, id: 'x', config: cfg() })
     expect(old?.sweepError).toBeNull()
     expect(old?.sweptSessions).toEqual([])
@@ -228,40 +228,40 @@ describe('文件名安全(slugify / reportRelPath)', () => {
     expect(slugify('评估增加设施的意义')).toContain('评估')
   })
 
-  it('清空或全非法字符时回落 debate,不产出空文件名', () => {
-    expect(slugify('')).toBe('debate')
-    expect(slugify('///***')).toBe('debate')
-    expect(slugify('   ')).toBe('debate')
+  it('清空或全非法字符时回落 deliberation,不产出空文件名', () => {
+    expect(slugify('')).toBe('deliberation')
+    expect(slugify('///***')).toBe('deliberation')
+    expect(slugify('   ')).toBe('deliberation')
   })
 
-  it('承接语兜底:混进来的"以上/继续"前缀清掉,清完剩空才回落 debate', () => {
+  it('承接语兜底:混进来的"以上/继续"前缀清掉,清完剩空才回落 deliberation', () => {
     // 纵深:就算 question 里混了承接语(如 hint 和历史拼成的长句),文件名也不该是废话。
-    expect(slugify('就以上问题继续辩论')).toBe('debate')
+    expect(slugify('就以上问题继续辩论')).toBe('deliberation')
     expect(slugify('针对上述管理架构问题继续辩论')).toContain('管理架构')
     expect(slugify('以上,继续:怎样的管理架构更适合 agent 编程')).toContain('管理架构')
   })
 
-  it('路径形状固定:docs/debates/<日期>-<slug>-<id尾>.md', () => {
-    const p = reportRelPath(1_700_000_000_000, '多仓上 K8s?', 'debate-abc123-7')
+  it('路径形状固定:docs/session-enhance/<日期>-<slug>-<id尾>.md', () => {
+    const p = reportRelPath(1_700_000_000_000, '多仓上 K8s?', 'se-abc123-7')
     expect(p.startsWith(`${REPORT_DIR}/`)).toBe(true)
     expect(p.endsWith('.md')).toBe(true)
     expect(p.split('/').length).toBe(3)
-    expect(p).toMatch(/^docs\/debates\/\d{4}-\d{2}-\d{2}-.+-[a-zA-Z0-9]{6}\.md$/)
+    expect(p).toMatch(/^docs\/session-enhance\/\d{4}-\d{2}-\d{2}-.+-[a-zA-Z0-9]{6}\.md$/)
   })
 
   it('同一问题不同局不互相覆盖(文件名带 id 尾)', () => {
-    const a = reportRelPath(1, 'q', 'debate-aaa111-1')
-    const b = reportRelPath(1, 'q', 'debate-bbb222-2')
+    const a = reportRelPath(1, 'q', 'se-aaa111-1')
+    const b = reportRelPath(1, 'q', 'se-bbb222-2')
     expect(a).not.toBe(b)
   })
 
   it('确定性:同输入同输出,不掺时间/随机', () => {
-    expect(reportRelPath(1_700_000_000_000, 'q', 'debate-abc123-7'))
-      .toBe(reportRelPath(1_700_000_000_000, 'q', 'debate-abc123-7'))
+    expect(reportRelPath(1_700_000_000_000, 'q', 'se-abc123-7'))
+      .toBe(reportRelPath(1_700_000_000_000, 'q', 'se-abc123-7'))
   })
 
   it('文件名部分不含非法字符(整段检查,不只检查 slug)', () => {
-    const base = reportRelPath(Date.now(), 'a/b\\c:d*e?f"g<h>i|j\n换行', 'debate-xyz789-3').split('/').pop() ?? ''
+    const base = reportRelPath(Date.now(), 'a/b\\c:d*e?f"g<h>i|j\n换行', 'se-xyz789-3').split('/').pop() ?? ''
     expect(base).not.toMatch(/[\\/:*?"<>|]/)
     expect(base.endsWith('.')).toBe(false)
     expect(base.endsWith(' ')).toBe(false)
@@ -275,7 +275,7 @@ describe('结论文档渲染(renderReport)', () => {
     quoteAudit: { quotableLines: 0, quotedLines: 0, hitLines: [], hitRate: null },
   }]
   const input = (over: Partial<ReportInput> = {}): ReportInput => ({
-    id: 'debate-abc-1',
+    id: 'se-abc-1',
     question: '该不该上 K8s?',
     questionType: 'selection',
     lenses: ['a', 'b'],
@@ -290,7 +290,7 @@ describe('结论文档渲染(renderReport)', () => {
     mapText: '## 成果地图\n- 视角:成本',
     rounds,
     transcript: [{ seq: 1, role: 'builder', round: 1, text: '正文' }],
-    generator: 'dsh-debate v0.5.0',
+    generator: 'dsh-session-enhance v0.5.0',
     stopText: '共识收敛(第 1 轮双方 agree 同一答案)',
     ...over,
   })
@@ -304,10 +304,10 @@ describe('结论文档渲染(renderReport)', () => {
 
   it('元信息表带齐局 id/题型/工作区/停机/生成版本', () => {
     const md = renderReport(input())
-    expect(md).toContain('debate-abc-1')
+    expect(md).toContain('se-abc-1')
     expect(md).toContain('selection · 2 视角')
     expect(md).toContain('共识收敛')
-    expect(md).toContain('dsh-debate v0.5.0')
+    expect(md).toContain('dsh-session-enhance v0.5.0')
     expect(md).toContain('10 分钟')
   })
 

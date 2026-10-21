@@ -1,31 +1,31 @@
-# dsh-debate Architecture Description
+# dsh-session-enhance Architecture Description
 
 > Provenance: `arch` retrofit on a brownfield DSH native plugin (2026-09-30);
-> 跨仓任务并入见 ADR-0025（2026-10-20），单线分叉见 ADR-0024。
+> 跨仓任务并入见 ADR-0025（2026-10-20），单线分叉见 ADR-0024；v0.14.0 全量更名 + 去模型工具（人工操作插件，`contributes.tools` 为空）。
 > Zero-invention: every statement traces to `CONTEXT.md`, `docs/adr/0001~0025`, or the code in `src/`.
 > Merge record (S20): vitest 行为门 `test/` 与 pytest 治理门 `tests/` 合并为单一 `tests/` 布局
 > （`tests/vitest/` 行为 + `tests/governance/` 架构 + `tests/<module>/` 镜像）；`docs/test_index.md`
 > 从"只登治理门"扩为"两扇门总目录"。`npm run test:sandbox` 跑合并后同一套文件。
 > Merge record (S22 对称)：辩论纯逻辑从 `src/*.ts` 平铺搬入 `src/debate/`（`debate.ts`/`lenses.ts`/`persist.ts`），
 > 与 `src/cross_tasks/` 平级对等；`src/version.ts` 留顶层共享（host/client 共用）；host 接线仍在 `src/index.ts`
-> （单 tsdown entry，平台约束不变）。红线 SYM-01 + DEBATE-01 落 TOML，`tests/src/debate/` 镜像随行。
+> （单 tsdown entry，平台约束不变）。红线 SYM-01 + DEBATE-01 落 TOML（v0.14.0 去模型工具：WIRE-01 改守路由面，CAGE-01/SYM-01 续守笼与符号面），`tests/src/debate/` 镜像随行。
 > 定位收敛（S21+S24）：辩论 v0.1 设计草稿 `docs/debate-design.md` 已删除（内容冻结在 git 历史）；
-> 本文件是全工程唯一架构描述（双功能：辩论 + 跨仓任务）。
+> 本文件是全工程唯一架构描述（双功能：思辨 + 跨仓任务）。
 > S27 host 内聚：工具笼（`host/cage.ts`）与常驻辩手对（`host/resident.ts`）从 `src/index.ts` 摘出，
 > index 只留路由表 + 重导出（单 tsdown entry 约束不变）；tests 直连 `src/host/*`，不再穿 index 缝。
 
 ## 1. Identification and Scope
 
-- **System Name**: dsh-debate (doubleelec native DSH plugin `elec-debate`).
+- **System Name**: dsh-session-enhance (doubleelec native DSH plugin `elec-session-enhance`).
 - **Functions**: 两个入口、两套 host 接线、一套面板外壳——
-  - **辩论**：为开放性论证题跑建构 / 挑战 / 制图三角色，产出一套固定五件套成果地图，而非单一结论句；
+  - **思辨**：为开放性论证题跑建构 / 挑战 / 制图三角色，产出一套固定五件套成果地图，而非单一结论句；
   - **跨仓任务**：扫一父目录下多仓结构（scan）→ 建任务材料目录（build，人审改 issued）→ 一仓一会话拉起执行（launch）→ 回信汇总（report/collect），见 ADR-0025。
-- **Scope**: `src/` 下的 host 半区（webServer 路由 + debate/task 工具 + 辩论循环与跨仓任务接线）与浏览器 bundle（overlay 对话框 + 输入框入口 + 任务面板）。测试单列 `tests/`（§7：vitest 行为门 + pytest 治理门，两扇门一处放）；部署与发包在圈外（见 spec Out of Scope）。
-- **Two functions, one seam**: 辩论（`src/debate/` 三纯模块 + `src/index.ts` 内 debate 接线）与多仓任务（`src/cross_tasks/` 三纯模块 + `src/index.ts` 内 task 接线约 480 行）是**平级对等目录**（S22 对称：`debate/` vs `cross_tasks/`，各管各的纯逻辑；`src/version.ts` 共享）。接线层（路由注册/工具注册/控制器）平台强制同文件（tsdown entry 单 `src/index.ts`、路由表在 `apply()` 逐条注册）。S27 摘出 host 内聚两件（不碰路由表）：工具笼 → `src/host/cage.ts`（白名单/交集核对/guard/`askSubagent`），常驻辩手对 → `src/host/resident.ts`（建对/交棒/停机判定）；`index.ts` 只留路由表 + 重导出（兼容旧 import 面），tests 直连 `src/host/*`。
+- **Scope**: `src/` 下的 host 半区（webServer 路由 + 思辨循环与跨仓任务接线，不注册模型工具）与浏览器 bundle（overlay 对话框 + 输入框入口 + 任务面板）。测试单列 `tests/`（§7：vitest 行为门 + pytest 治理门，两扇门一处放）；部署与发包在圈外（见 spec Out of Scope）。
+- **Two functions, one seam**: 思辨（`src/debate/` 三纯模块 + `src/index.ts` 内 deliberation 接线）与多仓任务（`src/cross_tasks/` 三纯模块 + `src/index.ts` 内 task 接线约 480 行）是**平级对等目录**（S22 对称：`debate/` vs `cross_tasks/`，各管各的纯逻辑；`src/version.ts` 共享）。接线层（路由注册/工具注册/控制器）平台强制同文件（tsdown entry 单 `src/index.ts`、路由表在 `apply()` 逐条注册）。S27 摘出 host 内聚两件（不碰路由表）：工具笼 → `src/host/cage.ts`（白名单/交集核对/guard/`askSubagent`），常驻辩手对 → `src/host/resident.ts`（建对/交棒/停机判定）；`index.ts` 只留路由表 + 重导出（兼容旧 import 面），tests 直连 `src/host/*`。
 
 ## 2. Stakeholders and Concerns
 
-- **提问者（最终用户）**: 只想点一下就开辩，不填表单；要看到辩论过程可读、可审计；最终拿地图自己做判断。
+- **提问者（最终用户）**: 只想点一下就开思辨，不填表单；要看到思辨过程可读、可审计；最终拿地图自己做判断。
   - **Concerns**: 入口无缝（ADR-0008），过程可读，产物忠实（ADR-0001/0002）。
 - **多仓任务发起人（同一用户，任务视角）**: 一父目录下多仓并行推进，任务材料人审后再拉会话，不拉空模板会话。
   - **Concerns**: 结构先看清（scan 分组可勾），材料先审后发（issued 门），一仓一会话可跟进（launch 回 sessionId），回信可汇总（report/collect）。
@@ -56,7 +56,7 @@ flowchart TD
     user["用户<br/>(composer 输入框)"]
     menu["增强入口<br/>(input.right 辩论 任务二选一)"]
     panels["双面板<br/>(shell.overlay debate TaskDialog)"]
-    plugin["dsh-debate 插件<br/>(webServer api host 接线)"]
+    plugin["dsh-session-enhance 插件<br/>(webServer api host 接线)"]
     parent["parent 会话<br/>(发起会话或自建满血)"]
     agents["子 agent 设施<br/>(fork 常驻 spawn)"]
     disk["落点<br/>(KV 记录 结论文档 任务目录)"]
@@ -147,34 +147,34 @@ flowchart TD
     - `debate.ts`: `classifyQuestion`（关键词启发式）、`extractSessionContext`（4000 字截断）、`buildBuilderPrompt/buildBuilderRoundPrompt/buildChallengerPrompt/buildSynthesizerPrompt`（三段式：结论摘要/详细论证/本轮变化，v4 起带 `focus` 焦点块与篇幅预算；制图要求先出「决策摘要」段）、`parseAgree/parseAnswer/detectNewInfo/isConverged`（停机协议）、`parsePendingItems/normalizePending/pendingStalled/formatPendingFocus`（v4 未决清单焦点账本）、`changesOf/sectionText`（分段取值）、`extractDecisionSummary/stripDecisionSummary/buildFallbackSummary`（v4 收尾陈述）、`isSaturated/normalizeAnswer/containsBannedPhrase`、`STOP_PROTOCOL_VERSION`（B5 解析版本位，v4）、`auditQuotes/QUOTE_FRAG_LEN/QUOTE_HIT_ALERT`（B6 片段级引用审计）、`ROUND_DETAIL_MAX_CHARS/PENDING_MAX_ITEMS`（v4 预算）。
     - `lenses.ts`: 四类题型种子模板（selection/review/tradeoff/causal）。
     - `persist.ts`: 留存层的纯函数（无 IO，故可单测）——`toRecord`（**显式白名单**：实时流/镜像开关/flush 等过程态不落盘）/`fromRecord`（宽容反序列化：关键字段缺失或版本超前则跳过该条，次要字段缺就补默认值）+ `markInterrupted`（把上次记 `running` 的局标成已中断）+ `slugify`/`reportRelPath`（文件名净化：Windows 非法字符、首尾点/连字符、按码点截断、中文保留）+ `renderReport`（结论文档排布：决策摘要 → 成果地图 → 每轮判定表 → 折叠全文；表格转义 `|`、正文中和 `</details>`）+ `STORAGE_UNIT/STORAGE_TABLE`。IO 全在 `src/index.ts`（ADR-0019）。
-  - `src/version.ts`（共享）：版本真值——`BUILD_VERSION`（构建期内联，host/client 各一份）+ `assessVersions`（内联版本 / 磁盘 manifest / bundle mtime 与进程启动时刻三方对账）+ `isClientStale`。host 侧 `/dsh-debate/api/version` 出事实，面板徽标显示**正在跑的版本**并在磁盘更新时要求重启宿主（ADR-0018）。
-  - `src/client`（辩论半区）: `DebateDialog`（2s 轮询 + 分段折叠 `TurnCard`）、`InputEntry`（草稿门控）、`useSessions.current` 透传（修 `input.right` 空 props 的根子）；停机审计块 + 镜像状态行（state 早有字段，S3 才接上）；`sections.ts` 纯分段函数（`splitSections` 从 index.tsx 抽出，可单测不拖 React/CSS）。实况只在辩论框内看（2s 轮询 `TurnCard/StreamCard`），独立实况页已删除（生产环境反向代理下基址推导打偏，只会“连接中…”）。
+  - `src/version.ts`（共享）：版本真值——`BUILD_VERSION`（构建期内联，host/client 各一份）+ `assessVersions`（内联版本 / 磁盘 manifest / bundle mtime 与进程启动时刻三方对账）+ `isClientStale`。host 侧 `/dsh-session-enhance/api/version` 出事实，面板徽标显示**正在跑的版本**并在磁盘更新时要求重启宿主（ADR-0018）。
+  - `src/client`（思辨半区）: 思辨 Dialog（2s 轮询 + 分段折叠 `TurnCard`）、`InputEntry`（草稿门控）、`useSessions.current` 透传（修 `input.right` 空 props 的根子）；停机审计块 + 镜像状态行（state 早有字段，S3 才接上）；`sections.ts` 纯分段函数（`splitSections` 从 index.tsx 抽出，可单测不拖 React/CSS）。实况只在思辨框内看（2s 轮询 `TurnCard/StreamCard`），独立实况页已删除（生产环境反向代理下基址推导打偏，只会“连接中…”）。
 - **Elements (task)**:
   - `src/cross_tasks/` 三纯模块（ADR-0025）——
     - `scan.ts`：结构探针（`scanParent`/`probeGit`/`mergeSameGitRoot`，`FsDeps` 注入可测）：输入 parentRoot，输出旗下直接子目录的 git 归属（`repo` 独立检出 / `part` 父库一部分 / `external` 名单或 junction 跳过 / `unknown` 拿不准让人勾）。
     - `materials.ts`：材料构建（`fillDirective`/`fillTo`/`buildMaterials` + `assertAscii`/`leftoverPlaceholders` + `handoffText`/`reportMarkdown`）：模板真身调用方显式传（`templateDir`/`directiveTemplate`/`toTemplate` 三选一），占位没填完就报错不写半成品。
     - `ensure-session.ts`：分组会话三道门（`ensureGroupedSession`，`EnsureDeps` 注入可测）：workspace 注册存在（resolve 或 create）→ `agents.create` 建会话（`meta.cwd` + preset + provider/model 显式）→ `attachSession` 挂进分组 → `followup` 派活。
-  - `src/index.ts` task 接线（约 480 行，与 debate 路由同文件逐条注册）——路由 7 条（`task/version`/`scan`/`build`/`launch`/`report`/`collect`/`stop`）+ 模型工具 `task_*` 5 个（scan/build/launch/report/collect）+ `taskLaunchControllers`（stop 按 key abort 未完成的拉起；已冒出的不回收）；全部参数显式（不从调用会话 cwd 推导），ASCII 门先行，issued 门卡 launch（S18）。
-  - `src/client`（任务半区）: `✦ 增强` 菜单（`InputButton` 二选一：辩论/多仓任务，按钮常亮各走各的门）+ `TaskDialog`（scan → build → launch 三步显式按钮，偏好存 localStorage）+ `src/client/task.ts` 纯逻辑（解析/校验/偏好，无 React/CSS，node environment 直测）。原生发送键不可拦截——任务启动必须点面板显式按钮（`inputActions` 全仓只有 `setDraft`）。
+  - `src/index.ts` task 接线（约 480 行，与 deliberation 路由同文件逐条注册）——路由 7 条（`task/version`/`scan`/`build`/`launch`/`report`/`collect`/`stop`），模型工具零个（人工操作插件，面板 HTTP 路由驱动）+ `taskLaunchControllers`（stop 按 key abort 未完成的拉起；已冒出的不回收）；全部参数显式（不从调用会话 cwd 推导），ASCII 门先行，issued 门卡 launch（S18）。
+  - `src/client`（任务半区）: `✦ 增强` 菜单（`InputButton` 二选一：思辨/多仓任务，按钮常亮各走各的门）+ `TaskDialog`（scan → build → launch 三步显式按钮，偏好存 localStorage）+ `src/client/task.ts` 纯逻辑（解析/校验/偏好，无 React/CSS，node environment 直测）。原生发送键不可拦截——任务启动必须点面板显式按钮（`inputActions` 全仓只有 `setDraft`）。
 
 ### 4.3 Module Documentation Map
 
 | Module | Docs bucket | Reason | Module doc paths |
 | ------ | ----------- | ------ | ---------------- |
-| `src` | top-level only | host 接线：路由注册/辩论循环/工具笼 + task 接线（单 tsdown entry，同文件逐条注册；host 内聚件见 `src/host`） | - |
+| `src` | top-level only | host 接线：路由注册/思辨循环/工具笼 + task 接线（单 tsdown entry，同文件逐条注册；host 内聚件见 `src/host`） | - |
 | `src/host` | top-level only | host 内聚：工具笼（cage.ts）+ 常驻辩手对（resident.ts）+ 共享面（types.ts）；index 只重导出 | - |
 | `src/client` | top-level only | 交互层：DebateDialog + TaskDialog 双面板，同 overlay；随 host 同构建同发布 | - |
-| `src/debate` | top-level only | 辩论服务纯逻辑（协议/分类/prompt/判定 + 视角模板 + 留存纯函数），与 `src/cross_tasks/` 平级对等 | - |
+| `src/debate` | top-level only | 思辨服务纯逻辑（协议/分类/prompt/判定 + 视角模板 + 留存纯函数），与 `src/cross_tasks/` 平级对等 | - |
 | `src/cross_tasks` | top-level only | 任务服务纯逻辑（scan/materials/ensure-session），与 `src/debate/` 平级对等；`src/task` 旧名 | - |
 | `src/version.ts` | top-level only | 共享：版本真值（host/client 共用，`src` 直属文件） | - |
 
-- **Coverage note**: `arch` TOML 覆盖是全量的（`src` + 嵌套 `src/client`、`src/debate`、`src/cross_tasks`、`src/host`）；测试单列 `tests/`（§7：vitest 行为门 + pytest 治理门，两扇门一处放，不再分 `test/`/`tests/` 两目录）。
-- **Naming (S23)**: 内部目录 `src/cross_tasks/` vs 公开面 `task_*` / `/api/task/*`——目录名取自废弃原型腾出的 `cross-tasks`（snake 式），公开面保持 `task` 前缀（breaking 边界：工具名/路由/manifest 不动）。文档里"跨仓任务"泛指功能，`cross_tasks` 特指代码目录，`cross-tasks`（kebab）仅指被废弃的原型实例目录，不混用。
+- **Coverage note**: `arch` TOML 覆盖是全量的（v0.14.0 起 `contributes.tools` 为空、路由前缀 `/dsh-session-enhance/api/`）（`src` + 嵌套 `src/client`、`src/debate`、`src/cross_tasks`、`src/host`）；测试单列 `tests/`（§7：vitest 行为门 + pytest 治理门，两扇门一处放，不再分 `test/`/`tests/` 两目录）。
+- **Naming (S23, v0.14.0 修订)**: 内部目录 `src/cross_tasks/` vs 公开面 `/api/task/*`——目录名取自废弃原型腾出的 `cross-tasks`（snake 式），公开面保持 `task` 路径；模型工具名已随人工操作化删除（breaking 边界：路由/manifest 为空工具表，旧注册名作废）。文档里"跨仓任务"泛指功能，`cross_tasks` 特指代码目录，`cross-tasks`（kebab）仅指被废弃的原型实例目录，不混用。
 
 ### 4.4 Runtime/Concurrency View
 
-- **Purpose**: 两条线的时序各走各的——4.4a 辩论（现行单线分叉，常驻/one-shot 为回退），4.4b 任务（scan→build→launch→report/collect 显式五步，无回退链）。
-- **Model/Diagram (4.4a debate)**:
+- **Purpose**: 两条线的时序各走各的——4.4a 思辨（现行单线分叉，常驻/one-shot 为回退），4.4b 任务（scan→build→launch→report/collect 显式五步，无回退链）。
+- **Model/Diagram (4.4a deliberation)**:
 
 ```mermaid
 sequenceDiagram
@@ -230,7 +230,7 @@ sequenceDiagram
 ### 4.5 Deployment/Physical View
 
 - **Purpose**: 单包双 bundle，dev 联调用 3090；辩论与任务同一包发布，无独立发版节拍。
-- **Elements**: `lib/index.js`（host：debate 接线 + task 接线约 480 行）+ `lib/client.js`（bundle：DebateDialog + TaskDialog 双面板同 overlay，经 `dsh.client` 声明）；`cordis.patch.yml` 插入组合；`dsh.plugin.json` 声明 `debate_*` 4 工具 + `task_*` 5 工具（+ 常驻 `debate_start`）与三槽位（header/overlay/input.right + 设置节）。dev 用 `dsh --profile dev --port 3090 --no-open`，client 硬刷（Ctrl+Shift+R）。
+- **Elements**: `lib/index.js`（host：deliberation 接线 + task 接线约 480 行）+ `lib/client.js`（bundle：思辨 Dialog + TaskDialog 双面板同 overlay，经 `dsh.client` 声明）；`cordis.patch.yml` 插入组合；`dsh.plugin.json` 声明**零模型工具**（人工操作插件，`contributes.tools` 为空）与三槽位（overlay/input.right + 设置节）。dev 用 `dsh --profile dev --port 3090 --no-open`，client 硬刷（Ctrl+Shift+R）。
 
 ### 4.6 Security View
 
@@ -257,13 +257,13 @@ sequenceDiagram
 - [ADR-0016](adr/0016-audit-protocol.md): 停机信号协议版本化（B5）+ 片段级引用审计（B6，下限估计）+ 面板/实况审计展示联调。
 - [ADR-0017](adr/0017-focus-ledger-and-closing-statement.md): 协议 v4——未决清单焦点账本 + 新增判定只看「本轮变化」段 + 篇幅预算 + 对话区镜像摘要 + 收尾陈述（决策摘要/兜底）。
 - [ADR-0018](adr/0018-version-truth.md): 版本真值——构建期内联 + 三方对账；徽标显示正在跑的版本，取不到时显示 `v?` 而非冒充新版本。（同日更正：本 profile 关的是**模块监听**，不是 DSH 没有热重载。）
-- [ADR-0019](adr/0019-conclusion-persistence.md): 结论落盘——整局记录进 KV 单元 `dsh_debate`（per-record）、结论文档进 `<工作区>/docs/debates/`；恢复的局只读且把半途的标成已中断；两条失败原因分开可见。
+- [ADR-0019](adr/0019-conclusion-persistence.md): 结论落盘——整局记录进 KV 单元 `dsh_session_enhance`（per-record）、结论文档进 `<工作区>/docs/session-enhance/`；恢复的局只读且把半途的标成已中断；两条失败原因分开可见。
 - [ADR-0020](adr/0020-cap-convergence.md): 压线共识——上限处一致是 convergence 的修饰位（`convergedAtCap`），只改说法不改停机；镜像/兜底收尾/面板审计三处标"压线"并给加轮复验建议。
 - [ADR-0021](adr/0021-optional-audit-versioning.md): 可选审计字段不 bump 记录版本——只有不兼容变更才 +1；`pointerAudit` 为判例（`?` 可选 + 缺即 unknown + 只审计不 gate）。
 - [ADR-0022](adr/0022-tool-cage-allowlist.md): 工具笼改白名单——deny 黑名单 fail-open（新工具默认放行），allow 白名单 fail-closed；辩手 6 项、制图员 3 项；启动交集核对（失效剔除、空集失败）、scope-local 走执行期 guard、生效笼型进已启动行 + 落盘（可选审计字段）。
 - [ADR-0023](adr/0023-session-takeover-plan-b.md): 会话接管 B 方案——忙快照 + 一键双停 + 打断可映射（旧局落盘/新局可见/面板画线）。
 - [ADR-0024](adr/0024-single-thread-fork.md): 单线分叉——单模型双角色交替线（互盲拿掉：挑战者能看到建构原文逐条反驳；载体用分叉保主会话零污染；种子照抄原生 fork；防呆 `isRouteIneffective` 豁免单线）。
-- [ADR-0025](adr/0025-task-merge.md): 增强入口与跨仓任务并入——输入框按钮改"✦ 增强"弹菜单（辩论/多仓任务），原生发送键不借用（`inputActions` 全仓只有 `setDraft`）；task 三纯模块并入 `src/cross_tasks/`（S23 由 `src/task/` 改名，原型废弃后腾名），路由挂 `/dsh-debate/api/task/*` 7 条（公开面不动），模型工具 `task_*` 5 个（公开面不动），launch 三道门 + issued 门照抄 launcher。
+- [ADR-0025](adr/0025-task-merge.md): 增强入口与跨仓任务并入——输入框按钮改"✦ 增强"弹菜单（思辨/多仓任务），原生发送键不借用（`inputActions` 全仓只有 `setDraft`）；task 三纯模块并入 `src/cross_tasks/`（S23 由 `src/task/` 改名，原型废弃后腾名），路由挂 `/dsh-session-enhance/api/task/*` 7 条，模型工具零个（人工操作插件，面板 HTTP 路由驱动，不注册模型工具），launch 三道门 + issued 门照抄 launcher。
 
 ## 6. Constraints and Risks
 

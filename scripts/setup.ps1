@@ -37,7 +37,7 @@ else {
 }
 
 Write-Host "`n== web profile (3080): local file: install (decoupled copy) ==" -ForegroundColor Cyan
-$webCopy = Join-Path $env:USERPROFILE '.dsh\profiles\web\node_modules\@doubleelec\dsh-debate'
+$webCopy = Join-Path $env:USERPROFILE '.dsh\profiles\web\node_modules\@doubleelec\dsh-session-enhance'
 $backup = "$webCopy.bak"
 if (Test-Path $backup) { Remove-Item -Recurse -Force $backup }
 if (Test-Path $webCopy) {
@@ -57,7 +57,7 @@ try {
   } finally { Pop-Location }
   $webBundle = Join-Path $webCopy 'lib\client.js'
   if (-not (Test-Path $webBundle)) { throw "install failed: $webBundle missing after install." }
-  $probe = Select-String -Path $webBundle -Pattern 'dshd-overlay' -SimpleMatch | Select-Object -First 1
+  $probe = Select-String -Path $webBundle -Pattern 'dshe-overlay' -SimpleMatch | Select-Object -First 1
   if (-not $probe) {
     throw 'install verification failed: new bundle marker (dshd-overlay) not found in web copy — refusing to declare success.'
   }

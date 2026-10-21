@@ -1,4 +1,4 @@
-# dsh-debate v0.1 插件架子 Spec
+# dsh-session-enhance v0.1 插件架子 Spec
 
 Status: ready-for-agent
 
@@ -11,7 +11,7 @@ Status: ready-for-agent
 
 ## Solution
 
-开发 `@doubleelec/dsh-debate` 原生插件（对标 dsh-workspace-explorer 的单包形态）：
+开发 `@doubleelec/dsh-session-enhance` 原生插件（对标 dsh-workspace-explorer 的单包形态）：
 输入框内"⚔ 辩论"按钮（有草稿才亮）为唯一入口，点开全配置对话框（只留三模型与轮数，
 问题/题型/视角/背景执行时从当前会话自动判断）。
 执行链为 debate_open → debate_round → debate_synthesize 三步工具，模型一步步调，

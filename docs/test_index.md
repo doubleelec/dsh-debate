@@ -42,14 +42,14 @@ One row per test function in each `tests/<module>/test_invariants.py`. Placehold
 | `test_invariants.py::test_src_single_thread_seam_exists` | src single-thread fork seam (ADR-0024) | a seam symbol (create/step/sweep) disappears from host |
 | `test_invariants.py::test_src_debater_tool_allowlist_is_closed` | src debater allowlist closed at six tools (ADR-0022) | the allowlist gains/loses an entry |
 | `test_invariants.py::test_src_synth_tool_allowlist_is_closed` | src synth allowlist closed at three tools (ADR-0022) | the allowlist gains/loses an entry |
-| `test_invariants.py::test_src_registered_tools_match_manifest` | src registration matches manifest tools | registration and `dsh.plugin.json` disagree |
+| `test_invariants.py::test_src_registered_tools_match_manifest` | src registers no model tools, manifest tools empty (human-operated plugin) | a tools.register returns or manifest tools non-empty |
 | `test_invariants.py::test_src_task_routes_are_seven` | src task wiring keeps seven routes (ADR-0025) | a task route is added/removed/renamed |
 | `test_invariants.py::test_src_peer_symmetry` | src debate/ vs task/ peer symmetry (S22, S27: host/ joins) | a peer dir loses module.toml, flat leftovers return, or wiring leaks into peers |
 | `test_invariants.py::test_client_pure_surface_exists` | src/client pure modules keep entry points | an exported pure function disappears |
 | `test_invariants.py::test_client_task_dialog_wired` | src/client TaskDialog wired to task calls | dialog or a task/* call disappears |
 | `test_invariants.py::test_client_no_send_key_intercept` | src/client send key stays unwired (ADR-0025) | panel code touches `inputActions`/`actions` beyond `setDraft` |
 | `test_invariants.py::test_debate_pure_surface_exists` | src/debate pure modules keep entry points (S22) | an exported pure function disappears |
-| `test_invariants.py::test_debate_vitest_mirrors_exist` | src/debate every module keeps vitest mirror (S22) | a debate vitest file is missing |
+| `test_invariants.py::test_debate_vitest_mirrors_exist` | src/debate every module keeps vitest mirror (S22) | a deliberation vitest file is missing |
 | `test_invariants.py::test_task_pure_surface_exists` | src/cross_tasks pure modules keep entry points | an exported pure function disappears |
 | `test_invariants.py::test_task_vitest_mirrors_exist` | src/cross_tasks every module keeps vitest mirror | a cross_tasks vitest file is missing |
 | `tests/src/host/test_invariants.py::test_host_cage_lives_in_cage` | src/host cage symbols live in host/cage.ts (S27) | a cage symbol moves back into index.ts |

@@ -1,5 +1,5 @@
 /**
- * dsh-debate — 视角模板库 v0.1(种子 4 类,见 ADR-0003)。
+ * dsh-session-enhance — 思辨视角模板库 v0.1(种子 4 类,见 ADR-0003)。
  * 模板只定三样:lens 维度名 + 挑战者 checklist + 证据期望。不写死话术。
  */
 

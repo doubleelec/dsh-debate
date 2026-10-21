@@ -1,5 +1,5 @@
 /**
- * dsh-debate task 结构探测 scan（纯逻辑 + 薄 IO，可注入 fake fs 单测）。
+ * dsh-session-enhance task 结构探测 scan（纯逻辑 + 薄 IO，可注入 fake fs 单测）。
  *
  * 从 dsh-task-launcher 移植（JS→TS 类型化，逻辑逐行同源）。
  *

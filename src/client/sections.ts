@@ -1,5 +1,5 @@
 /**
- * dsh-debate — 面板实录分段(纯函数,与 React/CSS 无关,可单测)。
+ * dsh-session-enhance — 面板实录分段(纯函数,与 React/CSS 无关,可单测)。
  *
  * 三段标题原样保留(host prompt 第 5 条强制),面板按段折叠渲染:
  * 结论摘要默认展开,详细论证/变化默认折叠。

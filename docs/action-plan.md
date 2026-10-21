@@ -1,13 +1,14 @@
-# dsh-debate Action Plan
+# dsh-session-enhance Action Plan
 
 > Resume point: Wave 6 - in flight: none - blocked: none
-> S21 落定——`architecture.md` 正名为全工程唯一架构（双功能：辩论 §4.4a + 任务 §4.4b）；`debate-design.md` 收敛为辩论 v0.1 冻结草稿；CONTEXT 补多仓任务五词；README 重写双功能。
+> S21 落定——`architecture.md` 正名为全工程唯一架构（双功能：思辨 §4.4a + 任务 §4.4b）；`debate-design.md` 收敛为辩论 v0.1 冻结草稿；CONTEXT 补多仓任务五词；README 重写双功能。
+> v0.14.0 全量更名（`dsh-debate` → `dsh-session-enhance`，不兼容旧路由/KV/报告路径）+ 去模型工具（人工操作插件，不再注册旧 `debate_*`/`task_*` 工具名）。
 > S20 落定：测试单目录 + 占位换活门 + 文档补齐，双绿 + ALL CLEAR。
 > 单线分叉后一局只产 1 个分叉会话文件（+N×3 个 one-shot 落盘，宿主行为改不了），结束扫掉只留结论文档；用户主会话零污染（转述+摘要才进对话区）。
 > 待线上真跑一局复验：fork→交替→扫盘全链（面板看 `mode:single`）+ 版本号 bump（0.13.0→0.14.0，新功能 minor）。
 > **迁到 v0.5.0 必须先重启宿主进程**：`lib/index.js` 只在宿主启动时加载。准确说不是 DSH 没有热重载，而是本 profile 没开**模块监听**（`dsh-base` 里 `hmr` 的 `root: []`，注释"module roots are opt-in"；ADR-0018 同日更正）。
 > 重启前面板徽标显示 `v?` + 告警（旧宿主没有 `/api/version`，实测 POST 返回 405），这是设计行为不是故障。
-> 重启后徽标应显示 `v0.5.0` 且无告警；随后跑一局真辩论复验两件事：S7（(a) 轮数是否真的下降、(b) 挑战者是否守约输出 `待决清单=` 行、(c) 对话区字数与收尾陈述是否可读）与 S9（(d) `<工作区>/docs/debates/` 下是否真出现结论文档、(e) 再重启一次后粘旧 id 是否仍能取到结论与全文）。
+> 重启后徽标应显示 `v0.5.0` 且无告警；随后跑一局真思辨复验两件事：S7（(a) 轮数是否真的下降、(b) 挑战者是否守约输出 `待决清单=` 行、(c) 对话区字数与收尾陈述是否可读）与 S9（(d) `<工作区>/docs/session-enhance/` 下是否真出现结论文档、(e) 再重启一次后粘旧 id 是否仍能取到结论与全文）。
 > 沙箱里 `npm test` 起不来（Vite 解析配置 `exec("net use")` → `spawn EPERM`），用 `npm run test:sandbox`：它编译并执行**同一份**测试文件，垫片遇到未实现的 matcher 会抛错而非静默通过。
 
 ## Waves
@@ -17,7 +18,7 @@
 - **Wave 2 (Context budget)**: 交棒载荷瘦身（ADR-0015：首见全文、此后跨轮传摘要+本轮变化、详细论证头尾截断，实测 -87%）+ `builderRelayChars` 可观测 + 饱和启发式否定关（B1）+ 跨入口判定同源（B2）+ 清死配置（B3）。退出条件：多轮 prompt 不爆，饱和可测。
 - **Final Wave (Integration & System testing)**: 跨 host+client 联调（面板停机审计块 + 对话区镜像状态 + 实况页同款 + `splitSections` 抽纯文件可测）与全门回归 + B5/B6（ADR-0016）。退出条件：治理门 + vitest 全绿，一局可读的真辩论。
 - **Wave 3 (Focus & legibility)**: 复盘一局真跑 10 轮（10.9 万字、饱和 10/10 误判、对话区灌 10.9 万字、7,015 字地图无决策陈述）后的协议 v4——未决清单焦点账本（`待决清单=` + `pendingStalled`）、新增判定只看「本轮变化」段、篇幅预算（1800 字）、对话区镜像摘要（`chatDigest`）、收尾陈述（制图「决策摘要」+ `buildFallbackSummary` 兜底）+ 面板收尾陈述块（ADR-0017）。退出条件：聚焦/有效/易懂三项各有实测读数支撑，一局跑完对话区直接给出下一步。
-- **Wave 4 (Durability & verification)**: 结论落盘（ADR-0019）——整局记录进 KV 单元 `dsh_debate`、启动恢复、结论文档写 `<工作区>/docs/debates/`、镜像报路径、面板可观测；外加把"从不运行的测试套件"救回来（`npm run test:sandbox`）。退出条件：重启后旧 id 仍能取到结论，且回归有可重复的入口而不是一次性脚本。
+- **Wave 4 (Durability & verification)**: 结论落盘（ADR-0019）——整局记录进 KV 单元 `dsh_session_enhance`、启动恢复、结论文档写 `<工作区>/docs/session-enhance/`、镜像报路径、面板可观测；外加把"从不运行的测试套件"救回来（`npm run test:sandbox`）。退出条件：重启后旧 id 仍能取到结论，且回归有可重复的入口而不是一次性脚本。
 - **Wave 5 (Test merge & doc completion)**: 测试单目录 + 占位换活门 + 文档补齐（S20）——`test/` 并入 `tests/vitest/`，三占位换 10 活门 + 四红线落 TOML，architecture.md 补 4.1/4.2/4.6。退出条件：vitest + pytest 双绿，arch check ALL CLEAR。
 
 ## Serial constraints
@@ -69,7 +70,7 @@
 | S6 | 面板可读性:重开版本号徽标 + 可缩放/全屏(纵向覆盖输入框)/最小化 + 人话轮次标签与轮次小结 + 删独立实况页 + 纯函数抽取(`labels.ts`/`dialogLayout.ts`) | done (2026-10-01) | tsc/build 绿 + 纯函数直跑断言(labels 10/10、dialogLayout 14/14) + 生产 3080 目视 |
 | S7 | 协议 v4 聚焦与收尾:未决清单焦点账本 + 新增判定只看变化段 + 篇幅预算 + 对话区镜像摘要 + 收尾陈述(决策摘要/兜底)+ 面板收尾块 | done (2026-10-01) | 协议层直跑断言 **39/39** + vitest 用例已补 + tsc/build 绿 + pytest 治理门 15 passed |
 | S8 | 版本真值:构建期内联 `BUILD_VERSION` + `/api/version` 三方对账(内联/磁盘/mtime vs 启动时刻)+ 徽标显示正在跑的版本(取不到显示 `v?`)+ 重启宿主/刷新页面两类提示 | done (2026-10-01) | 真实构建产物集成断言 **8/8**(running==disk、mtime 可读、stale=false、反事实判 stale)+ tsc/build 绿 + pytest 治理门绿 |
-| S9 | 结论落盘:整局记录进 KV 单元 `dsh_debate`(per-record,显式白名单)+ 启动恢复(半途的标已中断)+ 结论文档写 `<工作区>/docs/debates/`(日期-slug-id尾)+ 对话区镜像报路径 + `/api/history` + 面板显示路径/恢复标记/两类失败分开 | done (2026-10-01) | 真实 vitest 套件 **139/139**(新增 persist 35 条:白名单、宽容反序列化、文件名净化、markdown 结构)+ 真实构建产物集成断言 **11/11**(含 storage/history/docs-debates/ctx.effect 接线)+ tsc/build 绿 + pytest 治理门绿 |
+| S9 | 结论落盘:整局记录进 KV 单元 `dsh_session_enhance`(per-record,显式白名单)+ 启动恢复(半途的标已中断)+ 结论文档写 `<工作区>/docs/session-enhance/`(日期-slug-id尾)+ 对话区镜像报路径 + `/api/history` + 面板显示路径/恢复标记/两类失败分开 | done (2026-10-01) | 真实 vitest 套件 **139/139**(新增 persist 35 条:白名单、宽容反序列化、文件名净化、markdown 结构)+ 真实构建产物集成断言 **11/11**(含 storage/history/docs-session-enhance/ctx.effect 接线)+ tsc/build 绿 + pytest 治理门绿 |
 | S10 | 压线共识明示:上限处一致加 `convergedAtCap` 修饰位(只改说法不改停机)+ 镜像/兜底收尾/面板审计三处标"压线"并给"加 1~2 轮复验"建议 | done (2026-10-19) | 真实 vitest 套件 **145/145**(新增 6 条:压线判据 7 分支、兜底三态、面板 stopKey 4 分支)+ 线上局 `debate-mveltqkm-1` 三元组复核(stop=convergence, R10 才双 agree)+ tsc/build 绿 |
 | S11 | 诚实度三件:出处指针审计(只抽文件型、只审计不 gate)+ 缺口年龄(存活轮数+未覆盖声明)+ 清单截断不断词 | done (2026-10-19) | 真实 vitest 套件 **156/156**(新增 11 条:截断词边界、指针抽取/审计/裸路径、缺口抽取/年龄、接线、兜底两行、报告节、面板小结)+ 双轴 code-review(Standards 2 硬伤/Spec 4 真 bug 全收)+ tsc/build 绿 |
 | S12 | 新局三反馈:轮数钳制留痕(上限 10→20)+ 文件名精练(去语气词+12 码点)+ 总结语言铁律(术语展开/依据说人话/下一步可执行) | done (2026-10-19) | 真实 vitest 套件 **160/160**(新增 4 条:钳制上限+留痕、制图铁律、兜底人话、slug 精练)+ 线上局 `debate-mvf5l8vs-1` 三元组复核(stop=convergence, R10 压线, `deploy_live` 指针命中)+ tsc/build 绿 |

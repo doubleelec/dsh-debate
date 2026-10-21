@@ -24,7 +24,7 @@
 关键性质：**进程若加载的是旧 bundle，内联值自然就是旧版本**——宿主想谎报也没有素材，
 它读不到磁盘上的新版本号（不像运行时读 manifest 会读到新值）。
 
-### 2. host 三方对账（`/dsh-debate/api/version`）
+### 2. host 三方对账（`/dsh-session-enhance/api/version`）
 
 返回 `running`（内联 = 真正在跑）+ `disk`（请求时读 `dsh.plugin.json` = 重启后会生效）
 + `bundleMtimeMs`（`lib/index.js` 的 mtime）+ `startedAtMs`（本进程启动时刻），
@@ -101,4 +101,4 @@
   后者说"这份代码用哪版协议判的"。
 - 每次可见改动仍需 bump 版本号（约定：小改 +0.0.1、大改 +0.1.0），否则用户看到的是
   "mtime 变了但版本号没变"的提示——诚实，但不如直接 bump 清楚。
-- 新增一条对外接口 `/dsh-debate/api/version`；旧宿主没有它，这本身就是 staleness 证据。
+- 新增一条对外接口 `/dsh-session-enhance/api/version`；旧宿主没有它，这本身就是 staleness 证据。

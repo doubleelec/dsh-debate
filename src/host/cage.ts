@@ -72,7 +72,7 @@ const SCOPED_TOOL_GUARD_DENY = ['subagent']
  */
 export function scopedToolGuard(execution: { name: string }): string | undefined {
   if (SCOPED_TOOL_GUARD_DENY.includes(execution.name)) {
-    return `debate-guard:subagent 类 scope-local 工具不许辩手调用(${execution.name})`
+    return `se-guard:subagent 类 scope-local 工具不许辩手调用(${execution.name})`
   }
   return undefined
 }
@@ -138,7 +138,7 @@ export async function askSubagent(
     const run = await subagents.start('spawn', {
       parent,
       prompt: [{ type: 'text', text: prompt } as TextContentBlock],
-      label: `debate-${sessionId}-${role}`,
+      label: `se-${sessionId}-${role}`,
       signal: timeout.signal,
       agentOptions: { provider: route.provider, model: route.model },
       toolFilter: { allow: toolAllowFor(role) },

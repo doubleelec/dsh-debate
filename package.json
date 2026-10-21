@@ -1,7 +1,7 @@
 {
-  "name": "@doubleelec/dsh-debate",
-  "version": "0.13.0",
-  "description": "DSH native plugin that debates open-ended questions via builder/challenger/synthesizer roles and returns a structured, chat-readable argument map. | 双视角辩论(原生插件):为开放性论证题跑建构/挑战/制图三角色,产出结构化、可直接在对话里读的论证地图,而非单一结论。",
+  "name": "@doubleelec/dsh-session-enhance",
+  "version": "0.14.0",
+  "description": "DSH session-enhance toolkit: open-question deliberation and cross-repo task running.",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
@@ -22,15 +22,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/doubleelec/dsh-debate.git"
+    "url": "git+https://github.com/doubleelec/dsh-session-enhance.git"
   },
-  "homepage": "https://github.com/doubleelec/dsh-debate",
+  "homepage": "https://github.com/doubleelec/dsh-session-enhance",
   "keywords": [
     "deepseek-harness",
     "cordis",
     "plugin",
-    "debate",
     "deliberation",
+    "session-enhance",
     "ai-tools"
   ],
   "files": [
@@ -55,11 +55,11 @@
       "platform": "web"
     },
     "plugin": {
-      "id": "elec-debate",
+      "id": "elec-session-enhance",
       "kind": "native",
       "host": "lib/index.js",
       "client": "lib/client.js",
-      "hostHandler": "debate.start",
+      "hostHandler": "session.start",
       "clientSlots": [
         "shell.overlay",
         "conversation.input.right",
