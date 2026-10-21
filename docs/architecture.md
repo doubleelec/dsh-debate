@@ -42,7 +42,7 @@
 - **QAS-4 满血只读**: 辩手能读文件/检索/联网查证（31 工具继承链），但写不了文件、执行不了 shell、套不了娃（白名单笼：辩手 6 项、制图员 3 项，ADR-0022）。
 - **QAS-5 接管可见**: 辩论期间发起会话空闲可说话（host 后台直驱，不占 turn）；忙闲每轮采样可见、一键双停停两边、打断点在实录可指（ADR-0023）。
 - **QAS-6 单线零污染**: 默认单线分叉跑在 fork 子会话里（种子继承上下文，主会话只收转述+摘要）；互盲拿掉后挑战者逐条引用建构原文；辩论结束分叉扫掉，只留结论文档（ADR-0024）。
-- **QAS-7 任务先审后发**: scan 先看清结构（repo/part/external/unknown 分组）；build 写草稿目录（directive `status: draft`），占位没填完就报错不写半成品；launch 前 directive 非 issued 拒收（空模板会话不拉）；stop 能 abort 未完成的拉起（已冒出的会话不回收，人去会话列表跟进）。
+- **QAS-7 任务先审后发**: scan 先看清结构（repo/part/external/unknown 分组）；打开面板自动扫并预填（cwd 默认、repo 全勾、slug 自拟），"重新扫描"只在换目录时手点；build 写材料目录后直接进预览——逐仓列出"仓→cwd→provider/model"，确认才拉起（确认即签发，`skipIssuedCheck` 直发，directive 照常写盘留痕）；stop 能 abort 未完成的拉起（已冒出的会话不回收，人去会话列表跟进）。
 
 ## 4. Viewpoints and Views
 
@@ -84,7 +84,7 @@ flowchart TD
 - **Model/Diagram**:
 
 ```mermaid
-%%{init: {"flowchart": {"rankSpacing": 24, "nodeSpacing": 24}}}%%
+%%{init: {"flowchart": {"rankSpacing": 24, "nodeSpacing": 24, "htmlLabels": true, "useMaxWidth": false}}}%%
 flowchart TD
     subgraph Entry["入口层"]
         direction TB
@@ -212,14 +212,13 @@ sequenceDiagram
     participant H as task 接线
     participant D as 任务目录
     participant G as 一仓一会话
-    T->>H: POST task/scan parentRoot
+    T->>H: POST task/scan parentRoot(打开自动扫)
     H-->>T: repos 分组 repo part external unknown
     T->>H: POST task/build slug lead involved
-    H->>D: 写 directive draft 加 to 草稿
+    H->>D: 写 directive 加 to(确认即签发)
     H-->>T: taskDir taskDirName files
-    T->>D: 人审改 status draft 为 issued
-    T->>H: POST task/launch taskDir issued
-    H->>D: 读 directive 验 issued
+    T->>T: 预览将建会话逐仓确认
+    T->>H: POST task/launch taskDir skipIssuedCheck(确认后)
     H->>G: ensureGroupedSession 三道门派活
     G-->>H: sessionId workspaceId
     H-->>T: 各仓 sessionId 跟进
@@ -228,7 +227,7 @@ sequenceDiagram
     H->>D: 读回信写汇总
 ```
 
-- **Elements (4.4b)**: 五步全显式按钮推进，无后台直驱、无回退链：scan 只读结构（`mergeSameGitRoot` 同 git 根合并）；build 写盘即验（ASCII 门 + involved 落点存在 + 占位残留断言）；launch 每仓独立门（ASCII + issued + 三道门 + provider/model 显式）；stop 只 abort 未完成的拉起控制器，已冒出的会话不回收（人去会话列表跟进）；report/collect 只读回信做汇总。模板真身永不进插件（调用方显式传，见 ADR-0025）。
+- **Elements (4.4b)**: 打开自动扫、预览确认后直发，无后台直驱、无回退链：scan 只读结构（`mergeSameGitRoot` 同 git 根合并）；build 写盘即验（ASCII 门 + involved 落点存在 + 占位残留断言）；launch 每仓独立门（ASCII + 三道门 + provider/model 显式；确认即签发带 skipIssuedCheck，directive 照常写盘留痕；issued 门只拦外部直调 host 路由）；stop 只 abort 未完成的拉起控制器，已冒出的会话不回收（人去会话列表跟进）；report/collect 只读回信做汇总。模板真身永不进插件（调用方显式传，见 ADR-0025）。
 
 ### 4.5 Deployment/Physical View
 
@@ -267,6 +266,7 @@ sequenceDiagram
 - [ADR-0023](adr/0023-session-takeover-plan-b.md): 会话接管 B 方案——忙快照 + 一键双停 + 打断可映射（旧局落盘/新局可见/面板画线）。
 - [ADR-0024](adr/0024-single-thread-fork.md): 单线分叉——单模型双角色交替线（互盲拿掉：挑战者能看到建构原文逐条反驳；载体用分叉保主会话零污染；种子照抄原生 fork；防呆 `isRouteIneffective` 豁免单线）。
 - [ADR-0025](adr/0025-task-merge.md): 增强入口与跨仓任务并入——输入框按钮改"✦ 增强"弹菜单（思辨/多仓任务），原生发送键不借用（`inputActions` 全仓只有 `setDraft`）；task 三纯模块并入 `src/cross_tasks/`（S23 由 `src/task/` 改名，原型废弃后腾名），路由挂 `/dsh-session-enhance/api/task/*` 7 条，模型工具零个（人工操作插件，面板 HTTP 路由驱动，不注册模型工具），launch 三道门 + issued 门照抄 launcher。
+- [ADR-0026](adr/0026-task-autofill-preview.md): 任务面板打开即扫 + 预览即确认门——父目录默认只用当前会话 cwd（偏好旧值忽略防串台），repo 全勾/牵头首个/slug 自拟自动回填；"扫描结构"按钮改为"重新扫描"；build 成功直接进预览（逐仓"仓→cwd→provider/model"），确认才 launch（确认即签发带 `skipIssuedCheck`，issued 门只拦外部直调）。
 
 ## 6. Constraints and Risks
 

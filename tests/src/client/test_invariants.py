@@ -26,6 +26,8 @@ def test_client_pure_surface_exists():
         "validateTaskBuild",
         "loadTaskPrefs",
         "saveTaskPrefs",
+        "defaultParentRoot",
+        "suggestScanDefaults",
     ):
         assert symbol in task, f"src/client/task.ts missing: {symbol}"
 

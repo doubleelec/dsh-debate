@@ -22,8 +22,8 @@ import { splitSections } from './sections'
 import { resolveSessionId } from './session'
 import { roleName, roundLabel, roundSummary, stopKey } from './labels'
 import {
-  parseInvolvedLines, suggestTasksRoot, validateTaskBuild,
-  loadTaskPrefs, saveTaskPrefs,
+  suggestTasksRoot, validateTaskBuild,
+  loadTaskPrefs, saveTaskPrefs, defaultParentRoot, suggestScanDefaults,
 } from './task'
 import {
   DIALOG_DEFAULT_H, DIALOG_DEFAULT_W,
@@ -1110,7 +1110,8 @@ interface TaskRepo {
  */
 function TaskDialog(props: { onClose: () => void }): React.ReactNode {
   const prefs = loadTaskPrefs()
-  const [parentRoot, setParentRoot] = useState(prefs.parentRoot)
+  // 父目录默认只用当前会话 cwd(用户拍板):偏好里的旧值跨工程会串台,直接忽略。
+  const [parentRoot, setParentRoot] = useState(defaultParentRoot(sessionCwd))
   const [repos, setRepos] = useState<TaskRepo[] | null>(null)
   const [checked, setChecked] = useState<string[]>([])
   const [lead, setLead] = useState('')
@@ -1121,6 +1122,7 @@ function TaskDialog(props: { onClose: () => void }): React.ReactNode {
   const [provider, setProvider] = useState(prefs.provider)
   const [model, setModel] = useState(prefs.model)
   const [taskDir, setTaskDir] = useState<string | null>(null)
+  const [preview, setPreview] = useState<Array<{ repo: string; cwd: string }> | null>(null)
   const [sessions, setSessions] = useState<Array<{ repo: string; ok: boolean; sessionId?: string; error?: string }> | null>(null)
   const [backs, setBacks] = useState<Array<{ file: string; text: string }> | null>(null)
   const [busy, setBusy] = useState('')
@@ -1130,15 +1132,20 @@ function TaskDialog(props: { onClose: () => void }): React.ReactNode {
     setChecked((prev) => (prev.includes(rel) ? prev.filter((r) => r !== rel) : [...prev, rel]))
   }
 
-  const scan = async (): Promise<void> => {
-    const root = parentRoot.trim()
-    if (root === '') { setError('先填父目录(多个仓的共同父目录)'); return }
-    setBusy('扫描中…'); setError(null); setRepos(null); setChecked([]); setLead('')
+  const scan = async (root: string): Promise<void> => {
+    if (root === '') { setError('当前会话没有工作区:先在目标父目录的会话里打开面板'); return }
+    setBusy('扫描中…'); setError(null); setRepos(null); setChecked([]); setLead(''); setPreview(null)
     try {
       const r = await api<{ ok: boolean; repos?: TaskRepo[]; error?: string }>('task/scan', { parentRoot: root })
       if (!r.ok) { setError(r.error ?? 'scan failed'); return }
-      setRepos(r.repos ?? [])
-      // 偏好存一下:下次打开不用重填。
+      const found = r.repos ?? []
+      setRepos(found)
+      // 扫描结果直接回填:repo 全勾、牵头取首个、slug/标题从父目录名来,用户逐项可改。
+      const d = suggestScanDefaults(root, found)
+      setChecked(d.checked)
+      setLead(d.lead)
+      setSlug(d.slug)
+      setTitle(d.title)
       saveTaskPrefs({ parentRoot: root, tasksRoot, templateDir, provider, model })
     } catch (e) {
       setError(String(e))
@@ -1147,12 +1154,20 @@ function TaskDialog(props: { onClose: () => void }): React.ReactNode {
     }
   }
 
+  // 打开面板即扫一次:父目录=当前会话 cwd,无需点按钮。
+  const autoScanned = useRef(false)
+  useEffect(() => {
+    if (autoScanned.current) return
+    autoScanned.current = true
+    void scan(defaultParentRoot(sessionCwd))
+  }, [])
+
   const build = async (): Promise<void> => {
-    const involved = checked.length > 0 ? checked : parseInvolvedLines('')
+    const involved = checked
     const err = validateTaskBuild({ slug, lead, involved, tasksRoot: tasksRoot.trim() !== '' ? tasksRoot.trim() : suggestTasksRoot(parentRoot.trim()) })
     if (err !== null) { setError(err); return }
     const finalTasksRoot = tasksRoot.trim() !== '' ? tasksRoot.trim() : suggestTasksRoot(parentRoot.trim())
-    setBusy('建任务目录中…'); setError(null); setTaskDir(null); setSessions(null); setBacks(null)
+    setBusy('建任务目录中…'); setError(null); setTaskDir(null); setPreview(null); setSessions(null); setBacks(null)
     try {
       const r = await api<{ ok: boolean; taskDir?: string; error?: string }>('task/build', {
         slug: slug.trim(), lead: lead.trim(), involved, title: title.trim() !== '' ? title.trim() : slug.trim(),
@@ -1164,6 +1179,11 @@ function TaskDialog(props: { onClose: () => void }): React.ReactNode {
       if (!r.ok || !r.taskDir) { setError(r.error ?? 'build failed'); return }
       setTaskDir(r.taskDir)
       setTasksRoot(finalTasksRoot)
+      // 建目录成功即进预览:逐仓列出将建会话(仓→cwd→provider/model),确认才真正 launch。
+      const root = parentRoot.trim()
+      const prov = provider.trim() !== '' ? provider.trim() : '(宿主默认)'
+      const mod = model.trim() !== '' ? model.trim() : '(宿主默认)'
+      setPreview(involved.map((repo) => ({ repo, cwd: `${root}/${repo} · ${prov} / ${mod}` })))
       saveTaskPrefs({ parentRoot: parentRoot.trim(), tasksRoot: finalTasksRoot, templateDir, provider, model })
     } catch (e) {
       setError(String(e))
@@ -1174,16 +1194,20 @@ function TaskDialog(props: { onClose: () => void }): React.ReactNode {
 
   const launch = async (): Promise<void> => {
     if (taskDir === null) { setError('先建任务目录'); return }
-    setBusy('拉起执行会话中…(directive 须已改成 issued)'); setError(null); setSessions(null)
+    // 确认即签发:用户在预览里已确认,直接 launch 带 skipIssuedCheck(直发);
+    // directive 照常写盘留痕,不再要求人手改 issued。
+    setBusy('拉起执行会话中…'); setError(null); setSessions(null)
     try {
       const r = await api<{ ok: boolean; sessions?: Array<{ repo: string; ok: boolean; sessionId?: string; error?: string }>; error?: string }>('task/launch', {
         taskDir, involved: checked, parentRoot: parentRoot.trim(),
         lead: lead.trim() !== '' ? lead.trim() : undefined,
         provider: provider.trim() !== '' ? provider.trim() : undefined,
         model: model.trim() !== '' ? model.trim() : undefined,
+        skipIssuedCheck: true,
       })
       if (!r.ok) { setError(r.error ?? 'launch failed'); return }
       setSessions(r.sessions ?? [])
+      setPreview(null)
     } catch (e) {
       setError(String(e))
     } finally {
@@ -1218,12 +1242,12 @@ function TaskDialog(props: { onClose: () => void }): React.ReactNode {
         <button className={C('dshe-close')} onClick={props.onClose} aria-label="关闭">✕</button>
       </div>
       <div className={C('dshe-body')}>
-        <div className={C('dshe-note')}>扫描结构 → 勾仓建任务目录 → 人审改 issued → 点按钮拉起执行会话(原生回车只发消息,不触发任务)。</div>
+        <div className={C('dshe-note')}>打开自动扫描当前会话目录 → 核对勾选 → 确认拉起(原生回车只发消息,不触发任务)。</div>
         <div className={C('dshe-field')}>
-          <span>父目录(多个仓的共同父目录)</span>
+          <span>父目录(当前会话目录,换仓重扫)</span>
           <input type="text" value={parentRoot} onChange={(e) => setParentRoot(e.target.value)} placeholder="如 D:/Users/xxx/Documents/finance" />
           <div className={C('dshe-actions')}>
-            <button className={C('dshe-start')} onClick={() => { void scan() }} disabled={busy !== ''}>{busy === '扫描中…' ? busy : '扫描结构'}</button>
+            <button className={C('dshe-start')} onClick={() => { void scan(parentRoot.trim()) }} disabled={busy !== ''}>{busy === '扫描中…' ? busy : '重新扫描'}</button>
           </div>
         </div>
         {repos !== null && (
@@ -1279,17 +1303,25 @@ function TaskDialog(props: { onClose: () => void }): React.ReactNode {
         </div>
         {verdict !== null && <div className={C('dshe-note')}>待填:{verdict}</div>}
         <div className={C('dshe-actions')}>
-          <button className={C('dshe-start')} onClick={() => { void build() }} disabled={busy !== '' || verdict !== null}>{busy !== '' ? busy : '建任务目录'}</button>
+          <button className={C('dshe-start')} onClick={() => { void build() }} disabled={busy !== '' || verdict !== null}>{busy !== '' ? busy : '建任务并预览会话'}</button>
         </div>
         {taskDir !== null && (
           <div className={C('dshe-resolved')}>
             <div><b>任务目录:</b>{taskDir}</div>
-            <div className={C('dshe-note')}>去改 directive.md(填实 + status 改 issued),再点下面拉起。</div>
+            <div className={C('dshe-note')}>材料已写盘(directive 默认 issued,确认即拉起)。</div>
           </div>
         )}
-        <div className={C('dshe-actions')}>
-          <button className={C('dshe-start')} onClick={() => { void launch() }} disabled={busy !== '' || taskDir === null || checked.length === 0}>{busy !== '' ? busy : '建任务并拉起执行会话'}</button>
-        </div>
+        {preview !== null && (
+          <div className={C('dshe-field')}>
+            <span>将建立 {preview.length} 个执行会话(确认后拉起)</span>
+            {preview.map((p) => (
+              <div key={p.repo} className={C('dshe-note')}><b>{p.repo}</b>{p.repo === lead ? ' (牵头)' : ''}: {p.cwd}</div>
+            ))}
+            <div className={C('dshe-actions')}>
+              <button className={C('dshe-start')} onClick={() => { void launch() }} disabled={busy !== ''}>{busy !== '' ? busy : '确认拉起'}</button>
+            </div>
+          </div>
+        )}
         {sessions !== null && (
           <div className={C('dshe-resolved')}>
             {sessions.map((s) => (

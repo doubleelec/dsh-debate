@@ -6,6 +6,8 @@ import {
   validateTaskBuild,
   loadTaskPrefs,
   saveTaskPrefs,
+  defaultParentRoot,
+  suggestScanDefaults,
 } from '../../src/client/task'
 
 describe('parseInvolvedLines', () => {
@@ -66,5 +68,41 @@ describe('task prefs(node 无 window)', () => {
 
   it('写偏好静默,不抛', () => {
     expect(() => saveTaskPrefs({ parentRoot: 'a', tasksRoot: 'b', templateDir: '', provider: '', model: '' })).not.toThrow()
+  })
+})
+
+describe('defaultParentRoot', () => {
+  it('会话 cwd 原样返回,空/缺省回空', () => {
+    expect(defaultParentRoot('D:/work/finance')).toBe('D:/work/finance')
+    expect(defaultParentRoot('  ')).toBe('')
+    expect(defaultParentRoot(null)).toBe('')
+    expect(defaultParentRoot(undefined)).toBe('')
+  })
+})
+
+describe('suggestScanDefaults', () => {
+  it('repo 全勾、牵头取首个、slug 从父目录末段来', () => {
+    const d = suggestScanDefaults('D:/work/finance', [
+      { relPath: 'libs/broker', kind: 'repo' },
+      { relPath: 'data', kind: 'external' },
+      { relPath: 'quant/x', kind: 'repo' },
+      { relPath: 'plain', kind: 'unknown' },
+    ])
+    expect(d.checked).toEqual(['libs/broker', 'quant/x'])
+    expect(d.lead).toBe('libs/broker')
+    expect(d.slug).toBe('finance')
+    expect(d.title).toBe('finance')
+  })
+
+  it('无 repo 时牵头空、slug 回退 task', () => {
+    const d = suggestScanDefaults('', [{ relPath: 'plain', kind: 'unknown' }])
+    expect(d.checked).toEqual([])
+    expect(d.lead).toBe('')
+    expect(d.slug).toBe('task')
+  })
+
+  it('中文/空格父目录名清洗成可用 slug', () => {
+    const d = suggestScanDefaults('D:/工作/我的 仓', [{ relPath: 'a', kind: 'repo' }])
+    expect(d.slug).toBe('task')
   })
 })

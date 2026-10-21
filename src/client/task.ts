@@ -55,6 +55,33 @@ export function validateTaskBuild(input: TaskBuildInput): string | null {
   return null
 }
 
+/** 面板打开即扫的默认 parentRoot:只用当前会话 cwd(用户拍板)。偏好里的旧值忽略,免得跨工程串台。 */
+export function defaultParentRoot(sessionCwd: string | null | undefined): string {
+  const c = String(sessionCwd ?? '').trim()
+  return c
+}
+
+export interface ScanRepoLike {
+  relPath: string
+  kind: string
+}
+
+/**
+ * 扫描结果回填:repo 全勾选,牵头取首个 repo(没有 repo 则空),
+ * slug 从 parentRoot 末段转小写短横,标题默认与 slug 同文(用户再改)。
+ * 纯函数:打开面板自动跑完 scan 后调一次,用户仍可逐项改。
+ */
+export function suggestScanDefaults(
+  parentRoot: string,
+  repos: ScanRepoLike[],
+): { checked: string[]; lead: string; slug: string; title: string } {
+  const repolike = repos.filter((r) => r.kind === 'repo').map((r) => r.relPath)
+  const lead = repolike.length > 0 ? repolike[0] : ''
+  const seg = String(parentRoot ?? '').replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop() ?? ''
+  const slug = seg.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'task'
+  return { checked: repolike, lead, slug, title: slug }
+}
+
 export interface TaskPrefs {
   parentRoot: string
   tasksRoot: string

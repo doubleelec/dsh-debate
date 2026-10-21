@@ -7,7 +7,7 @@
 ## 功能
 
 - **思辨**：输入框 `✦ 增强` 菜单 → 思辨项 → 以草稿为议题起点，单线分叉跑建构/挑战交替，制图出五件套地图（详见 `docs/architecture.md` §4.4a）。
-- **跨仓任务**：`✦ 增强` 菜单 → 多仓任务项 → `TaskDialog` 走 scan → build → launch 三步（人审改 issued 后拉起），report/collect 汇总回信（详见 §4.4b 与 `docs/adr/0025-task-merge.md`）。
+- **跨仓任务**：`✦ 增强` 菜单 → 多仓任务项 → 打开自动扫当前会话目录并预填 → `TaskDialog` 建任务并预览会话 → 确认拉起（确认即签发），report/collect 汇总回信（详见 §4.4b 与 `docs/adr/0026-task-autofill-preview.md`）。
 
 ## 状态
 
@@ -17,7 +17,7 @@ v0.1 spec 之后的变化见 `docs/action-plan.md` 的 S0~S27 进度表（入口
 ## 领域文档
 
 - `CONTEXT.md`:术语表（以此为准，含多仓任务词汇）
-- `docs/adr/`:25 个已定决策（思辨 0001~0024 + 任务并入 0025）
+- `docs/adr/`:26 个已定决策（思辨 0001~0024 + 任务并入 0025 + 任务面板自动填与预览确认 0026）
 - `docs/architecture.md`:全工程唯一架构描述（双功能）
 - `docs/agents/`:工程 skill 约定（issue tracker / domain）
 
