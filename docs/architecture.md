@@ -46,8 +46,8 @@
 
 ### 4.1 Context View
 
-- **Purpose**: 插件在 DSH 里只占三个槽位 + 一组 HTTP 路由，不碰会话主循环。总图讲插件长什么样（黑盒 + 两条线），分图讲每条线怎么走。
-- **Model/Diagram (total)**:
+- **Purpose**: 插件在 DSH 里只占三个槽位 + 一组 HTTP 路由，不碰会话主循环。黑盒只讲边界：一张总图说清插件长什么样、跟谁打交道；功能区分在系统内部，不在黑盒里分图。
+- **Model/Diagram**:
 
 ```mermaid
 flowchart TD
@@ -74,76 +74,7 @@ flowchart TD
     end
 ```
 
-- **Model/Diagram (debate line)**:
-
-```mermaid
-flowchart TD
-    user["提问者<br/>(composer 输入框)"]
-    panel["debate 面板<br/>(shell.overlay 对话框)"]
-    entry["增强入口<br/>(input.right 辩论项)"]
-    host["debate host<br/>(webServer /dsh-debate/api/*)"]
-    parent["parent 会话<br/>(发起会话或自建满血)"]
-    single["分叉会话 single<br/>(fork 种子 继承上下文)"]
-    reside["常驻辩手对 resident<br/>(回退一 双会话互盲)"]
-    oneshot["子会话 one-shot<br/>(回退二 spawn 即弃)"]
-    synth["制图子会话<br/>(只读实录)"]
-
-    user -->|"草稿当辩论起点"| entry
-    entry -->|"prefill + open"| panel
-    panel -->|"POST start hint+sid"| host
-    host -->|"读背景+镜像进度"| parent
-    host -->|"默认 fork 创建"| single
-    host -.->|"建对失败回退"| reside
-    host -.->|"再失败回退"| oneshot
-    host -->|"spawn 实录全文"| synth
-    synth -->|"成果地图"| host
-    host -->|"transcript + 成果地图"| panel
-    host -->|"mirror append<br/>(log-only)"| parent
-
-    subgraph Legend["Legend"]
-        direction LR
-        L1["solid = 同步调用"]
-        L2["dashed = 回退与异步接管"]
-    end
-```
-
-- **Model/Diagram (task line)**:
-
-```mermaid
-flowchart TD
-    lead["任务发起人<br/>(composer 输入框)"]
-    taskpanel["TaskDialog<br/>(shell.overlay 三步面板)"]
-    taskentry["增强入口<br/>(input.right 任务项)"]
-    taskhost["task 接线<br/>(webServer /dsh-debate/api/task/*)"]
-    disk["任务目录<br/>(tasksRoot slug-stamp)"]
-    tpls["模板真身<br/>(编排库 templateDir)"]
-    group["执行会话群<br/>(一仓一 agents.create)"]
-    wsreg["workspace 分组<br/>(resolve 或 create)"]
-
-    lead -->|"标题+仓走表单"| taskentry
-    taskentry -->|"open 面板"| taskpanel
-    taskpanel -->|"POST task/scan parentRoot"| taskhost
-    taskhost -->|"scanParent 结构分组"| taskpanel
-    taskpanel -->|"POST task/build slug lead involved"| taskhost
-    taskhost -->|"读模板"| tpls
-    taskhost -->|"写 directive to 草稿"| disk
-    taskpanel -->|"人审改 issued"| disk
-    taskpanel -->|"POST task/launch taskDir issued"| taskhost
-    taskhost -->|"查 issued 门"| disk
-    taskhost -->|"ensureGroupedSession 三道门"| wsreg
-    wsreg -->|"attachSession 跟进"| group
-    taskhost -->|"sessionId 回执"| taskpanel
-    taskpanel -->|"POST task/report collect"| taskhost
-    taskhost -->|"读回信汇总"| disk
-
-    subgraph TaskLegend["Legend"]
-        direction LR
-        T1["solid = 同步调用"]
-        T2["scan build launch 三步显式按钮"]
-    end
-```
-
-- **Elements**: 黑盒外只有三样：发起会话（读背景/写镜像）、子 agent 设施（`ctx.subagents` spawn、`ctx.agents` 建分叉/常驻）、浏览器（轮询 state）——见总图。分线细节：辩论载体三态按序降级：单线分叉 → 常驻对 → one-shot；制图恒为 one-shot（只读实录，不参辩）。任务线无降级：scan/build/launch/report/collect 五步显式推进，issued 门与三道门是硬门（§4.4b）。
+- **Elements**: 黑盒外只有三样：发起会话（读背景/写镜像）、子 agent 设施（`ctx.subagents` spawn、`ctx.agents` 建分叉/常驻）、浏览器（轮询 state）。两条线的走法是内部细节，见 §4.4a（辩论）/ §4.4b（任务）时序。
 
 ### 4.2 Logical Decomposition View
 
@@ -165,7 +96,7 @@ flowchart TD
         pers["persist.ts<br/>(留存纯函数)"]
         proto --> lens
     end
-    subgraph Task["任务纯逻辑 src/task"]
+    subgraph Task["任务纯逻辑 src/cross_tasks"]
         direction LR
         scan["scan.ts<br/>(结构探针)"]
         mats["materials.ts<br/>(模板填充)"]
