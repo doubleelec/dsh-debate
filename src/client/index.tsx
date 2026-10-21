@@ -636,6 +636,19 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
     }
   }
 
+  // T1 探针 P1:对发起会话真调一次 followup,看会话区是否进入运行态。
+  // debateId 从本局面拿 parentSid,用户不用找会话 id。只发一条无害心跳。
+  const probeTurn = async (): Promise<void> => {
+    if (!sessionId) return
+    try {
+      const r = await api<{ ok: boolean; statusBefore?: unknown; statusAfter?: unknown; error?: string }>('debug-followup', { debateId: sessionId })
+      if (!r.ok) { setError(r.error ?? 'probe failed'); return }
+      setError(`探针已发:turn 前 status=${String(r.statusBefore)} → 3s 后=${String(r.statusAfter)}。看会话区:发送按钮变停止了吗?有蓝字吗?`)
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
   const copyMap = (): void => {
     const last = turns.length > 0 ? turns[turns.length - 1].text : ''
     if (!last) return
@@ -841,6 +854,8 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
                 <button className={C('dshe-stop')} onClick={() => { void stop() }} disabled={status === 'polling'} title={status === 'polling' ? '等模型开局:输入框回车后自动跟局' : undefined}>{tr('btn.stop')}</button>
                 {/* S17 一键双停:连发起会话的 turn 一起停(用户刚说的话留着)。 */}
                 <button className={C('dshe-stop')} onClick={() => { void interrupt() }} disabled={status === 'polling'} title={tr('btn.interruptTip')}>{tr('btn.interrupt')}</button>
+                {/* T1 探针 P1:对发起会话真调一次 followup,看会话区是否进入运行态。 */}
+                <button className={C('dshe-stop')} onClick={() => { void probeTurn() }} title="T1 探针:发一条无害心跳进发起会话,看发送按钮/蓝字变没变">探针起 turn</button>
               </>
             : <button className={C('dshe-start')} onClick={() => { void start() }}>{tr('btn.start')}</button>}
           <span className={C('dshe-status')}>{tr(`st.${status}`)}</span>

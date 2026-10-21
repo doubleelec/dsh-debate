@@ -2105,7 +2105,9 @@ export default {
         handler: async (req, res) => {
           // T1 探针 P1(一次性,有副作用):对 parent 真调一次 followup,看发起会话
           // 是否起 turn。只发一条无害心跳文本,不跑模型任务,随时可停。
-          // body: { sid?, text? }。返回 followup 前后 status 快照 + 3s 后的 status。
+          // body: { sid?, debateId?, text? }。sid 直给发起会话 id;debateId 则从
+          // debate 会话表取 parentSid(面板点按钮用,不用用户找会话 id)。
+          // 返回 followup 前后 status 快照 + 3s 后的 status。
           // 用户侧观察:发送按钮是否变停止、有无"深度求索中"蓝字。
           try {
             const body = await readJsonBody(req)
@@ -2120,8 +2122,10 @@ export default {
             } | undefined
             if (!agents) return writeJson(res, { ok: false, error: 'agents service unavailable' })
             const sid = typeof body.sid === 'string' ? body.sid : ''
+            const debateId = typeof body.debateId === 'string' ? body.debateId : ''
+            const fromDebate = debateId !== '' ? sessions.get(debateId)?.parentSid ?? '' : ''
             const live = agents.list().map((a) => a.session?.id ?? '?')
-            const target = sid !== '' ? sid : (live[0] ?? '')
+            const target = sid !== '' ? sid : fromDebate !== '' ? fromDebate : (live[0] ?? '')
             if (target === '' || target === '?') return writeJson(res, { ok: true, live, resolved: false })
             const parent = agents.get(target)
             if (!parent || typeof parent.followup !== 'function') {
