@@ -9,7 +9,7 @@
 > Merge record (S22 对称)：辩论纯逻辑从 `src/*.ts` 平铺搬入 `src/debate/`（`debate.ts`/`lenses.ts`/`persist.ts`），
 > 与 `src/cross_tasks/` 平级对等；`src/version.ts` 留顶层共享（host/client 共用）；host 接线仍在 `src/index.ts`
 > （单 tsdown entry，平台约束不变）。红线 SYM-01 + DEBATE-01 落 TOML，`tests/src/debate/` 镜像随行。
-> 定位收敛（S21）：`docs/debate-design.md` 是辩论功能的设计草稿（v0.1 冻结），不是全工程架构；
+> 定位收敛（S21+S24）：辩论 v0.1 设计草稿 `docs/debate-design.md` 已删除（内容冻结在 git 历史）；
 > 本文件是全工程唯一架构描述（双功能：辩论 + 跨仓任务）。
 
 ## 1. Identification and Scope
@@ -46,8 +46,35 @@
 
 ### 4.1 Context View
 
-- **Purpose**: 插件在 DSH 里只占三个槽位 + 一组 HTTP 路由，不碰会话主循环；辩论与任务各走一条线，共用入口菜单与 overlay 外壳。
-- **Model/Diagram (debate)**:
+- **Purpose**: 插件在 DSH 里只占三个槽位 + 一组 HTTP 路由，不碰会话主循环。总图讲插件长什么样（黑盒 + 两条线），分图讲每条线怎么走。
+- **Model/Diagram (total)**:
+
+```mermaid
+flowchart TD
+    user["用户<br/>(composer 输入框)"]
+    menu["增强入口<br/>(input.right 辩论 任务二选一)"]
+    panels["双面板<br/>(shell.overlay debate TaskDialog)"]
+    plugin["dsh-debate 插件<br/>(webServer api host 接线)"]
+    parent["parent 会话<br/>(发起会话或自建满血)"]
+    agents["子 agent 设施<br/>(fork 常驻 spawn)"]
+    disk["落点<br/>(KV 记录 结论文档 任务目录)"]
+
+    user -->|"草稿或表单"| menu
+    menu -->|"open 面板"| panels
+    panels -->|"POST api"| plugin
+    plugin -->|"读背景 镜像进度"| parent
+    plugin -->|"建会话 派活"| agents
+    plugin -->|"写记录 写文档"| disk
+    plugin -->|"transcript 成果 地图回执"| panels
+
+    subgraph CtxLegend["Legend"]
+        direction LR
+        C1["solid = 同步调用"]
+        C2["黑盒外只有三样 parent agents 浏览器"]
+    end
+```
+
+- **Model/Diagram (debate line)**:
 
 ```mermaid
 flowchart TD
@@ -80,7 +107,7 @@ flowchart TD
     end
 ```
 
-- **Model/Diagram (task)**:
+- **Model/Diagram (task line)**:
 
 ```mermaid
 flowchart TD
@@ -116,7 +143,7 @@ flowchart TD
     end
 ```
 
-- **Elements**: 外部只有三样：发起会话（读背景/写镜像）、子 agent 设施（`ctx.subagents` spawn、`ctx.agents` 建分叉/常驻）、浏览器（轮询 state）。辩论载体三态按序降级：单线分叉 → 常驻对 → one-shot；制图恒为 one-shot（只读实录，不参辩）。任务线无降级：scan/build/launch/report/collect 五步显式推进，issued 门与三道门是硬门（§4.4b）。
+- **Elements**: 黑盒外只有三样：发起会话（读背景/写镜像）、子 agent 设施（`ctx.subagents` spawn、`ctx.agents` 建分叉/常驻）、浏览器（轮询 state）——见总图。分线细节：辩论载体三态按序降级：单线分叉 → 常驻对 → one-shot；制图恒为 one-shot（只读实录，不参辩）。任务线无降级：scan/build/launch/report/collect 五步显式推进，issued 门与三道门是硬门（§4.4b）。
 
 ### 4.2 Logical Decomposition View
 

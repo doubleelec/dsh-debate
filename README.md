@@ -10,15 +10,13 @@
 
 ## 状态
 
-v0.13.0：辩论单线分叉默认（ADR-0024）+ 任务并入（ADR-0025）。完整循环按 `docs/architecture.md` 推进；
-`docs/debate-design.md` 是辩论 v0.1 设计草稿（已冻结，只看起源）。
+v0.13.0：辩论单线分叉默认（ADR-0024）+ 任务并入（ADR-0025）。完整循环按 `docs/architecture.md` 推进。
 
 ## 领域文档
 
 - `CONTEXT.md`:术语表（以此为准，含多仓任务词汇）
 - `docs/adr/`:25 个已定决策（辩论 0001~0024 + 任务并入 0025）
 - `docs/architecture.md`:全工程唯一架构描述（双功能）
-- `docs/debate-design.md`:辩论设计草稿（v0.1 冻结）
 - `docs/agents/`:工程 skill 约定（issue tracker / domain）
 
 ## 开发
