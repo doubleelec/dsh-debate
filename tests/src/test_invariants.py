@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 VITEST_DIR = ROOT / "tests" / "vitest"
 SRC_INDEX = ROOT / "src" / "index.ts"
+HOST_CAGE = ROOT / "src" / "host" / "cage.ts"
 MANIFEST = ROOT / "dsh.plugin.json"
 
 
@@ -30,10 +31,10 @@ def test_src_single_thread_seam_exists():
 
 
 def test_src_debater_tool_allowlist_is_closed():
-    """Tool cage (ADR-0022): debater allowlist is exactly the six read-only tools."""
-    src = _read(SRC_INDEX)
-    m = re.search(r"export const DEBATER_TOOL_ALLOW = \[([^\]]+)\]", src)
-    assert m, "DEBATER_TOOL_ALLOW literal not found in src/index.ts"
+    """Tool cage (ADR-0022): debater allowlist is exactly the six read-only tools (S27: lives in host/cage.ts)."""
+    cage = _read(HOST_CAGE)
+    m = re.search(r"export const DEBATER_TOOL_ALLOW = \[([^\]]+)\]", cage)
+    assert m, "DEBATER_TOOL_ALLOW literal not found in src/host/cage.ts"
     tools = sorted(t.strip().strip("'\"") for t in m.group(1).split(",") if t.strip())
     assert tools == ["glob", "grep", "read", "read_image", "web_fetch", "web_search"], (
         f"debater allowlist drifted: {tools}"
@@ -41,10 +42,10 @@ def test_src_debater_tool_allowlist_is_closed():
 
 
 def test_src_synth_tool_allowlist_is_closed():
-    """Tool cage (ADR-0022): synthesizer allowlist is exactly the three read tools."""
-    src = _read(SRC_INDEX)
-    m = re.search(r"export const SYNTH_TOOL_ALLOW = \[([^\]]+)\]", src)
-    assert m, "SYNTH_TOOL_ALLOW literal not found in src/index.ts"
+    """Tool cage (ADR-0022): synthesizer allowlist is exactly the three read tools (S27: lives in host/cage.ts)."""
+    cage = _read(HOST_CAGE)
+    m = re.search(r"export const SYNTH_TOOL_ALLOW = \[([^\]]+)\]", cage)
+    assert m, "SYNTH_TOOL_ALLOW literal not found in src/host/cage.ts"
     tools = sorted(t.strip().strip("'\"") for t in m.group(1).split(",") if t.strip())
     assert tools == ["glob", "read", "read_image"], f"synth allowlist drifted: {tools}"
 
@@ -75,9 +76,9 @@ def test_src_task_routes_are_seven():
 
 
 def test_src_peer_symmetry():
-    """S22: debate/ vs cross_tasks/ are peer pure-logic dirs; host wiring stays in index.ts."""
+    """S22/S27: debate/ vs cross_tasks/ are peer pure-logic dirs; host wiring stays in index.ts + host/."""
     src_dir = ROOT / "src"
-    for peer in ("debate", "cross_tasks"):
+    for peer in ("debate", "cross_tasks", "host"):
         d = src_dir / peer
         assert d.is_dir(), f"src/{peer}/ missing: peers must both exist"
         assert (d / "module.toml").is_file(), f"src/{peer}/module.toml missing"
@@ -85,7 +86,7 @@ def test_src_peer_symmetry():
     flat = {p.name for p in src_dir.glob("*.ts")}
     assert flat == {"index.ts", "version.ts"}, f"flat src/*.ts drifted: {sorted(flat)}"
     # Peer dirs carry no host wiring: no webServer register, no tools.register.
-    for peer in ("debate", "cross_tasks"):
+    for peer in ("debate", "cross_tasks", "host"):
         for ts in (src_dir / peer).glob("*.ts"):
             text = ts.read_text(encoding="utf-8")
             assert "webServer.register" not in text, f"{ts} must not register routes"

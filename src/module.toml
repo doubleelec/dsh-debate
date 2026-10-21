@@ -1,8 +1,9 @@
 # src/module.toml
-# Module-level manifest (arch retrofit baseline + S19/S21/S22 reconcile).
+# Module-level manifest (arch retrofit baseline + S19/S21/S22/S27 reconcile).
 # Host wiring module: src/index.ts (single tsdown entry, route table in apply()).
 # Pure logic lives in peer submodules debate/ (protocol/lenses/persist) and
-# cross_tasks/ (scan/materials/ensure-session); src/version.ts is shared (host/client).
+# cross_tasks/ (scan/materials/ensure-session); host internals in host/
+# (types/cage/resident: S27 P0 extraction); src/version.ts is shared (host/client).
 # TS sources are not counted by the vendored orphan check (only .py/.ps1 + dirs),
 # so submodules lists only the nested governed directories; wiring vs pure split
 # is documented in architecture.md §4.2 (see ADR-0025 §7 for why wiring is not split).
@@ -14,6 +15,7 @@ submodules = [
     "client",
     "debate",
     "cross_tasks",
+    "host",
 ]
 require_invariants = true
 
@@ -36,5 +38,5 @@ test_ref = "tests/src/test_invariants.py::test_src_debater_tool_allowlist_is_clo
 
 [[invariant.symmetry.rules]]
 id = "SYM-01"
-desc = "debate/ vs cross_tasks/ stay peer pure-logic submodules; host wiring stays in index.ts."
+desc = "debate/ vs cross_tasks/ stay peer pure-logic submodules; host wiring stays in index.ts + host/."
 test_ref = "tests/src/test_invariants.py::test_src_peer_symmetry"

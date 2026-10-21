@@ -15,25 +15,13 @@ import { rm } from 'node:fs/promises'
 import fs from 'node:fs'
 import path from 'node:path'
 
-/** 最小 Agent 面:runDebateLoop 需要 parent 身份 + 会话事件读取 + 进度镜像。 */
-export interface ParentAgent {
-  readonly session: {
-    readonly id: string
-    snapshotEvents?: (fromSeq?: number, toSeqExclusive?: number) => readonly { type: string; data?: unknown }[]
-    events?: (fromSeq?: number) => readonly { type: string; data?: unknown }[]
-    surface?: unknown
-    /** 会话日志直接追加(对话区直播用:直接进 surface,不经过 inbox,不唤醒模型)。 */
-    append?: (type: string, data: unknown, opts?: unknown) => unknown
-  }
-  [key: string]: unknown
-}
-/** 最小内容块面:文本块提取所需子集。 */
-export interface TextContentBlock {
-  readonly type: string
-  readonly text?: unknown
-  [key: string]: unknown
-}
 import type { DebateConfig, DebateMap, DebateRound, DebateStatus, TranscriptEntry } from './debate/debate'
+import type { AgentsLike, ParentAgent, ResidentAgent, ResidentPair, TextContentBlock, AgentPresetsLike, ResidentSetupCtx, SubagentsLike } from './host/types'
+export type { AgentsLike, ParentAgent, ResidentAgent, ResidentPair, TextContentBlock, AgentPresetsLike, ResidentSetupCtx, SubagentsLike } from './host/types'
+import { DEBATER_TOOL_ALLOW, SYNTH_TOOL_ALLOW, toolAllowFor, resolveToolAllow, visibleNamesOf, cageLabel, scopedToolGuard, askSubagent, textOf, turnVerdict, STEP_STALL_MS, STEP_HARD_CAP_MS, PROGRESS_POLL_MS } from './host/cage'
+export { DEBATER_TOOL_ALLOW, SYNTH_TOOL_ALLOW, toolAllowFor, resolveToolAllow, visibleNamesOf, cageLabel, scopedToolGuard, askSubagent, turnVerdict, STEP_STALL_MS, STEP_HARD_CAP_MS, PROGRESS_POLL_MS } from './host/cage'
+import { SUBAGENT_DELEGATION_CONTEXT, RESIDENT_TURN_ATTEMPTS, readResidentEvents, heartbeatOf, extractHandoffConclusion, epochStopReason, epochStopDetail, createResidentPair, isRetriableTurnError, driveResidentTurn } from './host/resident'
+export { SUBAGENT_DELEGATION_CONTEXT, RESIDENT_TURN_ATTEMPTS, readResidentEvents, heartbeatOf, extractHandoffConclusion, epochStopReason, epochStopDetail, createResidentPair, isRetriableTurnError, driveResidentTurn } from './host/resident'
 import { DEFAULT_CONFIG, normalizeAnswer, isContinuationHint, SETTLED_DEFS_MAX, isOneSidedAccept, isTopicLoop, classifyQuestion, extractSessionContext, buildBuilderPrompt, buildBuilderRoundPrompt, buildChallengerPrompt, buildSynthesizerPrompt, renderTranscriptForSynthesizer, toDebateRound, roundConverged, convergedAtCap, isSaturated, pendingStalled, slimHandoff, formatPendingFocus, sectionText, parseAnswer, parseGaps, gapAge, extractDecisionSummary, buildFallbackSummary, DECISION_SECTION } from './debate/debate'
 export { isTopicLoop }
 export { renderTranscriptForSynthesizer, answerShapeOf, answerSpecOf } from './debate/debate'
@@ -680,22 +668,6 @@ function looseText(data: unknown): string {
 }
 
 /** live Agent 注册表最小面:host 直驱时按 sessionId 取 parent,取不到则自建。 */
-export interface AgentsLike {
-  get(id: string): unknown
-  list(): Array<{ session?: { id: string } }>
-  create(options: {
-    sessionId: string
-    parentAgent?: unknown
-    meta?: { cwd?: string; parentSession?: string; isSeeded?: boolean; origin?: 'subagent'; delegationDepth?: number; agentPreset?: string }
-    agentOptions?: { provider?: string; model?: string }
-    signal?: AbortSignal
-    setup?: (agentCtx: any, agent?: any) => void | Promise<void>
-    /** fork 种子(照抄原生 fork:buildForkSeed 切源会话事件前缀 + session/end-seed 标记)。 */
-    seed?: Array<{ type: string; seq?: number; time?: number; data?: unknown }>
-    inheritedEventCount?: number
-  }): Promise<{ agent: unknown; dispose(): Promise<void> }>
-}
-
 /** fork 种子事件面(自实现 buildForkSeed 的输入输出同形,不引宿主内部包)。 */
 export interface SeedEvent {
   type: string
@@ -873,52 +845,7 @@ export async function sweepSingleThread(
   return { detached, removed, errors }
 }
 
-/** 常驻辩手 live 面(resident_debater):followup 交棒 + whenIdle 等 turn + 读自有事件。 */
-export interface ResidentAgent {
-  readonly session: {
-    readonly id: string
-    seq?: number
-    snapshotEvents?: (...args: any[]) => readonly any[]
-    events?: (...args: any[]) => readonly any[]
-  }
-  followup(message: any): void
-  whenIdle(): Promise<void>
-  cancel?: (...args: any[]) => void
-  status?: unknown
-  ctx?: unknown
-  [key: string]: unknown
-}
-
-/** 常驻辩手对:整场存活,host 在两者之间交棒(handoff)。 */
-export interface ResidentPair {
-  builder: ResidentAgent
-  challenger: ResidentAgent
-  dispose(): Promise<void>
-}
-
-/** preset 注册表最小面:自建 parent 时挂默认 preset(照抄 webhook 样板),子 agent 继承满血工具集。 */
-export interface AgentPresetsLike {
-  defaultId?: string
-  mount(agentCtx: unknown, id: string): Promise<unknown>
-  composeFrom?: (agentCtx: unknown, parentCtx: unknown) => string | undefined
-  composedPreset?: (agentCtx: unknown) => string | undefined
-}
-
-/** 常驻辩手创建时 setup 内的最小 agentCtx 面( composition-only,不 drive)。 */
-export interface ResidentSetupCtx {
-  get(name: string): any
-  systemPrompt: {
-    section(s: { name: string; order: number; text: string }): unknown
-    context(c: { name: string; order: number; text: string }): unknown
-    getSectionOrder(name: string): number
-    getContextOrder(name: string): number
-  }
-  tools: {
-    restrict(filter: { allow?: string[]; deny?: string[] }): unknown
-    schemas?: (scope?: unknown) => Array<{ name?: unknown }>
-    guard?: (guard: (execution: { name: string }) => string | undefined) => () => void
-  }
-}
+/** 常驻辩手对:整场存活,host 在两者之间交棒(handoff)。(面已迁 host/types,重导出见顶。) */
 
 /** 每场辩论的中止器(stop 路由 abort,后台任务退出)。 */
 const controllers = new Map<string, AbortController>()
@@ -1320,100 +1247,19 @@ export async function runHostDebate(
     }
   }
 }
-export interface SubagentsLike {
-  start(provider: string, req: {
-    parent: ParentAgent
-    prompt: TextContentBlock[]
-    label?: string
-    signal: AbortSignal
-    agentOptions?: { provider?: string; model?: string }
-    toolFilter?: { allow?: string[]; deny?: string[] }
-  }): Promise<{ result: Promise<{ output: TextContentBlock[]; stopReason: string }>; dispose(): Promise<void> }>
-}
+/** 子 agent 面:最小面已迁 host/types,重导出见顶。(askSubagent 已迁 host/cage。) */
 
-/** 文本块提取:子 agent 输出的 assistant 文本。 */
-function textOf(blocks: TextContentBlock[]): string {
-  const parts: string[] = []
-  for (const b of blocks) {
-    if (b !== null && typeof b === 'object' && (b as { type?: unknown }).type === 'text') {
-      const t = (b as { text?: unknown }).text
-      if (typeof t === 'string') parts.push(t)
-    }
-  }
-  return parts.join('\n').trim()
-}
+/** 文本块提取:子 agent 输出的 assistant 文本。(已迁 host/cage,重导出见顶。) */
 
-/**
- * 辩论子 agent 工具笼(S16 白名单:只读论证员):
- * - 辩手(建构/挑战):读文件找证据 + 联网查证,六项。
- *   名单依据:2026-10-20 线上 scope 实测(standard preset,31 个全局工具) +
- *   白名单辩论结论(辩手六项、制图员三项)。
- * - 制图员:只读实录,不参辩,三项(读 + 找文件,不联网)。
- * - 白名单语义(工具注册表文档):allow 只留点名的,后来出现的新工具一律排除;
- *   deny 则相反,新工具默认放行——只读角色必须用 allow,否则每加一个新工具都是一次敞口。
- * - allow 只能点全局名:scope-local(如 preset 层的 `subagent`)列了就 unknown 抛错
- *   (deny 同理,沿用旧注释的实测结论);这类名字走执行期 guard 拦,不进名单。
- */
-export const DEBATER_TOOL_ALLOW = ['read', 'read_image', 'glob', 'grep', 'web_fetch', 'web_search']
-export const SYNTH_TOOL_ALLOW = ['read', 'read_image', 'glob']
+/** 辩论子 agent 工具笼(S16 白名单:只读论证员)。(已迁 host/cage,重导出见顶。) */
 
-/** 角色取名单:辩手六项,制图员三项(两处挂载点同源,不各写一份)。 */
-export function toolAllowFor(role: 'builder' | 'challenger' | 'synthesizer'): string[] {
-  return role === 'synthesizer' ? [...SYNTH_TOOL_ALLOW] : [...DEBATER_TOOL_ALLOW]
-}
+/** 启动核对(S16)。(已迁 host/cage,重导出见顶。) */
 
-/**
- * 启动核对(S16):种子名单与宿主实际工具表取交集,失效名剔掉并留痕。
- * - 交集源 = host 侧 `schemas(parent)` 的全局视图(已有 debug-agent 路由在用,见 :2125)。
- * - 取不到实际表(undefined,接口不存在/抛错) → 按种子先发、标 unverified,
- *   让系统自己的 unknown 校验报错(挑战者终轮结论:不把可选接口当启动硬依赖)。
- * - 交集为空 → 显式抛 `empty-allow`,不无笼裸奔(建构者终轮:终态定为直接失败)。
- * 纯函数,可单测;IO(读 schemas)在调用方。
- */
-export function resolveToolAllow(seed: string[], visible: string[] | undefined): { allow: string[]; dropped: string[]; unverified: boolean } {
-  if (visible === undefined) return { allow: [...seed], dropped: [], unverified: true }
-  const set = new Set(visible)
-  const allow = seed.filter((n) => set.has(n))
-  const dropped = seed.filter((n) => !set.has(n))
-  if (allow.length === 0) throw new Error(`empty-allow:种子名单 ${seed.join(',')} 与宿主实际工具表无交集(实际:${visible.join(',')}),不无笼裸奔`)
-  return { allow, dropped, unverified: false }
-}
+/** 从 schemas 原始形状里抽全局工具名。(已迁 host/cage,重导出见顶。) */
 
-/**
- * 从 schemas 原始形状里抽全局工具名(非字符串一律丢掉,不猜不编)。
- * schemas 条目形状 `{ name?: unknown }`,与 debug-agent 路由同源(见 :2126)。
- */
-export function visibleNamesOf(all: Array<{ name?: unknown }> | undefined): string[] {
-  if (!Array.isArray(all)) return []
-  return all.map((t) => t.name).filter((n): n is string => typeof n === 'string')
-}
+/** 笼标签(S16)。(已迁 host/cage,重导出见顶。) */
 
-/**
- * 笼标签(S16):生效笼型并入已启动进度行,会话可见,不只写日志。
- * 辩论结论:开局那一行挂笼,不必每轮刷新。
- */
-export function cageLabel(allow: string[], dropped: string[], unverified = false): string {
-  const base = `工具笼·白名单${allow.length}项(${allow.join('/')})`
-  if (unverified) return `${base},实际表未核对(按种子先发)`
-  if (dropped.length > 0) return `${base},剔除失效${dropped.length}项(${dropped.join('/')})`
-  return base
-}
-
-/** scope-local 工具名(allow/restrict 都拦不住,filter 只影响全局层):执行期 guard 拦。 */
-const SCOPED_TOOL_GUARD_DENY = ['subagent']
-
-/**
- * 执行期 guard(S16):拦 scope-local 工具(如 preset 层的 `subagent`)。
- * 白名单与 restrict 都只动全局层,scoped 注册随后合并、不受影响(工具注册表文档),
- * 所以这类名字必须在执行时再拦一道。同步函数,返串即拒、返 undefined 即放行。
- * one-shot 链路无挂载点(子 agent 由 subagents.start 内部组装),只挂常驻 setup。
- */
-export function scopedToolGuard(execution: { name: string }): string | undefined {
-  if (SCOPED_TOOL_GUARD_DENY.includes(execution.name)) {
-    return `debate-guard:subagent 类 scope-local 工具不许辩手调用(${execution.name})`
-  }
-  return undefined
-}
+/** 执行期 guard(S16)。(已迁 host/cage,重导出见顶。) */
 
 /**
  * 打断点(S17 会话接管):transcript 最后一条的位置,面板照此画线,不猜不编。
@@ -1447,225 +1293,27 @@ export function interruptPlanOf(_parentSid: string | null): { cancelKind: 'user'
   return { cancelKind: 'user', keepInbox: true }
 }
 
-/** 一次性子 agent 单步超时:6 分钟。子 agent hang 住(等人点/大海捞针)时直接失败,不无限卡轮次。 */
-const STEP_TIMEOUT_MS = 6 * 60 * 1000
+/** 常驻辩手轮次卡死阈值。(与 turnVerdict/PROGRESS 一并迁 host/cage,常量重导出见顶。) */
 
-/** 常驻辩手轮次卡死阈值:多久没有任何新事件才算卡住(干活久不算错,见 turnVerdict)。 */
-export const STEP_STALL_MS = 4 * 60 * 1000
+/** 子 agent 固定 delegation 声明。(已迁 host/resident,SUBAGENT_DELEGATION_CONTEXT 重导出见顶。) */
 
-/** 常驻辩手单轮硬顶:再久也不能无限等(有进度也砍),兜住"永不 hang"。 */
-export const STEP_HARD_CAP_MS = 20 * 60 * 1000
+/** 读常驻辩手自有事件。(已迁 host/resident,重导出见顶。) */
 
-/** 常驻辩手轮次进度采样间隔。 */
-export const PROGRESS_POLL_MS = 10 * 1000
+/** 工具心跳(heartbeat)。(已迁 host/resident,重导出见顶。) */
 
-/**
- * 常驻轮次是否该中断(纯判定,便于单测):
- * idleMs=距上次有新事件的时长,totalMs=本 turn 总时长。
- * 先看硬顶(有进度也砍),再看卡死(无新事件)。两者都够不到才继续等。
- */
-export function turnVerdict(idleMs: number, totalMs: number): 'ok' | 'stalled' | 'hard-cap' {
-  if (totalMs >= STEP_HARD_CAP_MS) return 'hard-cap'
-  if (idleMs >= STEP_STALL_MS) return 'stalled'
-  return 'ok'
-}
+/** 文本块数组取文本(交棒结论提取用)。(已迁 host/resident,私函数随模块走。) */
 
-/** 起一次 one-shot 子 agent 并取文本(带工具笼 + 单步超时 + 实报原因)。 */
-export async function askSubagent(
-  subagents: SubagentsLike,
-  parent: ParentAgent,
-  sessionId: string,
-  role: 'builder' | 'challenger' | 'synthesizer',
-  prompt: string,
-  route: { provider: string; model: string },
-  signal: AbortSignal,
-): Promise<string> {
-  const timeout = new AbortController()
-  let timeoutFired = false
-  const timer = setTimeout(() => {
-    timeoutFired = true
-    timeout.abort(new Error(`subagent-${role}:timeout(${STEP_TIMEOUT_MS / 60000}min)`))
-  }, STEP_TIMEOUT_MS)
-  const onAbort = (): void => timeout.abort(signal.reason)
-  if (signal.aborted) onAbort()
-  else signal.addEventListener('abort', onAbort, { once: true })
-  try {
-    // S16 白名单:one-shot 无 schemas 核对挂载点(spawn 内部组装,父进程表未必是子表),
-    // 按种子先发、交系统 unknown 校验(挑战者终轮结论);scope-local 敞口见笼注释。
-    const run = await subagents.start('spawn', {
-      parent,
-      prompt: [{ type: 'text', text: prompt } as TextContentBlock],
-      label: `debate-${sessionId}-${role}`,
-      signal: timeout.signal,
-      agentOptions: { provider: route.provider, model: route.model },
-      toolFilter: { allow: toolAllowFor(role) },
-    })
-    try {
-      let result: { output: TextContentBlock[]; stopReason: string }
-      try {
-        result = await run.result
-      } catch (e) {
-        // 基础设施fault(result Promise 本身 reject):外层停了归 stopped,超时归超时。
-        if (signal.aborted) throw new Error('aborted')
-        if (timeoutFired) throw new Error(`subagent-${role}:timeout(${STEP_TIMEOUT_MS / 60000}min,写超时,已中止)`)
-        throw e instanceof Error ? e : new Error(String(e))
-      }
-      if (result.stopReason === 'completed') return textOf(result.output)
-      // stopReason 非 completed:先分清是谁杀的,再实报(之前一律报 aborted,超时原因被吞)。
-      if (signal.aborted) throw new Error('aborted')
-      if (timeoutFired) throw new Error(`subagent-${role}:timeout(${STEP_TIMEOUT_MS / 60000}min,写超时,已中止)`)
-      throw new Error(`subagent-${role}:${result.stopReason}`)
-    } finally {
-      await run.dispose()
-    }
-  } finally {
-    clearTimeout(timer)
-    signal.removeEventListener('abort', onAbort)
-  }
-}
+/** durable stream 记录取文本。(已迁 host/resident,私函数随模块走。) */
 
-/**
- * 子 agent 固定 delegation 声明(照抄 dsh-subagent/child-agent 的 SUBAGENT_DELEGATION_CONTEXT):
- * runtime-context 贡献,不是 system section,所以部署的 system prompt 在 parent/child 间保持一致。
- */
-const SUBAGENT_DELEGATION_CONTEXT =
-  'You are a delegated subagent: your permission scope was fixed when you were started and cannot be ' +
-  'widened from inside this session — operations that require approval are rejected automatically. ' +
-  'When the task needs access beyond that scope, do not retry the denied operation; state the ' +
-  'limitation in your reply so the delegating agent can handle it.'
+/** 交棒结论(handoff_conclusion)提取。(已迁 host/resident,重导出见顶。) */
 
-/** 读常驻辩手自有事件(owned suffix 由调用方按长度切)。 */
-export function readResidentEvents(agent: ResidentAgent): { type: string; data?: any }[] {
-  try {
-    const snap = (agent.session as any).snapshotEvents?.(0)
-    if (Array.isArray(snap)) return snap as { type: string; data?: any }[]
-    const legacy = (agent.session as any).events?.(0)
-    if (Array.isArray(legacy)) return legacy as { type: string; data?: any }[]
-  } catch {
-    // 会话不可读时退化为空,调用方报 empty-output
-  }
-  return []
-}
+/** 本 epoch 最后一个 turn/end 的终端原因。(已迁 host/resident,重导出见顶。) */
 
-/**
- * 工具心跳(heartbeat):turn 内 assistant 文本还没出来(读文件/调工具阶段)时,
- * 给面板看的活物。只读事件 type,不碰 data(形状未知也不崩):
- * 后缀里找含 tool 子串的事件 type,取最后一种,形如"🔧 tool/call ×3"。
- * 无 tool 事件返回 null(调用方显示"思考中…"还是空由面板定)。
- */
-export function heartbeatOf(suffix: readonly { type: string; data?: any }[]): string | null {
-  let lastTool = ''
-  let count = 0
-  for (const e of suffix) {
-    if (typeof e.type === 'string' && e.type.toLowerCase().includes('tool')) {
-      if (e.type === lastTool) count++
-      else {
-        lastTool = e.type
-        count = 1
-      }
-    }
-  }
-  if (lastTool === '') return null
-  return `🔧 ${lastTool} ×${count}`
-}
+/** 本 epoch 最后一个 turn/end 的终端细节。(已迁 host/resident,重导出见顶。) */
 
-/** 文本块数组取文本(交棒结论提取用,与 textOf 同源但容忍 any)。 */
-function blocksText(blocks: unknown): string {
-  if (!Array.isArray(blocks)) return ''
-  const parts: string[] = []
-  for (const b of blocks) {
-    if (b !== null && typeof b === 'object' && (b as { type?: unknown }).type === 'text') {
-      const t = (b as { text?: unknown }).text
-      if (typeof t === 'string') parts.push(t)
-    }
-  }
-  return parts.join('\n').trim()
-}
+/** 常驻辩手建对。(已迁 host/resident,重导出见顶。) */
 
-/** durable stream 记录取文本(照抄 dsh-llm joinAssistantStreamText 的两条分支)。 */
-function streamText(stream: unknown): string {
-  if (!Array.isArray(stream)) return ''
-  const parts: string[] = []
-  for (const r of stream) {
-    if (r === null || typeof r !== 'object') continue
-    const rec = r as Record<string, any>
-    if (rec.type === 'text-chunks' && Array.isArray(rec.texts)) parts.push(rec.texts.join(''))
-    else if (rec.type === 'chunk' && rec.chunk !== null && typeof rec.chunk === 'object' && rec.chunk.type === 'text-delta' && typeof rec.chunk.text === 'string') parts.push(rec.chunk.text)
-  }
-  return parts.join('')
-}
-
-/**
- * 交棒结论(handoff_conclusion)提取:最后非空助手消息,没有才回落流式累计。
- * 照抄 dsh-subagent AssistantOutputFold 的选择规则(与 stopReason 无关)。
- */
-export function extractHandoffConclusion(events: readonly { type: string; data?: any }[]): string | null {
-  let message: unknown
-  const partial: string[] = []
-  for (const e of events) {
-    if (e.type === 'assistant/message') {
-      const content = (e.data as any)?.message?.content
-      // 只有带文本的才成为候选:空 content 的 usage-only 消息不替换 earlier 输出(照抄 AssistantOutputFold)。
-      if (Array.isArray(content) && content.length > 0 && blocksText(content) !== '') message = content
-      const s = (e.data as any)?.stream
-      const t = streamText(s)
-      if (t !== '') partial.push(t)
-    } else if (e.type === 'assistant/attempt') {
-      const t = streamText((e.data as any)?.stream)
-      if (t !== '') partial.push(t)
-    }
-  }
-  if (message !== undefined) {
-    const t = blocksText(message)
-    return t !== '' ? t : partial.join('') !== '' ? partial.join('') : null
-  }
-  const text = partial.join('')
-  return text !== '' ? text : null
-}
-
-/** 本 epoch 最后一个 turn/end 的终端原因,映射到 subagent  seam 词汇(completed/max-tokens/aborted/refusal/error)。 */
-export function epochStopReason(events: readonly { type: string; data?: any }[]): string {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i]
-    if (e.type === 'turn/end') {
-      const kind = (e.data as any)?.reason?.kind as string | undefined
-      switch (kind) {
-        case 'completed': return 'completed'
-        case 'max-tokens': return 'max-tokens'
-        case 'aborted': return 'aborted'
-        case 'blocked': return 'refusal'
-        default: return 'error'
-      }
-    }
-  }
-  return 'error'
-}
-
-/**
- * 本 epoch 最后一个 turn/end 的终端细节(QAS-2:中断原因实报,不吞成 error)。
- * error 取 reason.error.message(provider/模型侧真因),aborted 取 signal.reason,其余为空。
- */
-export function epochStopDetail(events: readonly { type: string; data?: any }[]): string {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i]
-    if (e.type !== 'turn/end') continue
-    const reason = (e.data as any)?.reason
-    if (reason === null || typeof reason !== 'object') return ''
-    const err = (reason as any).error
-    if (err !== undefined && err !== null) {
-      if (typeof err === 'string') return err
-      const m = (err as any).message
-      if (typeof m === 'string' && m !== '') return m
-      const c = (err as any).code
-      if (typeof c === 'string' && c !== '') return c
-    }
-    const r = (reason as any).reason
-    if (typeof r === 'string' && r !== '') return r
-    if (r instanceof Error && r.message !== '') return r.message
-    return ''
-  }
-  return ''
-}
+/** isRetriableTurnError/driveResidentTurn。(已迁 host/resident,重导出见顶。) */
 
 /**
  * 常驻辩手建对:整场存活的两个可续聊子会话(各绑自己的模型路由)。
@@ -1677,259 +1325,7 @@ export function epochStopDetail(events: readonly { type: string; data?: any }[])
  * origin=subagent 让侧边栏隐藏(parent 目录见 subagentCatalog,不堆未分组),
  * isSeeded=false 保证互盲(不继承 parent 历史)。
  */
-export async function createResidentPair(
-  ctx: Context,
-  agents: AgentsLike,
-  parent: ParentAgent,
-  debateId: string,
-  builderRoute: { provider: string; model: string },
-  challengerRoute: { provider: string; model: string },
-  signal: AbortSignal,
-  targetCwd?: string,
-): Promise<ResidentPair> {
-  const get = (ctx as unknown as { get(name: string): unknown }).get.bind(ctx)
-  const presets = get('agentPresets') as AgentPresetsLike | undefined
-  const presetId = presets?.defaultId ?? null
-  const parentCtx = (parent as any)?.ctx as unknown | undefined
-  // cwd 三级:显式目标工作区(评审别家工程) > 发起会话 cwd > 进程目录。
-  const inheritCwd = (parent as any)?.session?.header?.cwd as string | undefined
-  const cwd = targetCwd !== undefined && targetCwd !== '' ? targetCwd
-    : inheritCwd !== undefined && inheritCwd !== '' ? inheritCwd : process.cwd()
-  const setupFor = (role: 'builder' | 'challenger'): ((agentCtx: any) => void | Promise<void>) => async (agentCtx: any) => {
-    // 1) join parent 生成(同步 bind,无 roster 读取失败模式);parentCtx 拿不到才回落 mount 默认。
-    try {
-      if (presets?.composeFrom && parentCtx) {
-        presets.composeFrom(agentCtx, parentCtx)
-      } else if (presets && presetId !== null && presetId !== '') {
-        await presets.mount(agentCtx, presetId)
-      }
-    } catch { /* join 失败不拦创建:prompt 仍可跑,工具集回落全局 */ }
-    // 2) delegation 声明。
-    try {
-      agentCtx.systemPrompt.context({
-        name: 'subagent:delegation',
-        order: agentCtx.systemPrompt.getContextOrder('SUBAGENT_DELEGATION'),
-        text: SUBAGENT_DELEGATION_CONTEXT,
-      })
-    } catch { /* 上下文挂不上不拦创建 */ }
-    // 3) 工具笼(S16 白名单,整场有效,创建时 restrict 一次)。
-    // 启动核对:用 agentCtx 自己的 schemas 视图与种子取交集,失效名剔掉;
-    // 取不到(undefined)按种子先发、交 restrict 的 unknown 校验(挑战者终轮结论)。
-    // 交集为空 → 显式失败,不无笼裸奔(建构者终轮)。
-    try {
-      let visible: string[] | undefined
-      try {
-        const all = agentCtx.tools?.schemas?.(agentCtx) as Array<{ name?: unknown }> | undefined
-        visible = all === undefined ? undefined : visibleNamesOf(all)
-      } catch { visible = undefined }
-      const resolved = resolveToolAllow(toolAllowFor(role), visible)
-      agentCtx.tools.restrict({ allow: resolved.allow })
-      if (resolved.dropped.length > 0 || resolved.unverified) {
-        try { agentCtx.systemPrompt.context({ name: 'debate:cage', order: 0, text: cageLabel(resolved.allow, resolved.dropped, resolved.unverified) }) } catch { /* 笼标签挂不上不拦创建 */ }
-      }
-    } catch (e) {
-      if (e instanceof Error && e.message.startsWith('empty-allow')) throw e
-      /* restrict 失败时抛给创建事务回滚 */ throw new Error('resident-restrict-failed')
-    }
-    // 4) 执行期 guard:拦 scope-local(如 `subagent`),restrict/allow 都动不到它们。
-    // one-shot 无挂载点,只挂常驻;guard 抛错不拦创建(拦不住也比建不起来强)。
-    try {
-      agentCtx.tools?.guard?.(scopedToolGuard)
-    } catch { /* guard 挂不上不拦创建 */ }
-  }
-  // 子会话血统:parent 层级 +1(ParentAgent 面无 header,取不到则按 0 算,不拦创建)。
-  const parentDepthRaw = (parent as { session?: { header?: { delegationDepth?: unknown } } })?.session?.header?.delegationDepth
-  const parentDepth = typeof parentDepthRaw === 'number' && Number.isSafeInteger(parentDepthRaw) && parentDepthRaw >= 0 ? parentDepthRaw : 0
-  const mkOne = async (role: 'builder' | 'challenger', route: { provider: string; model: string }): Promise<{ agent: ResidentAgent; dispose: () => Promise<void> }> => {
-    const handle = await agents.create({
-      sessionId: `debate-${debateId}-${role}`,
-      parentAgent: parent,
-      meta: {
-        cwd,
-        parentSession: parent.session.id,
-        isSeeded: false,
-        origin: 'subagent',
-        delegationDepth: parentDepth + 1,
-        ...(presetId !== null && presetId !== '' ? { agentPreset: presetId } : {}),
-      },
-      agentOptions: { provider: route.provider, model: route.model },
-      signal,
-      setup: setupFor(role),
-    })
-    return { agent: handle.agent as ResidentAgent, dispose: handle.dispose }
-  }
-  let bHandle: { agent: ResidentAgent; dispose: () => Promise<void> } | null = null
-  try {
-    bHandle = await mkOne('builder', builderRoute)
-    const cHandle = await mkOne('challenger', challengerRoute)
-    const b = bHandle.agent
-    const bDispose = bHandle.dispose
-    const cDispose = cHandle.dispose
-    const challenger = cHandle.agent
-    return {
-      builder: b,
-      challenger,
-      dispose: async () => {
-        // host 持有创建句柄的 dispose 能力:停轮→等静→unregister→拆 session→unwind scope 由 registry 负责。
-        const results = await Promise.allSettled([bDispose(), cDispose()])
-        const first = results.find((r) => r.status === 'rejected')
-        if (first?.status === 'rejected') throw first.reason
-      },
-    }
-  } catch (e) {
-    // 建对半路失败:已出的那方 dispose 回收,不留孤儿会话。
-    if (bHandle) {
-      try { await bHandle.dispose() } catch { /* 回收失败不掩盖原错 */ }
-    } else {
-      try { (null as unknown as ResidentAgent | null)?.cancel?.({ kind: 'user' }) } catch { /* 忽略 */ }
-    }
-    throw e
-  }
-}
-
-/** 常驻轮次尝试次数上限:provider 偶发内部错误时重投同一轮(同会话,记忆形状不变)。 */
-export const RESIDENT_TURN_ATTEMPTS = 3
-
-/**
- * provider/模型侧 error 才值得重投;超时、卡死、空输出、拒绝、外层中止重投只会再卡一次。
- * 判据是 driveResidentTurn 抛出的错误前缀(resident-<role>:error...)。
- */
-export function isRetriableTurnError(message: string): boolean {
-  return /^resident-(builder|challenger):error(\(|$)/.test(message)
-}
-
-/**
- * 交棒(handoff):把一段 prompt 投进常驻辩手 inbox,等 turn 跑完,取交棒结论。
- * provider 偶发 error 时重投(至多 RESIDENT_TURN_ATTEMPTS 次);超时/中止如实上抛。
- */
-export async function driveResidentTurn(
-  agent: ResidentAgent,
-  prompt: string,
-  role: 'builder' | 'challenger',
-  signal: AbortSignal,
-  onStream?: (preview: { kind: 'text' | 'tools'; text: string }) => void,
-  opts?: { pollMs?: number },
-): Promise<string> {
-  let lastErr: Error | null = null
-  for (let attempt = 1; attempt <= RESIDENT_TURN_ATTEMPTS; attempt++) {
-    if (signal.aborted) throw new Error('aborted')
-    try {
-      return await driveResidentOnce(agent, prompt, role, signal, onStream, opts?.pollMs)
-    } catch (e) {
-      lastErr = e instanceof Error ? e : new Error(String(e))
-      if (!isRetriableTurnError(lastErr.message) || signal.aborted) throw lastErr
-      if (attempt === RESIDENT_TURN_ATTEMPTS) {
-        throw new Error(`${lastErr.message.replace(/\)$/, '')},重投 ${RESIDENT_TURN_ATTEMPTS} 次仍失败)`)
-      }
-    }
-  }
-  throw lastErr ?? new Error(`resident-${role}:unknown`)
-}
-
-/** 单次交棒尝试:followup → 进度感知等待 → 读自有后缀 → 校验终止原因与交棒结论。 */
-async function driveResidentOnce(
-  agent: ResidentAgent,
-  prompt: string,
-  role: 'builder' | 'challenger',
-  signal: AbortSignal,
-  onStream?: (preview: { kind: 'text' | 'tools'; text: string }) => void,
-  pollMs: number = PROGRESS_POLL_MS,
-): Promise<string> {
-  if (signal.aborted) throw new Error('aborted')
-  const boundary = readResidentEvents(agent).length
-  agent.followup({
-    id: `debate-handoff-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
-    role: 'user',
-    content: [{ type: 'text', text: prompt }],
-    source: { kind: 'user' },
-  })
-  const startedAt = Date.now()
-  let seen = boundary
-  let lastProgressAt = startedAt
-  let lastStream = ''
-  // 文本优先,工具心跳兜底:读文件阶段 assistant 还没吐字时,面板至少能看到"🔧 tool/call ×3"。
-  const publish = (): void => {
-    if (!onStream) return
-    try {
-      const suffix = readResidentEvents(agent).slice(boundary)
-      const cur = extractHandoffConclusion(suffix) ?? ''
-      if (cur !== '' && cur !== lastStream) {
-        lastStream = cur
-        onStream({ kind: 'text', text: cur })
-        return
-      }
-      if (cur === '' && lastStream === '') {
-        const beat = heartbeatOf(suffix)
-        if (beat !== null && beat !== lastBeat) {
-          lastBeat = beat
-          onStream({ kind: 'tools', text: beat })
-        }
-      }
-    } catch { /* 流发布失败不影响等待 */ }
-  }
-  let lastBeat = ''
-  let timer: ReturnType<typeof setInterval> | null = null
-  let onAbort: (() => void) | null = null
-  try {
-    await new Promise<void>((resolve, reject) => {
-      let settled = false
-      const done = (fn: () => void): void => {
-        if (settled) return
-        settled = true
-        if (timer !== null) clearInterval(timer)
-        if (onAbort !== null) signal.removeEventListener('abort', onAbort)
-        fn()
-      }
-      // 进度感知超时:干活久不算错,卡住才算。事件计数在长就直接续期。
-      // 顺手发布流式累计文本:assistant/attempt 的 stream 增量即打字机数据源(面板 2s 轮询)。
-      timer = setInterval(() => {
-        const now = Date.now()
-        const count = readResidentEvents(agent).length
-        publish()
-        if (count > seen) {
-          seen = count
-          lastProgressAt = now
-          return
-        }
-        const verdict = turnVerdict(now - lastProgressAt, now - startedAt)
-        if (verdict === 'ok') return
-        try { agent.cancel?.({ kind: 'user' }) } catch { /* 忽略 */ }
-        const mins = Math.round((verdict === 'stalled' ? now - lastProgressAt : now - startedAt) / 60000)
-        const why = verdict === 'stalled' ? `stalled(${mins}min 无新事件,已中止)` : `timeout(${mins}min 硬顶,已中止)`
-        done(() => reject(new Error(`resident-${role}:${why}`)))
-      }, pollMs)
-      onAbort = () => {
-        try { agent.cancel?.({ kind: 'user' }) } catch { /* 忽略 */ }
-        done(() => reject(new Error('aborted')))
-      }
-      signal.addEventListener('abort', onAbort, { once: true });
-      (async () => {
-        try {
-          await agent.whenIdle()
-          done(() => resolve())
-        } catch (e) {
-          done(() => reject(e instanceof Error ? e : new Error(String(e))))
-        }
-      })()
-    })
-  } finally {
-    if (timer !== null) clearInterval(timer)
-    if (onAbort !== null) signal.removeEventListener('abort', onAbort)
-  }
-  if (signal.aborted) throw new Error('aborted')
-  // 短 turn 可能在第一个轮询 tick 前就跑完:结束时保底发布一次,调用方至少见过一次预览。
-  publish()
-  const suffix = readResidentEvents(agent).slice(boundary)
-  const stop = epochStopReason(suffix)
-  if (stop !== 'completed') {
-    if (signal.aborted) throw new Error('aborted')
-    const detail = epochStopDetail(suffix)
-    throw new Error(`resident-${role}:${stop}${detail !== '' ? `(${detail})` : ''}`)
-  }
-  const text = extractHandoffConclusion(suffix)
-  if (text === null || text.trim() === '') throw new Error(`resident-${role}:empty-output`)
-  return text
-}
+/** 常驻辩手建对 + 交棒驱动。(已迁 host/resident,重导出见顶。) */
 
 /** 取自动判断(未 resolve 抛错)。 */
 function requireAuto(session: DebateSession): NonNullable<DebateConfig['auto']> {

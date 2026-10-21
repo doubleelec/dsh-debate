@@ -1,0 +1,28 @@
+# src/host/module.toml
+# Host internal modules: shared agent faces (types), tool cage (cage),
+# resident pair + handoff drive (resident). S27 P0 extraction from index.ts.
+# Peer governance under src/: host/* are internal seams of the host layer,
+# imported by src/index.ts (single tsdown entry) and directly by vitest.
+# TS sources are not counted by vendored orphan checks (only .py/.ps1 + dirs),
+# so submodules stays empty; TS files are documented in architecture.md §4.2.
+
+[module]
+name = "src/host"
+description = "Host internals: cage, resident handoff, shared agent faces. No routes."
+submodules = []
+require_invariants = true
+
+[public_api]
+exposed = []
+reason = "No facade: src/index.ts re-exports host symbols for compat; tests import host/* directly."
+
+# Semantic red lines for the host internals (S27: extracted from index.ts).
+[[invariant.cage.rules]]
+id = "HOST-01"
+desc = "Tool cage lives in host/cage (allow lists, resolve, guard, ask); index.ts only re-exports."
+test_ref = "tests/src/host/test_invariants.py::test_host_cage_lives_in_cage"
+
+[[invariant.resident.rules]]
+id = "HOST-02"
+desc = "Resident pair + handoff drive live in host/resident; index.ts only re-exports."
+test_ref = "tests/src/host/test_invariants.py::test_host_resident_lives_in_resident"

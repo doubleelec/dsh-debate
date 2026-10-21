@@ -44,7 +44,9 @@ import {
   type DebateRound,
   type TranscriptEntry,
 } from '../../src/debate/debate'
-import { normalizeConfig, extractModelEcho, isRouteIneffective, resolveAuto, settledDefsOf, settledItemsOfSession, stepOpen, stepRound, stepSynthesize, sessions, extractHandoffConclusion, heartbeatOf, epochStopReason, epochStopDetail, stepOpenResident, stepRoundResident, stepOpenSingle, stepRoundSingle, buildDebateForkSeed, createSingleThread, turnVerdict, isRetriableTurnError, recordRoundAndJudge, driveResidentTurn, createResidentPair, toolAllowFor, resolveToolAllow, cageLabel, visibleNamesOf, scopedToolGuard, interruptMarkOf, parentBusyOf, interruptPlanOf, DEBATER_TOOL_ALLOW, SYNTH_TOOL_ALLOW, STEP_STALL_MS, STEP_HARD_CAP_MS } from '../../src/index'
+import { normalizeConfig, extractModelEcho, isRouteIneffective, resolveAuto, settledDefsOf, settledItemsOfSession, stepOpen, stepRound, stepSynthesize, sessions, stepOpenResident, stepRoundResident, stepOpenSingle, stepRoundSingle, buildDebateForkSeed, createSingleThread, recordRoundAndJudge, interruptMarkOf, parentBusyOf, interruptPlanOf } from '../../src/index'
+import { toolAllowFor, resolveToolAllow, cageLabel, visibleNamesOf, scopedToolGuard, turnVerdict, DEBATER_TOOL_ALLOW, SYNTH_TOOL_ALLOW, STEP_STALL_MS, STEP_HARD_CAP_MS } from '../../src/host/cage'
+import { extractHandoffConclusion, heartbeatOf, epochStopReason, epochStopDetail, isRetriableTurnError, driveResidentTurn, createResidentPair } from '../../src/host/resident'
 import { settledItemsOf } from '../../src/debate/debate'
 import { defaultLensIds, findLens, LENS_TEMPLATES } from '../../src/debate/lenses'
 import { splitSections } from '../../src/client/sections'
