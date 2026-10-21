@@ -84,10 +84,13 @@ flowchart TD
 - **Model/Diagram**:
 
 ```mermaid
+%%{init: {"flowchart": {"rankSpacing": 12, "nodeSpacing": 18}}}%%
 flowchart TD
     subgraph Entry["入口层"]
-        direction LR
-        entry["Composer 输入框<br/>增强入口<br/>(用户意图 辩论 任务二选一)"]
+        direction TB
+        composer["Composer 输入框<br/>(用户意图)"]
+        menu["增强入口<br/>(辩论 任务二选一)"]
+        composer --> menu
     end
     subgraph Face["交互层"]
         direction LR
@@ -100,28 +103,37 @@ flowchart TD
         taskSvc["任务服务<br/>(扫描 构建 拉起 汇总)"]
     end
     subgraph Carry["载体层"]
-        direction LR
+        direction TB
         fork["分叉会话<br/>(默认)"]
-        oneshot["一次会话<br/>(制图恒用)"]
+        resident["常驻会话对<br/>(回退一)"]
+        oneshot["一次会话<br/>(回退二 制图恒用)"]
         taskGroup["执行会话群<br/>(一仓一会话)"]
     end
     subgraph Keep["留存层"]
-        direction LR
-        keep["进行记录<br/>结论文档<br/>(KV 可续跑 论证地图)"]
+        direction TB
+        kv["进行记录<br/>(KV 可续跑)"]
+        docs["结论文档<br/>(论证地图 任务回信)"]
+        kv --> docs
     end
 
-    entry --> debateUI
-    entry --> taskUI
+    menu --> debateUI
+    menu --> taskUI
     debateUI --> debateSvc
     taskUI --> taskSvc
     debateSvc --> fork
+    fork -.->|建对失败降级| resident
+    resident -.->|再失败降级| oneshot
     debateSvc --> oneshot
     taskSvc --> taskGroup
-    debateSvc --> keep
-    taskSvc --> keep
-```
+    debateSvc --> kv
+    taskSvc --> kv
 
-- **Fallback（次要语义，不进图）**: 分叉会话建对失败降级常驻会话对，再失败降级一次会话（制图恒用一次会话）。
+    subgraph Legend["Legend"]
+        direction LR
+        L1["solid = 调用"]
+        L2["dashed = 降级"]
+    end
+```
 
 - **Elements (debate)**:
   - `src/index.ts` 宿主侧分三层（`mode` 三态，默认单线）+ `src/host/` 内聚两件（S27 摘出，index 重导出兼容旧面）：
