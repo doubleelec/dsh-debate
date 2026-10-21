@@ -642,7 +642,7 @@ function lastUserText(events: { type: string; data?: unknown }[]): string {
     const ev = events[i]
     if (ev.type !== 'user/message') continue
     const t = looseText(ev.data).trim()
-    if (t === '' || /^(?:思辨单|⚔\s*思辨|思辨开题|交锋第|成果地图)/.test(t) || /^(?:(?:那请)?继续(?:处理|吧)?|好|好的|收到|嗯|明白|了解|确认|ok|okay)(?:[，,、\s]*(?:(?:我)?(?:继续(?:处理|吧)?|处理)|收到|好的?))*[。！!，,\s]*$/i.test(t)) continue
+    if (t === '' || /^(?:辩论单|⚔\s*辩论|辩论开题|交锋第|成果地图)/.test(t) || /^(?:(?:那请)?继续(?:处理|吧)?|好|好的|收到|嗯|明白|了解|确认|ok|okay)(?:[，,、\s]*(?:(?:我)?(?:继续(?:处理|吧)?|处理)|收到|好的?))*[。！!，,\s]*$/i.test(t)) continue
     return t
   }
   return ''
@@ -1006,7 +1006,7 @@ export async function runHostDebate(
     const autoEvents = historyEvents.length > 0 ? historyEvents : parentEvents
     session.config.auto = resolveAuto(autoEvents, hint)
     const auto = session.config.auto
-    if (auto.question === '') throw new Error('empty-question:输入框没有问题,先写下要辩的问题再点开始')
+    if (auto.question === '') throw new Error('empty-question:输入框没有问题,先写下要辩论的问题再点开始')
     // 秒级直播:建单→自动判断完成即有进度,不用等第一个模型输出。
     setProgress(session, `已启动:「${auto.question}」(建构 ${session.config.builder.model} vs 挑战 ${session.config.challenger.model},共 ${session.config.maxRounds} 轮)。建构者开写中…`)
     mirror(parent, session, `⚔ 辩论开始:「${auto.question}」(建构 ${session.config.builder.model} vs 挑战 ${session.config.challenger.model},共 ${session.config.maxRounds} 轮,制图 ${session.config.synthesizer.model})。开题马上到,进度同步见面板。`)
@@ -1680,7 +1680,7 @@ export function isRouteIneffective(
 }
 
 /**
- * 跑完整思辨循环(仅供单测:一次跑完开题+交锋+制图)。
+ * 跑完整辩论循环(仅供单测:一次跑完开题+交锋+制图)。
  * 通过 ctx 上的 subagents 起 one-shot 子 agent,agentOptions 锁定模型。
  * 停机与 host 直驱同源:每轮 recordRoundAndJudge,convergence/saturation 即停,不跑满。
  */

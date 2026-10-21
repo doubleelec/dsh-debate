@@ -233,12 +233,12 @@ describe('extractSessionContext', () => {
   it('提取最近 user/assistant 文本,跳过面板镜像残留', () => {
     const events = [
       { type: 'user/message', data: { message: { content: 'Redis 压测过了,扛不住' } } },
-      { type: 'user/message', data: { message: { content: '思辨开题:执行思辨单 x' } } },
+      { type: 'user/message', data: { message: { content: '辩论开题:执行辩论单 x' } } },
       { type: 'assistant/message', data: { message: { content: '收到' } } },
     ]
     const ctx = extractSessionContext(events)
     expect(ctx).toContain('Redis 压测过了')
-    expect(ctx).not.toContain('思辨开题')
+    expect(ctx).not.toContain('辩论开题')
   })
   it('较早的任务背景不应因最近 10 条确认消息而丢失', () => {
     const events = [
@@ -295,12 +295,12 @@ describe('resolveAuto', () => {
     expect(auto?.questionType).toBe('review')
   })
   it('hint 是承接语则视为无 hint,回落到真正的用户问题', () => {
-    // 线上实测:用户在输入框随手写"就以上问题继续思辨",hint 直接当问题,
-    // 整局问题/文件名/结论全跟着错(文件名"就以上问题继续思辨",内容看不出在谈管理架构)。
+    // 线上实测:用户在输入框随手写"就以上问题继续辩论",hint 直接当问题,
+    // 整局问题/文件名/结论全跟着错(文件名"就以上问题继续辩论",内容看不出在谈管理架构)。
     const events = [
       { type: 'user/message', data: { content: '怎样的管理架构更适合 agent 编程' } },
     ]
-    for (const h of ['就以上问题继续思辨', '针对上面的问题继续', '接着刚才的再谈一轮', '以上,继续']) {
+    for (const h of ['就以上问题继续辩论', '针对上面的问题继续', '接着刚才的再谈一轮', '以上,继续']) {
       const auto = resolveAuto(events, h)
       expect(auto?.question).toBe('怎样的管理架构更适合 agent 编程')
     }

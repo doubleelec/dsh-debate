@@ -1,8 +1,8 @@
 /**
  * dsh-session-enhance — Client 半区。
  *
- * 只用按钮,不用命令:输入框 input.right「✦ 增强」菜单(思辨/多仓任务二选一)+
- * shell.overlay 浮层对话框(思辨 Dialog:三模型+轮数,问题/题型/lens 自动判断;任务 TaskDialog 三步)。
+ * 只用按钮,不用命令:输入框 input.right「✦ 增强」菜单(辩论/多仓任务二选一)+
+ * shell.overlay 浮层对话框(辩论 Dialog:三模型+轮数,问题/题型/lens 自动判断;任务 TaskDialog 三步)。
  * 建单走 /dsh-session-enhance/api/start,轮询 /dsh-session-enhance/api/state 取实况。
  * 执行由 host 后台直驱完成(ADR-0011,面板点开始即跑,不发触发语)。
  */
@@ -47,7 +47,7 @@ async function api<T = unknown>(method: string, payload: Record<string, unknown>
 const NS = 'dsh-session-enhance'
 const DICTS: Record<string, Record<string, string>> = {
   zh: {
-    'panel.title': '开放思辨', 'tip': '为开放性问题跑建构 / 挑战 / 制图,产出成果地图',
+    'panel.title': '开放辩论', 'tip': '为开放性问题跑建构 / 挑战 / 制图,产出成果地图',
     'auto.note': '问题、题型、视角、背景自动从当前会话提取,不用填。',
     'auto.question': '问题:', 'auto.type': '题型:', 'auto.lensesUnit': ' 个视角', 'auto.ctx': '背景 ', 'auto.charsUnit': ' 字',
     'type.selection': '选型 / 方案比较', 'type.review': '评审 / 对照验证',
@@ -587,7 +587,7 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
       if (!r.ok || !r.id) { setError(r.error ?? 'start failed'); return }
       try { clearDraftOnStart?.() } catch { /* 忽略 */ }
       prefillQuestion = ''
-      // 建单成功即最小化:思辨是后台长任务,面板缩成右下角胶囊(带 running 绿点),
+      // 建单成功即最小化:辩论是后台长任务,面板缩成右下角胶囊(带 running 绿点),
       // 进度走对话区 mirror + 胶囊点回。用户点 ✕ 是关面板,点 — 是最小化,开始即后者。
       setMinimized(true)
       // 建单的 id 自己知道,直接跟局看实况(轮询 transcript 即时追加,自动滚到底)。
@@ -1421,7 +1421,7 @@ export function apply(ctx: CtxLike): void {
       name: 'conversation.input.right',
       id: 'enhance-entry',
       order: 100,
-      label: () => '✦ 增强(思辨/多仓任务)',
+      label: () => '✦ 增强(辩论/多仓任务)',
       // 增强菜单(ADR-0025):不再独占叫"辩论",两项走 overlay 面板显式按钮。
       // Session scope invokes this with the current session ID. The slot's
       // renderSlot call intentionally has no owner props, so props.sessionId

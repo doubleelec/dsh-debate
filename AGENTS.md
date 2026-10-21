@@ -1,6 +1,6 @@
 # dsh-session-enhance
 
-开放思辨 Map：面向开放性论证题，用建构 / 挑战 / 制图三角色产出一套成果地图，而非单一结论。
+开放辩论 Map：面向开放性论证题，用建构 / 挑战 / 制图三角色产出一套成果地图，而非单一结论。
 
 ## Commit messages
 
@@ -24,4 +24,4 @@ Throwaway artifacts go in `.tmp/` (gitignored; any session may clear it without 
 
 ### Domain docs
 
-Single-context layout (`CONTEXT.md` + `docs/adr/`). See `docs/agents/domain.md`.
+Single-context glossary (`GLOSSARY.md` + `docs/adr/`).

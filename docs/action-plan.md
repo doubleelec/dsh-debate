@@ -1,14 +1,14 @@
 # dsh-session-enhance Action Plan
 
 > Resume point: Wave 6 - in flight: none - blocked: none
-> S21 落定——`architecture.md` 正名为全工程唯一架构（双功能：思辨 §4.4a + 任务 §4.4b）；`debate-design.md` 收敛为辩论 v0.1 冻结草稿；CONTEXT 补多仓任务五词；README 重写双功能。
+> S21 落定——`architecture.md` 正名为全工程唯一架构（双功能：辩论 §4.4a + 任务 §4.4b）；`debate-design.md` 收敛为辩论 v0.1 冻结草稿；CONTEXT 补多仓任务五词；README 重写双功能。
 > v0.14.0 全量更名（`dsh-debate` → `dsh-session-enhance`，不兼容旧路由/KV/报告路径）+ 去模型工具（人工操作插件，不再注册旧 `debate_*`/`task_*` 工具名）。
 > S20 落定：测试单目录 + 占位换活门 + 文档补齐，双绿 + ALL CLEAR。
 > 单线分叉后一局只产 1 个分叉会话文件（+N×3 个 one-shot 落盘，宿主行为改不了），结束扫掉只留结论文档；用户主会话零污染（转述+摘要才进对话区）。
 > 待线上真跑一局复验：fork→交替→扫盘全链（面板看 `mode:single`）+ 版本号 bump（0.13.0→0.14.0，新功能 minor）。
 > **迁到 v0.5.0 必须先重启宿主进程**：`lib/index.js` 只在宿主启动时加载。准确说不是 DSH 没有热重载，而是本 profile 没开**模块监听**（`dsh-base` 里 `hmr` 的 `root: []`，注释"module roots are opt-in"；ADR-0018 同日更正）。
 > 重启前面板徽标显示 `v?` + 告警（旧宿主没有 `/api/version`，实测 POST 返回 405），这是设计行为不是故障。
-> 重启后徽标应显示 `v0.5.0` 且无告警；随后跑一局真思辨复验两件事：S7（(a) 轮数是否真的下降、(b) 挑战者是否守约输出 `待决清单=` 行、(c) 对话区字数与收尾陈述是否可读）与 S9（(d) `<工作区>/docs/session-enhance/` 下是否真出现结论文档、(e) 再重启一次后粘旧 id 是否仍能取到结论与全文）。
+> 重启后徽标应显示 `v0.5.0` 且无告警；随后跑一局真辩论复验两件事：S7（(a) 轮数是否真的下降、(b) 挑战者是否守约输出 `待决清单=` 行、(c) 对话区字数与收尾陈述是否可读）与 S9（(d) `<工作区>/docs/session-enhance/` 下是否真出现结论文档、(e) 再重启一次后粘旧 id 是否仍能取到结论与全文）。
 > 沙箱里 `npm test` 起不来（Vite 解析配置 `exec("net use")` → `spawn EPERM`），用 `npm run test:sandbox`：它编译并执行**同一份**测试文件，垫片遇到未实现的 matcher 会抛错而非静默通过。
 
 ## Waves

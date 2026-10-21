@@ -15,7 +15,7 @@ Post-v0.1 changes are tracked in the S0~S27 progress table in `docs/action-plan.
 
 ## Domain docs
 
-- `CONTEXT.md`: glossary (authoritative, includes cross-repo task vocabulary; kept in Chinese as the domain language)
+- `GLOSSARY.md`:术语表（以此为准，含多仓任务词汇）
 - `docs/adr/`: 26 settled decisions (deliberation 0001~0024 + task merge 0025 + task panel autofill with preview-as-confirm 0026)
 - `docs/architecture.md`: the single architecture description for the whole project (both functions)
 - `docs/agents/`: engineering skill conventions (issue tracker / domain)
