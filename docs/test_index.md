@@ -47,6 +47,7 @@ One row per test function in each `tests/<module>/test_invariants.py`. Placehold
 | `test_invariants.py::test_src_peer_symmetry` | src debate/ vs task/ peer symmetry (S22, S27: host/ joins) | a peer dir loses module.toml, flat leftovers return, or wiring leaks into peers |
 | `test_invariants.py::test_client_pure_surface_exists` | src/client pure modules keep entry points | an exported pure function disappears |
 | `test_invariants.py::test_client_task_dialog_wired` | src/client TaskDialog wired to task calls | dialog or a task/* call disappears |
+| `test_invariants.py::test_client_task_dialog_takes_sessions` | src/client TaskDialog takes useSessions like DebateDialog (ADR-0026 fix) | the useSessions prop threading is lost in a merge |
 | `test_invariants.py::test_client_no_send_key_intercept` | src/client send key stays unwired (ADR-0025) | panel code touches `inputActions`/`actions` beyond `setDraft` |
 | `test_invariants.py::test_debate_pure_surface_exists` | src/debate pure modules keep entry points (S22) | an exported pure function disappears |
 | `test_invariants.py::test_debate_vitest_mirrors_exist` | src/debate every module keeps vitest mirror (S22) | a deliberation vitest file is missing |

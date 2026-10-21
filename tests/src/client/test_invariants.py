@@ -40,6 +40,21 @@ def test_client_task_dialog_wired():
         assert call in src, f"panel missing client call {call}"
 
 
+def test_client_task_dialog_takes_sessions():
+    """TaskDialog receives useSessions like DebateDialog (cwd snapshot, ADR-0026 fix).
+
+    Regression guard: the prop threading was once lost in a merge, silently
+    reverting TaskDialog to service-line-only cwd (empty in some hosts).
+    """
+    src = _read(PANEL)
+    assert "function TaskDialog(props: { onClose: () => void; useSessions?" in src, (
+        "TaskDialog must accept useSessions prop"
+    )
+    assert "<TaskDialog onClose=" in src and "useSessions={props.useSessions}" in src, (
+        "DebateRoot must pass useSessions to TaskDialog"
+    )
+
+
 def test_client_no_send_key_intercept():
     """Native send key stays unwired (ADR-0025): only setDraft may be touched."""
     code = _read(PANEL)

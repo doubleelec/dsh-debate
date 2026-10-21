@@ -1018,7 +1018,7 @@ function DebateRoot(props: { useSessions?: (s: unknown) => unknown }): React.Rea
   return (
     <>
       {open && <DebateDialog onClose={() => setPanelOpen(false)} useSessions={props.useSessions} />}
-      {taskOpen && <TaskDialog onClose={() => setTaskPanelOpen(false)} />}
+      {taskOpen && <TaskDialog onClose={() => setTaskPanelOpen(false)} useSessions={props.useSessions} />}
     </>
   )
 }
@@ -1123,10 +1123,19 @@ interface TaskRepo {
  * - 原生发送键不可拦截:任务启动必须点面板里的「建任务并拉起执行会话」。
  * - 草稿不收走:任务标题走面板表单,草稿留给用户自己发。
  */
-function TaskDialog(props: { onClose: () => void }): React.ReactNode {
+function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => unknown }): React.ReactNode {
   const prefs = loadTaskPrefs()
+  // cwd 三路(与 DebateDialog 同口径):useSessions 快照优先,sessionCwd 服务线次之,都不通才空。
+  let liveCwd: string | null = sessionCwd
+  try {
+    const snap = props.useSessions ? (props.useSessions((s: unknown) => s) as { current?: unknown; byId?: Record<string, { cwd?: unknown }> }) : undefined
+    if (typeof snap?.current === 'string' && snap.current !== '') {
+      const cur = snap.byId?.[snap.current]
+      if (typeof cur?.cwd === 'string' && cur.cwd !== '') liveCwd = cur.cwd
+    }
+  } catch { /* store 不可用时用服务线缓存 */ }
   // 父目录默认只用当前会话 cwd(用户拍板):偏好里的旧值跨工程会串台,直接忽略。
-  const [parentRoot, setParentRoot] = useState(defaultParentRoot(sessionCwd))
+  const [parentRoot, setParentRoot] = useState(defaultParentRoot(liveCwd))
   const [repos, setRepos] = useState<TaskRepo[] | null>(null)
   const [checked, setChecked] = useState<string[]>([])
   const [lead, setLead] = useState('')
@@ -1169,12 +1178,12 @@ function TaskDialog(props: { onClose: () => void }): React.ReactNode {
     }
   }
 
-  // 打开面板即扫一次:父目录=当前会话 cwd,无需点按钮。
+  // 打开面板即扫一次:父目录=当前会话 cwd(首扫用 liveCwd 快照,不等服务线),无需点按钮。
   const autoScanned = useRef(false)
   useEffect(() => {
     if (autoScanned.current) return
     autoScanned.current = true
-    void scan(defaultParentRoot(sessionCwd))
+    void scan(defaultParentRoot(liveCwd))
   }, [])
 
   const build = async (): Promise<void> => {
