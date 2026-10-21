@@ -96,16 +96,18 @@ flowchart TD
         direction LR
         debateUI["辩论面板<br/>(开题 轮次 成果)"]
         taskUI["任务面板<br/>(扫描 构建 拉起 汇总)"]
+        debateUI ~~~ taskUI
     end
     subgraph Service["服务层"]
         direction LR
         debateSvc["辩论服务<br/>(建构 挑战 制图)"]
         taskSvc["任务服务<br/>(扫描 构建 拉起 汇总)"]
+        debateSvc ~~~ taskSvc
     end
     subgraph Carry["载体层"]
         direction TB
         subgraph FallbackChain["回退链"]
-            direction LR
+            direction TB
             fork["分叉会话<br/>(默认)"]
             resident["常驻会话对<br/>(回退一)"]
             oneshot["一次会话<br/>(回退二 制图恒用)"]
