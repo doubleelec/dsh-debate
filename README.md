@@ -12,7 +12,7 @@
 ## 状态
 
 v0.14.0：全量更名（`dsh-debate` → `dsh-session-enhance`，不兼容旧路由/KV/报告路径）+ 去模型工具（人工操作插件，不再注册旧 `debate_*`/`task_*` 工具名）。单线分叉默认（ADR-0024）+ 任务并入（ADR-0025）。完整循环按 `docs/architecture.md` 推进。
-v0.1 spec 之后的变化见 `docs/efforts/debate-v01/spec.md` 末节「Post-v0.1 Changes」（入口/轮数/裁判/直驱/互盲/路由/地图形状均有 ADR 指路）。
+v0.1 spec 之后的变化见 `docs/action-plan.md` 的 S0~S27 进度表（入口/轮数/裁判/直驱/互盲/路由/地图形状均有 ADR 指路；原 `docs/efforts/debate-v01/` 已按约定在发布后删除，记录由 git 历史保留）。
 
 ## 领域文档
 
