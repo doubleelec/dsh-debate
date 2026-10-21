@@ -87,7 +87,7 @@ flowchart TD
 %%{init: {"flowchart": {"rankSpacing": 24, "nodeSpacing": 24, "htmlLabels": true, "useMaxWidth": false}}}%%
 flowchart TD
     %% 子图内横排走 TB + 无边同 rank（天然横排，零隐形边）；
-    %% LR 对无边叶子是竖排倾向（与直觉相反），见 ai_proxy docs/issues/084 机理。
+    %% LR 对无边叶子是竖排倾向（与直觉相反），背景见 md-diagram §1.4。
     subgraph Entry["入口层"]
         direction TB
         composer["Composer 输入框"]
