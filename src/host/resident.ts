@@ -9,7 +9,7 @@ import type { Context } from 'cordis'
 import type {
   AgentPresetsLike, AgentsLike, ParentAgent, ResidentAgent, ResidentPair, ResidentSetupCtx,
 } from './types'
-import { cageLabel, resolveToolAllow, scopedToolGuard, toolAllowFor, visibleNamesOf } from './cage'
+import { cageLabel, resolveToolAllow, scopedToolGuard, textOf, toolAllowFor, visibleNamesOf } from './cage'
 import { PROGRESS_POLL_MS, STEP_HARD_CAP_MS, STEP_STALL_MS, turnVerdict } from './cage'
 
 /** 常驻辩手轮次尝试次数上限:provider 偶发内部错误时重投同一轮(同会话,记忆形状不变)。 */
@@ -60,18 +60,8 @@ export function heartbeatOf(suffix: readonly { type: string; data?: any }[]): st
   return `🔧 ${lastTool} ×${count}`
 }
 
-/** 文本块数组取文本(交棒结论提取用,与 cage.textOf 同源但容忍 any)。 */
-function blocksText(blocks: unknown): string {
-  if (!Array.isArray(blocks)) return ''
-  const parts: string[] = []
-  for (const b of blocks) {
-    if (b !== null && typeof b === 'object' && (b as { type?: unknown }).type === 'text') {
-      const t = (b as { text?: unknown }).text
-      if (typeof t === 'string') parts.push(t)
-    }
-  }
-  return parts.join('\n').trim()
-}
+/** 文本块数组取文本(交棒结论提取用,与 cage.textOf 同源,复用 cage 实现)。 */
+const blocksText = textOf
 
 /** durable stream 记录取文本(照抄 dsh-llm joinAssistantStreamText 的两条分支)。 */
 function streamText(stream: unknown): string {

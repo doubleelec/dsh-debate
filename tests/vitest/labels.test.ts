@@ -28,7 +28,8 @@ describe('roleName', () => {
   })
 
   it('passes unknown roles through instead of crashing', () => {
-    expect(roleName('judge', tr)).toBe('judge')
+    // 'judge' 已移除(无生产者),回落分支用任意未知 role 覆盖。
+    expect(roleName('mystery-role', tr)).toBe('mystery-role')
   })
 })
 

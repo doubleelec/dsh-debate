@@ -1,10 +1,10 @@
 /**
- * dsh-debate — Client 半区(v0.1)。
+ * dsh-debate — Client 半区。
  *
- * 只用按钮,不用命令:会话 header 胶囊按钮 + 输入框 dock 小按钮,点开同一个
- * shell.overlay 全配置对话框(问题/题型/lens/双模型/轮数/裁判),一目了然。
+ * 只用按钮,不用命令:输入框 input.right「✦ 增强」菜单(辩论/多仓任务二选一)+
+ * shell.overlay 浮层对话框(辩论 Dialog:三模型+轮数,问题/题型/lens 自动判断;任务 TaskDialog 三步)。
  * 建单走 /dsh-debate/api/start,轮询 /dsh-debate/api/state 取实况。
- * 执行由模型调 debate_run 工具完成(面板提示用户发一句话触发)。
+ * 执行由 host 后台直驱完成(ADR-0011,面板点开始即跑,不发触发语)。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import styles from './panel.module.css'

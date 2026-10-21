@@ -77,8 +77,9 @@ export function scopedToolGuard(execution: { name: string }): string | undefined
   return undefined
 }
 
-/** 文本块提取:子 agent 输出的 assistant 文本。 */
-export function textOf(blocks: TextContentBlock[]): string {
+/** 文本块提取:子 agent 输出的 assistant 文本。容忍 unknown(交棒结论提取与 ask 结果共用)。 */
+export function textOf(blocks: Array<{ type?: unknown; text?: unknown }> | unknown): string {
+  if (!Array.isArray(blocks)) return ''
   const parts: string[] = []
   for (const b of blocks) {
     if (b !== null && typeof b === 'object' && (b as { type?: unknown }).type === 'text') {

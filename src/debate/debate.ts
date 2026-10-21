@@ -893,22 +893,25 @@ function isDebateContextNoise(text: string): boolean {
   return /^(?:(?:那请)?继续(?:处理|吧)?|好|好的|收到|嗯|明白|了解|确认|ok|okay)(?:[，,、\s]*(?:(?:我)?(?:继续(?:处理|吧)?|处理)|收到|好的?))*[。！!，,\s]*$/i.test(t)
 }
 
-/** transcript 条目。 */
+/** transcript 条目。role 只有三生产者 + system(裁判已移除,无 'judge' 生产者,不留死取值)。 */
 export interface TranscriptEntry {
   seq: number
-  role: 'builder' | 'challenger' | 'synthesizer' | 'judge' | 'system'
+  role: 'builder' | 'challenger' | 'synthesizer' | 'system'
   round: number
   text: string
 }
 
-/** 成果地图五件套(ADR-0001)。 */
+/**
+ * 成果地图五件套(ADR-0001)。
+ * v0.1 只产 markdown 文本:mapText 是真产物;结构化字段暂不解析,stepSynthesize 返 null 占位,
+ * 不返"lenses 仅名 + 四表全空"的空壳(空壳冒充解析结果)。
+ */
 export interface DebateMap {
   lenses: Array<{ name: string; claim: string }>
   arguments: Array<{ claim: string; reasons: string[]; counterExamples: string[]; confidence: number }>
   grounding: Array<{ statement: string; kind: ClaimKind; status: ClaimStatus; source?: string }>
   disputes: Array<{ topic: string; agreed: boolean; kind: 'fact' | 'value' | null; detail: string }>
   gaps: Array<{ missing: string; howToFill: string }>
-  verdict?: { opinion: string; reasons: string[] }
 }
 
 export function buildBuilderPrompt(question: string, lenses: LensTemplate[], questionType: QuestionType, context = ''): string {

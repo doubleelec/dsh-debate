@@ -1635,7 +1635,8 @@ export async function stepRound(
 }
 
 /**
- * 第三步:制图(独立调用,只读实录)。返回制图原文与空地图壳(调用方负责进会话)。
+ * 第三步:制图(独立调用,只读实录)。返回制图原文;结构化地图暂不解析,map 返 null 占位
+ * (v0.1 只产 markdown 文本,不返"四表全空"的空壳冒充解析结果)。
  */
 export async function stepSynthesize(
   subagents: SubagentsLike,
@@ -1643,23 +1644,17 @@ export async function stepSynthesize(
   session: DebateSession,
   signal: AbortSignal,
   live?: StepLive,
-): Promise<{ mapText: string; map: DebateMap }> {
+): Promise<{ mapText: string; map: DebateMap | null }> {
   const cfg = session.config
   const auto = requireAuto(session)
   live?.onStart?.('synthesizer')
   const mapText = await askSubagent(subagents, parent, session.id, 'synthesizer', buildSynthesizerPrompt(auto.question, renderTranscriptForSynthesizer(session.transcript), auto.questionType), cfg.synthesizer, signal)
   pushEntry(session, 'synthesizer', cfg.maxRounds + 1, mapText)
   live?.onSide?.('synthesizer', mapText)
-  const map: DebateMap = {
-    lenses: lensObjsOf(session).map((l) => ({ name: l.name, claim: '' })),
-    arguments: [],
-    grounding: [],
-    disputes: [],
-    gaps: [],
-  }
-  session.map = map
+  // 结构化地图暂不解析:v0.1 只产 markdown 文本,map 置 null(不返空壳)。
+  session.map = null
   session.mapText = mapText
-  return { mapText, map }
+  return { mapText, map: null }
 }
 
 /** 从开题输出里提取 MODEL: 回显行,用于防呆(路由未生效则停)。 */
@@ -1690,21 +1685,32 @@ export function isRouteIneffective(
  * 通过 ctx 上的 subagents 起 one-shot 子 agent,agentOptions 锁定模型。
  * v0.2:仅供单测/兼容, panel 链路由 debate_open/challenge/synthesize 三工具分步驱动,
  * 每步结果自然进会话(动态显示),面板照常轮询。
+ * 停机与 host 直驱同源:每轮 recordRoundAndJudge,convergence/saturation 即停,不跑满。
  */
 export async function runDebateLoop(
   subagents: SubagentsLike,
   parent: ParentAgent,
   session: DebateSession,
   signal: AbortSignal,
-): Promise<DebateMap> {
+): Promise<string> {
   await stepOpen(subagents, parent, session, signal)
   const max = session.config.maxRounds
   for (let r = 1; r <= max; r++) {
     if (signal.aborted) throw new Error('aborted')
-    await stepRound(subagents, parent, session, signal)
+    const { builderOut, challengerOut, builderRelayChars } = await stepRound(subagents, parent, session, signal)
+    const verdict = recordRoundAndJudge(session, r, builderOut, challengerOut, builderRelayChars)
+    if (verdict === 'convergence') {
+      session.stopReason = 'convergence'
+      break
+    }
+    if (verdict === 'saturation') {
+      session.stopReason = 'saturation'
+      break
+    }
+    if (r >= max) session.stopReason = 'maxRounds'
   }
-  const { map } = await stepSynthesize(subagents, parent, session, signal)
-  return map
+  const { mapText } = await stepSynthesize(subagents, parent, session, signal)
+  return mapText
 }
 
 export default {
@@ -2565,10 +2571,13 @@ export default {
             const a = (args ?? {}) as { hint?: unknown }
             const auto = resolveAuto(readEvents(parent), typeof a.hint === 'string' ? a.hint : '')
             session.config.auto = auto
-            await runDebateLoop(subagents, parent, session, exec.signal)
+            const mapText = await runDebateLoop(subagents, parent, session, exec.signal)
             session.status = 'done'
             session.updatedAt = Date.now()
-            return `## 成果地图(兼容单步)\n\n问题:${auto.question}\n\n${session.mapText ?? ''}`
+            const stopNote = session.stopReason === 'convergence' ? '(共识收敛,提前停机)'
+              : session.stopReason === 'saturation' ? '(覆盖饱和,提前停机)'
+              : session.stopReason === 'maxRounds' ? `(跑满 ${session.config.maxRounds} 轮)` : ''
+            return `## 成果地图(兼容单步)${stopNote}\n\n问题:${auto.question}\n\n${mapText}`
           } catch (err) {
             fail(session, err)
           }

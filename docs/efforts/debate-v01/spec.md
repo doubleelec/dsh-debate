@@ -66,3 +66,16 @@ Status: ready-for-agent
 
 - 设计草稿见 docs/debate-design.md；CONTEXT.md 与 ADR 为权威来源，冲突时以后者为准。
 - 本 effort 目录在插件发布后按约定删除，记录由 git 历史保留。
+
+## Post-v0.1 Changes（v0.1 之后的变化，spec 文本不再改，只指路）
+
+v0.1 spec 是架子起点；以下偏离均有 ADR/波次授权，不算 creep（code-review Spec 轴终审 ea26743）：
+
+- 入口：header 胶囊摘除，仅剩 input.right「✦ 增强」菜单（常亮，无草稿也开面板）→ ADR-0025。
+- 对话框：无题型/lens 手动开关，仅三模型 + 轮数 + auto 回显 → Solution「只留三模型与轮数」+ ADR-0008。
+- 轮数：1~10 → 1~20（MAX_ROUNDS_CAP=20，钳制留痕）→ S12/B17。
+- 裁判：judgeEnabled 从 interface 移除（死配置），面板无开关 → B3/S2。
+- 执行：host 后台直驱 runHostDebate，不发触发语 → ADR-0011。
+- 交锋：默认单线分叉串行无互盲（resident/one-shot 仍互盲并行）；US11 防呆仅 resident/one-shot 查 isRouteIneffective，单线豁免 → ADR-0024。
+- 路由：后台直驱 + version/history/task/interrupt 多路由 → ADR-0011/0019/0025。
+- 五件套：只产 markdown 文本（mapText），结构化 DebateMap 置 null 占位，不返空壳。
