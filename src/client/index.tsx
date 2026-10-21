@@ -587,6 +587,9 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
       if (!r.ok || !r.id) { setError(r.error ?? 'start failed'); return }
       try { clearDraftOnStart?.() } catch { /* 忽略 */ }
       prefillQuestion = ''
+      // 建单成功即最小化:思辨是后台长任务,面板缩成右下角胶囊(带 running 绿点),
+      // 进度走对话区 mirror + 胶囊点回。用户点 ✕ 是关面板,点 — 是最小化,开始即后者。
+      setMinimized(true)
       // 建单的 id 自己知道,直接跟局看实况(轮询 transcript 即时追加,自动滚到底)。
       setFollowId(r.id)
       await follow(r.id)
