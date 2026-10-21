@@ -103,10 +103,13 @@ flowchart TD
         taskSvc["任务服务<br/>(扫描 构建 拉起 汇总)"]
     end
     subgraph Carry["载体层"]
-        direction LR
-        fork["分叉会话<br/>(默认)"]
-        resident["常驻会话对<br/>(回退一)"]
-        oneshot["一次会话<br/>(回退二 制图恒用)"]
+        direction TB
+        subgraph FallbackChain["回退链"]
+            direction LR
+            fork["分叉会话<br/>(默认)"]
+            resident["常驻会话对<br/>(回退一)"]
+            oneshot["一次会话<br/>(回退二 制图恒用)"]
+        end
         taskGroup["执行会话群<br/>(一仓一会话)"]
     end
     subgraph Keep["留存层"]
