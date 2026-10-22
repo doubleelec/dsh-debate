@@ -1125,15 +1125,17 @@ interface TaskRepo {
  */
 function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => unknown }): React.ReactNode {
   const prefs = loadTaskPrefs()
-  // cwd 三路(与 DebateDialog 同口径):useSessions 快照优先,sessionCwd 服务线次之,都不通才空。
+  // cwd 三路(与 DebateDialog 同口径):快照 byId 优先,sessionCwd 服务线次之,都不通才空。
+  // 主键用 currentSid(input.right 注入的 sessionId,模块级缓存):0.2.0 快照已无 current,
+  // 只看 snap.current 在新宿主上永远取不到(之前两次修法都漏了这一路,故仍报"没有工作区")。
+  let liveSid = currentSid
   let liveCwd: string | null = sessionCwd
   try {
     const snap = props.useSessions ? (props.useSessions((s: unknown) => s) as { current?: unknown; byId?: Record<string, { cwd?: unknown }> }) : undefined
-    if (typeof snap?.current === 'string' && snap.current !== '') {
-      const cur = snap.byId?.[snap.current]
-      if (typeof cur?.cwd === 'string' && cur.cwd !== '') liveCwd = cur.cwd
-    }
-  } catch { /* store 不可用时用服务线缓存 */ }
+    if (typeof snap?.current === 'string' && snap.current !== '') liveSid = snap.current
+    const cur = snap?.byId?.[liveSid]
+    if (typeof cur?.cwd === 'string' && cur.cwd !== '') liveCwd = cur.cwd
+  } catch { /* store 不可用时用 input.right + 服务线缓存 */ }
   // 父目录默认只用当前会话 cwd(用户拍板):偏好里的旧值跨工程会串台,直接忽略。
   const [parentRoot, setParentRoot] = useState(defaultParentRoot(liveCwd))
   const [repos, setRepos] = useState<TaskRepo[] | null>(null)

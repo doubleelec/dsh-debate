@@ -55,6 +55,24 @@ def test_client_task_dialog_takes_sessions():
     )
 
 
+def test_client_task_dialog_cwd_key_not_snap_current():
+    """TaskDialog keys cwd lookup on currentSid, not snap.current (0.2.0 probe).
+
+    0.2.0 snapshots carry no `current`; DebateDialog already falls back to the
+    input.right sessionId cache (currentSid). TaskDialog keyed only on
+    snap.current, so on 0.2.0 hosts it always resolved empty and errored
+    "no workspace" even with a live cwd. Both dialogs must share the key.
+    """
+    src = _read(PANEL)
+    m = re.search(r"function TaskDialog\(.*?\{([\s\S]*?)\n  try \{", src)
+    assert m, "TaskDialog body not found"
+    body = m.group(1)
+    assert "currentSid" in body, "TaskDialog must seed the lookup key from currentSid"
+    assert "byId?.[liveSid]" in src or "byId[liveSid]" in src or "byId?.[live" in src, (
+        "TaskDialog must look up byId with the seeded key, not snap.current alone"
+    )
+
+
 def test_client_no_send_key_intercept():
     """Native send key stays unwired (ADR-0025): only setDraft may be touched."""
     code = _read(PANEL)
