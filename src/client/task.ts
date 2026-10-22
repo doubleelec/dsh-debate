@@ -1,8 +1,9 @@
 /**
  * dsh-session-enhance — Client 半区多仓任务面板纯逻辑(无 React/CSS,可单测)。
  *
- * 收自 ADR-0025 的面板约定:
+ * 收自 ADR-0025 的面板约定(ADR-0028 修订推荐流):
  * - involved 文本框每行一个相对路径(空行/#注释忽略,首见序去重)。
+ * - 打开面板自动扫:只展示结构,不预勾选;涉及仓由 task/recommend 按任务描述推荐,用户审核。
  * - tasksRoot 缺省为 parentRoot 下的 `.tasks`。
  * - launch 前校验只做"缺项"提示;issued 门与 ASCII 门由 host 如实报错,面板原文展示。
  * - 偏好(tasksRoot/parentRoot/templateDir/provider/model)存 localStorage,node 下无 window 时退化为空。
@@ -50,9 +51,44 @@ export function validateTaskBuild(input: TaskBuildInput): string | null {
   const slugErr = validateSlug(input.slug)
   if (slugErr !== null) return slugErr
   if (String(input.lead ?? '').trim() === '') return '牵头仓不能为空(点扫描结果里的「牵头」填入)'
-  if (!Array.isArray(input.involved) || input.involved.length === 0) return '涉及仓不能为空(先扫描,再点「加入」)'
+  if (!Array.isArray(input.involved) || input.involved.length === 0) return '涉及仓不能为空(等 AI 推荐或手动勾选)'
   if (String(input.tasksRoot ?? '').trim() === '') return '任务根目录不能为空(点「默认 .tasks」填入)'
   return null
+}
+
+/**
+ * 草稿启发式标题(ADR-0028):recommend 失败/未跑时的本地回退。
+ * 空白折叠后取前 40 字,超长加 …;空草稿回 ''(调用方再回退 slug)。
+ */
+export function suggestTitleFromDraft(draft: string): string {
+  const t = String(draft ?? '').replace(/\s+/g, ' ').trim()
+  if (t === '') return ''
+  return t.length > 40 ? `${t.slice(0, 40)}…` : t
+}
+
+/**
+ * 推荐合并(ADR-0028):recommend 返回的推荐仓与扫描结果求交(保推荐序、去重),
+ * 只收 repo/part(unknown/external 不参任务);lead 取首个;都不中则空选 + 手勾。
+ * 纯函数:面板拿到 recommend 响应后调一次,用户仍可逐项改。
+ */
+export function applyRecommendDefaults(
+  found: ScanRepoLike[],
+  recommended: string[],
+): { checked: string[]; lead: string } {
+  const known = new Set(
+    found
+      .filter((r) => r.kind === 'repo' || r.kind === 'part')
+      .map((r) => r.relPath),
+  )
+  const checked: string[] = []
+  const seen = new Set<string>()
+  for (const r of recommended ?? []) {
+    const rel = String(r ?? '').trim()
+    if (rel === '' || seen.has(rel) || !known.has(rel)) continue
+    seen.add(rel)
+    checked.push(rel)
+  }
+  return { checked, lead: checked.length > 0 ? checked[0] : '' }
 }
 
 /** 面板打开即扫的默认 parentRoot:只用当前会话 cwd(用户拍板)。偏好里的旧值忽略,免得跨工程串台。 */
@@ -67,19 +103,17 @@ export interface ScanRepoLike {
 }
 
 /**
- * 扫描结果回填:repo 全勾选,牵头取首个 repo(没有 repo 则空),
- * slug 从 parentRoot 末段转小写短横,标题默认与 slug 同文(用户再改)。
- * 纯函数:打开面板自动跑完 scan 后调一次,用户仍可逐项改。
+ * 扫描回填(ADR-0028 修订):只定 slug(父目录末段转小写短横,中文名洗空回退 task)。
+ * checked/lead 恒为空——涉及仓不再预勾选,等 task/recommend 按任务描述推荐后再
+ * 经 applyRecommendDefaults 合并(ADR-0026 的"repo 全勾"已作废)。
  */
 export function suggestScanDefaults(
   parentRoot: string,
-  repos: ScanRepoLike[],
+  _repos: ScanRepoLike[],
 ): { checked: string[]; lead: string; slug: string; title: string } {
-  const repolike = repos.filter((r) => r.kind === 'repo').map((r) => r.relPath)
-  const lead = repolike.length > 0 ? repolike[0] : ''
   const seg = String(parentRoot ?? '').replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop() ?? ''
   const slug = seg.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'task'
-  return { checked: repolike, lead, slug, title: slug }
+  return { checked: [], lead: '', slug, title: slug }
 }
 
 export interface TaskPrefs {

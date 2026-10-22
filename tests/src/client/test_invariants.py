@@ -28,6 +28,8 @@ def test_client_pure_surface_exists():
         "saveTaskPrefs",
         "defaultParentRoot",
         "suggestScanDefaults",
+        "suggestTitleFromDraft",
+        "applyRecommendDefaults",
     ):
         assert symbol in task, f"src/client/task.ts missing: {symbol}"
 
@@ -71,6 +73,21 @@ def test_client_task_dialog_cwd_key_not_snap_current():
     assert "byId?.[liveSid]" in src or "byId[liveSid]" in src or "byId?.[live" in src, (
         "TaskDialog must look up byId with the seeded key, not snap.current alone"
     )
+
+
+def test_client_task_recommend_wired():
+    """TaskDialog recommends involved repos via task/recommend (ADR-0028).
+
+    Panel calls task/recommend after scan, merges with applyRecommendDefaults,
+    and shows AI reasons; the entry button is gated on non-empty draft.
+    """
+    src = _read(PANEL)
+    assert "'task/recommend'" in src, "panel must call task/recommend"
+    assert "applyRecommendDefaults" in src, "panel must merge recommendation via applyRecommendDefaults"
+    assert "suggestTitleFromDraft" in src, "panel must fall back to draft-derived title"
+    assert "prefillTaskDesc" in src, "task description must be seeded from the input draft"
+    assert "✦ 增强会话" in src, "entry button must be renamed to 增强会话"
+    assert "disabled={!ready}" in src, "entry button must be disabled on empty draft"
 
 
 def test_client_no_send_key_intercept():

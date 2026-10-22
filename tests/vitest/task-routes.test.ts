@@ -7,7 +7,7 @@ import pluginDefault from '../../src/index'
 const { apply } = pluginDefault as unknown as { apply(ctx: never): void }
 
 /** fake ctx:假 agents/registry + 真路由 handler(沿用 launcher 的 fake 测法)。 */
-function makeCtx(): {
+function makeCtx(recommendText?: string): {
   ctx: never
   routes: Array<{ path: string; handler(req: unknown, res: unknown): Promise<unknown> }>
   created: unknown[]
@@ -37,7 +37,19 @@ function makeCtx(): {
   const ctx = {
     get(name: string): unknown {
       if (name === 'agents') return agents
-      if (name === 'subagents') return { async start(): Promise<never> { throw new Error('no subagents in route test') } }
+      // 推荐桩:用注文当模型输出(无注文时抛,走 ok:false 分支)。
+      if (name === 'subagents') {
+        return {
+          async start(): Promise<never> {
+            if (recommendText === undefined) throw new Error('no subagents in route test')
+            const text = recommendText
+            return {
+              result: Promise.resolve({ output: [{ type: 'text', text }], stopReason: 'completed' }),
+              async dispose(): Promise<void> {},
+            } as never
+          },
+        }
+      }
       if (name === 'workspaceRegistry') return registry
       if (name === 'agentPresets') {
         return {
@@ -85,12 +97,13 @@ const tmpBase = join(tmpdir(), `dsh-session-enhance-task-routes-${Date.now()}`)
 mkdirSync(tmpBase, { recursive: true })
 
 describe('task routes(面板 HTTP 路由,ADR-0025)', () => {
-  it('routes: /api/task/* 七路由注册', () => {
+  it('routes: /api/task/* 八路由注册', () => {
     const taskPaths = routes.map((r) => r.path).filter((p) => p.startsWith('/dsh-session-enhance/api/task/')).sort()
     expect(taskPaths).toEqual([
       '/dsh-session-enhance/api/task/build',
       '/dsh-session-enhance/api/task/collect',
       '/dsh-session-enhance/api/task/launch',
+      '/dsh-session-enhance/api/task/recommend',
       '/dsh-session-enhance/api/task/report',
       '/dsh-session-enhance/api/task/scan',
       '/dsh-session-enhance/api/task/stop',
@@ -185,5 +198,43 @@ describe('task routes(面板 HTTP 路由,ADR-0025)', () => {
     expect(bad.ok).toBe(false)
     expect(String(bad.error)).toMatch(/ASCII/)
     expect(readFileSync).toBeTypeOf('function')
+  })
+})
+
+describe('task/recommend(ADR-0028:模型推荐涉及仓,人审核)', () => {
+  const repos = [
+    { relPath: 'libs/broker', kind: 'repo' },
+    { relPath: 'quant/x', kind: 'repo' },
+  ]
+
+  it('routes: 正常推荐(注文桩),未知仓被过滤', async () => {
+    const { ctx: c2, routes: r2 } = makeCtx(
+      '{"recommended": ["quant/x", "nope"], "reasons": {"quant/x": "改动点"}, "title": "修空语义"}',
+    )
+    apply(c2)
+    const r = await call(r2, '/dsh-session-enhance/api/task/recommend', {
+      description: '修 broker 空语义', repos,
+    })
+    expect(r.ok).toBe(true)
+    expect(r.recommended).toEqual(['quant/x'])
+    expect(r.reasons).toEqual({ 'quant/x': '改动点' })
+    expect(r.title).toBe('修空语义')
+  })
+
+  it('routes: description/repos 缺失回 ok:false(不抛 500)', async () => {
+    const { ctx: c2, routes: r2 } = makeCtx('{}')
+    apply(c2)
+    expect((await call(r2, '/dsh-session-enhance/api/task/recommend', {})).ok).toBe(false)
+    expect((await call(r2, '/dsh-session-enhance/api/task/recommend', { description: 'x' })).ok).toBe(false)
+    expect((await call(r2, '/dsh-session-enhance/api/task/recommend', { description: 'x', repos: [] })).ok).toBe(false)
+  })
+
+  it('routes: 模型吐垃圾回 ok:false', async () => {
+    const { ctx: c2, routes: r2 } = makeCtx('今天天气不错')
+    apply(c2)
+    const r = await call(r2, '/dsh-session-enhance/api/task/recommend', {
+      description: '修 broker', repos,
+    })
+    expect(r.ok).toBe(false)
   })
 })

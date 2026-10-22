@@ -458,6 +458,12 @@
   cursor: default;
 }
 
+/* 空草稿禁用态(ADR-0028:输入框无内容时整钮禁用):与置灰同口径。 */
+.dshe-dockbtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* 增强菜单:输入框 dock 按钮旁的弹出菜单(辩论/多仓任务二选一)。 */
 .dshe-enhance {
   position: relative;

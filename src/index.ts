@@ -31,6 +31,7 @@ import { findLens, type LensTemplate } from './debate/lenses'
 import { scanParent, defaultDeps as taskDefaultDeps } from './cross_tasks/scan'
 import { buildMaterials, handoffText, reportFileName, reportMarkdown, assertAscii as assertTaskAscii, leftoverPlaceholders } from './cross_tasks/materials'
 import { ensureGroupedSession, clearTempHandles as clearTaskTempHandles } from './cross_tasks/ensure-session'
+import { parseRecommendText } from './cross_tasks/recommend'
 
 /** 请求面(结构子集,镜像 explorer)。 */
 export interface DebateHttpRequest {
@@ -2183,7 +2184,8 @@ export default {
           }
         },
       },
-      // ── 跨仓任务(task)路由(ADR-0025):scan/build/launch/report/collect/stop + task-version。
+      // ── 跨仓任务(task)路由(ADR-0025):scan/build/launch/report/collect/stop
+      // + recommend(ADR-0028:按任务描述推荐涉及仓,模型只给推荐、人审核)。
       // 全部参数显式,不从调用会话 cwd 推导;模板真身仍在各编排库(templateDir/模板文本显式传)。
       {
         kind: 'exact',
@@ -2191,6 +2193,95 @@ export default {
         handler: async (_req, res) => {
           const facts = await versionFacts()
           return writeJson(res, { ok: true, version: BUILD_VERSION, ...facts })
+        },
+      },
+      {
+        kind: 'exact',
+        path: '/dsh-session-enhance/api/task/recommend',
+        handler: async (req, res) => {
+          // 涉及仓推荐(ADR-0028):按任务描述从扫描到的仓里挑涉及仓。
+          // 模型只给推荐 + 理由 + 简短标题,面板预勾选后必须经用户审核;
+          // 判不出/调用失败一律 ok:false,面板回退空选 + 提示手勾,不阻塞。
+          let owned: { dispose(): Promise<void> } | null = null
+          try {
+            const body = await readJsonBody(req)
+            const description = typeof body.description === 'string' ? body.description.trim() : ''
+            const repos = Array.isArray(body.repos) ? body.repos as Array<Record<string, unknown>> : []
+            if (description === '') return writeJson(res, { ok: false, error: 'description required' })
+            if (repos.length === 0) return writeJson(res, { ok: false, error: 'repos required' })
+            const known = repos
+              .filter((r) => (r.kind === 'repo' || r.kind === 'part') && typeof r.relPath === 'string')
+              .map((r) => ({ relPath: String(r.relPath), kind: String(r.kind) }))
+            for (const r of known) assertTaskAscii(r.relPath, 'repos[].relPath')
+            if (known.length === 0) return writeJson(res, { ok: false, error: 'no recommendable repos' })
+            const agents = ctx.get('agents') as AgentsLike | undefined
+            const subagents = ctx.get('subagents') as SubagentsLike | undefined
+            if (!agents || !subagents) return writeJson(res, { ok: false, error: 'agents/subagents unavailable' })
+            const sid = typeof body.sid === 'string' ? body.sid : ''
+            // parent 三段式(照抄 runHostDebate):sid 直取 → 兜底活体 → 自建满血。
+            // fake ctx 下 agents 可能缺 get/list,全程 try 兜底,最终走自建。
+            let parent: ParentAgent | undefined
+            if (sid !== '') {
+              try {
+                const got = (agents as AgentsLike | undefined)?.get(sid) as ParentAgent | undefined
+                if (got?.session) parent = got
+              } catch { /* 取不到走兜底 */ }
+            }
+            if (!parent?.session && agents) {
+              try {
+                const live = (agents as AgentsLike).list() ?? []
+                const first = live.find((a) => (((a as unknown) as ParentAgent)?.session?.id)) as ParentAgent | undefined
+                if (first?.session) parent = first
+              } catch { /* 兜底失败则走自建 */ }
+            }
+            if (!parent || !parent.session) {
+              const full = await createFullParent(ctx, agents, `se-recommend-${Date.now().toString(36)}`, DEFAULT_CONFIG.synthesizer, AbortSignal.timeout(180000))
+              owned = { dispose: full.dispose }
+              parent = full.agent
+            }
+            if (!parent || !parent.session) return writeJson(res, { ok: false, error: 'no live parent' })
+            const list = known.map((r) => `- ${r.relPath} (${r.kind})`).join('\n')
+            const prompt = [
+              '你是分仓员。只做一件事：按下面的任务描述，从候选仓里挑出本次任务涉及的仓。',
+              '只输出一段 JSON，不要解释，不要调用任何工具，不要输出别的：',
+              '{"recommended": ["仓路径1", ...], "reasons": {"仓路径1": "一句话理由", ...}, "title": "任务简短标题(20字内)"}',
+              '规则：recommended 只从候选里选，按相关度由高到低排；判不出就给空数组；title 是给人看的一句话。',
+              '',
+              '任务描述：',
+              description,
+              '',
+              '候选仓：',
+              list,
+            ].join('\n')
+            const ctl = new AbortController()
+            const timer = setTimeout(() => ctl.abort(), 120000)
+            try {
+              const run = await subagents.start('spawn', {
+                parent,
+                prompt: [{ type: 'text', text: prompt } as TextContentBlock],
+                label: 'se-task-recommend',
+                signal: ctl.signal,
+              })
+              try {
+                const result = await run.result
+                if (result.stopReason !== 'completed') {
+                  return writeJson(res, { ok: false, error: `recommend subagent: ${result.stopReason}` })
+                }
+                const cleaned = parseRecommendText(textOf(result.output), known)
+                return writeJson(res, { ok: true, ...cleaned })
+              } finally {
+                await run.dispose()
+              }
+            } finally {
+              clearTimeout(timer)
+            }
+          } catch (e) {
+            return writeJson(res, { ok: false, error: e instanceof Error ? e.message : String(e) })
+          } finally {
+            if (owned) {
+              try { await owned.dispose() } catch { /* 自建 parent 回收失败不影响结果 */ }
+            }
+          }
         },
       },
       {

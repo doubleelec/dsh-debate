@@ -24,6 +24,7 @@ import { roleName, roundLabel, roundSummary, stopKey } from './labels'
 import {
   suggestTasksRoot, validateTaskBuild,
   loadTaskPrefs, saveTaskPrefs, defaultParentRoot, suggestScanDefaults,
+  suggestTitleFromDraft, applyRecommendDefaults,
 } from './task'
 import {
   DIALOG_DEFAULT_H, DIALOG_DEFAULT_W,
@@ -60,7 +61,6 @@ const DICTS: Record<string, Record<string, string>> = {
     'mirror.off': '仅面板(自建 parent,无对话区可写)',
     'mirror.on': '对话区镜像', 'mirror.fail': '镜像失败',
     'interrupt.mark': '⛔ 此处被打断(后续实录是停机前已写完的,之后无新增)',
-    'takeover.busy': '发起会话忙(用户正在说话)', 'takeover.idle': '发起会话闲',
     'btn.start': '开始辩论', 'btn.stop': '停止', 'btn.close': '关闭',
     'btn.interrupt': '一键双停', 'btn.interruptTip': '连发起会话的 turn 一起停(用户刚说的话留着),后台辩论同步中止',
     'st.idle': '就绪', 'st.running': '辩论进行中…(host 后台直驱,开题/交锋/地图自动进面板)',
@@ -120,7 +120,6 @@ const DICTS: Record<string, Record<string, string>> = {
     'mirror.off': 'panel only (self-built parent, no chat surface)',
     'mirror.on': 'chat mirror', 'mirror.fail': 'mirror failed',
     'interrupt.mark': '⛔ interrupted here (entries below were finished before stop, nothing after)',
-    'takeover.busy': 'parent busy (user talking)', 'takeover.idle': 'parent idle',
     'btn.start': 'Start debate', 'btn.stop': 'Stop', 'btn.close': 'Close',
     'btn.interrupt': 'Interrupt both', 'btn.interruptTip': 'Stop the parent turn too (keep what the user just said), abort the background debate',
     'st.idle': 'Ready', 'st.running': 'Deliberation running… (host drives open → rounds → map into the panel)',
@@ -215,8 +214,6 @@ interface StateResp {
   residentError?: string | null
   /** S17 打断点:stop/interrupt 时 transcript 停在哪,面板照此画线。null=没被打断/开题前就停。 */
   interruptedAt?: { round: number; seq: number } | null
-  /** S17 接管快照:发起会话忙闲(轮询采样)。null=还没采过。 */
-  parentBusy?: boolean | null
   streaming?: Record<string, { round: number; kind: 'text' | 'tools'; text: string }>
   decisionSummary?: string | null
   /** 结论文档(ADR-0019):相对工作区路径 + 绝对路径;null=没写(未指定工作区或写入失败)。 */
@@ -242,6 +239,8 @@ let taskPanelOpen = false
 const subscribeTaskOpen = (fn: (v: boolean) => void): (() => void) => { openTaskListeners.add(fn); return () => { openTaskListeners.delete(fn) } }
 const setTaskPanelOpen = (v: boolean): void => { taskPanelOpen = v; openTaskListeners.forEach((fn) => fn(v)) }
 let prefillQuestion = ''
+// 多仓任务描述(ADR-0028):入口收输入框草稿,TaskDialog 挂载时预填,可改,草稿不清。
+let prefillTaskDesc = ''
 // 当前会话 id(input.right 是 session scope,标准 props 自带 sessionId,入口每次渲染更新)。
 let currentSid = ''
 interface InputActs { setDraft(d: string): void; submit?(): void }
@@ -373,7 +372,6 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
   const [reportError, setReportError] = useState<string | null>(null)
   const [restored, setRestored] = useState(false)
   const [interruptedAt, setInterruptedAt] = useState<{ round: number; seq: number } | null>(null)
-  const [parentBusy, setParentBusy] = useState<boolean | null>(null)
   /**
    * 版本对账(v0.4):徽标显示**后台真正在跑的版本**(host 内联常量),不是磁盘版本。
    * null = 还没拿到;verMissing = 后台没这条路由(旧宿主)或取数失败。
@@ -513,7 +511,6 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
       if (s.reportError !== undefined) setReportError(s.reportError)
       if (s.restored !== undefined) setRestored(s.restored === true)
       if (s.interruptedAt !== undefined) setInterruptedAt(s.interruptedAt)
-      if (s.parentBusy !== undefined) setParentBusy(s.parentBusy)
       if (s.status === 'done' || s.status === 'failed' || s.status === 'stopped') {
         if (timer.current !== null) { window.clearInterval(timer.current); timer.current = null }
         if (s.status === 'failed') setError(s.error ?? 'failed')
@@ -871,11 +868,6 @@ function DebateDialog(props: { onClose: () => void; useSessions?: (s: unknown) =
             </div>
           </div>
         )}
-        {sessionId !== null && status === 'running' && (
-          <div className={C('dshe-note')}>
-            <div className={C('dshe-sid')}>会话 {sessionId}{parentBusy === true ? ` · ${tr('takeover.busy')}` : parentBusy === false ? ` · ${tr('takeover.idle')}` : ''}</div>
-          </div>
-        )}
         {sessionId !== null && status === 'done' && turns.length > 0 && (
           <div className={C('dshe-field')}>
             <span>{tr('draft.hint')}</span>
@@ -1032,15 +1024,13 @@ function InputButton(props: { useInput?: (s: unknown) => unknown; inputActions?:
   } catch { /* store 不可用时按空处理 */ }
   const ready = draft.trim() !== ''
   const [menu, setMenu] = useState(false)
-  // 增强菜单(ADR-0025):按钮常亮(置灰只对"以草稿开辩/建任务"有意义,菜单两项各走各的门)。
-  // - 辩论:草稿是辩题起点,无草稿点开面板会提示"先写问题"。
-  // - 多仓任务:标题/仓都走面板表单,无草稿也能开,所以不禁用。
+  // 增强菜单:双入口共用草稿门(ADR-0028 反转 ADR-0025 可达性:空草稿整钮禁用)。
+  // - 辩论:草稿是辩题起点,建单成功后清空输入框。
+  // - 多仓任务:草稿是任务描述起点,TaskDialog 预填可改,草稿留给用户自己发。
   const openDebate = (): void => {
     setMenu(false)
     if (!ready) {
-      // 无草稿也开面板,面板会提示先写问题(比按钮置灰更可达)。
-      prefillQuestion = ''
-      openPanel?.()
+      // 防线:调用方保证输入框有内容才点菜单,空草稿直接关菜单不建空单。
       return
     }
     // 只读不清空:内容进对话框起点展示,等点"开始辩论"建单成功后才清空输入框。
@@ -1049,33 +1039,51 @@ function InputButton(props: { useInput?: (s: unknown) => unknown; inputActions?:
   }
   const openTask = (): void => {
     setMenu(false)
-    // 草稿不清:任务标题走面板表单,草稿留给用户自己发。
+    if (!ready) return
+    // 草稿收进任务描述起点(面板可改);草稿不清,留给用户自己发。
+    prefillTaskDesc = draft.trim()
     openTaskPanel?.()
   }
   useEffect(() => {
     if (!menu) return
     const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') setMenu(false) }
+    // 失焦关闭:点菜单容器外面就关(输入框打字不触发 pointerdown,另由草稿变化关)。
+    const onDown = (e: PointerEvent): void => {
+      const el = (e.target as Element | null)?.closest?.(`.${styles['dshe-enhance'] ?? 'dshe-enhance'}`)
+      if (!el) setMenu(false)
+    }
     document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onDown)
+    return () => { document.removeEventListener('keydown', onKey); document.removeEventListener('pointerdown', onDown) }
   }, [menu])
+  // 输入框一打字就关菜单:菜单开着时草稿变了,"创建辩论"会收走旧草稿,不如关了重开。
+  // 用 ref 比对(不能把 menu 放进依赖,否则开菜单瞬间又被关掉)。
+  const prevDraft = useRef(draft)
+  useEffect(() => {
+    if (prevDraft.current !== draft) {
+      prevDraft.current = draft
+      setMenu(false)
+    }
+  })
   return (
     <span className={C('dshe-enhance')}>
       <button
         type="button"
         className={C('dshe-dockbtn')}
-        title="增强:开辩论 / 建多仓任务"
+        title={ready ? '增强会话:创建辩论 / 建多仓任务' : '先在输入框写下任务或问题,再点增强会话'}
         aria-haspopup="menu"
         aria-expanded={menu}
         onClick={() => setMenu((v) => !v)}
-      ><span>✦ 增强</span></button>
+        disabled={!ready}
+      ><span>✦ 增强会话</span></button>
       {menu && (
         <span className={C('dshe-menu')} role="menu">
           <button
             type="button" role="menuitem"
             className={C('dshe-menuitem')}
-            title={ready ? '以输入框内容为起点开辩' : '开辩论面板(先在输入框写下要辩的问题)'}
+            title="以输入框内容为起点创建辩论"
             onClick={openDebate}
-          ><span>{ready ? '⚔ 以草稿开辩论' : '⚔ 开辩论'}</span></button>
+          ><span>⚔ 创建辩论</span></button>
           <button
             type="button" role="menuitem"
             className={C('dshe-menuitem')}
@@ -1119,9 +1127,12 @@ interface TaskRepo {
 }
 
 /**
- * 多仓任务面板(ADR-0025):scan → build → launch 三步,全走显式按钮。
- * - 原生发送键不可拦截:任务启动必须点面板里的「建任务并拉起执行会话」。
- * - 草稿不收走:任务标题走面板表单,草稿留给用户自己发。
+ * 多仓任务面板(ADR-0028):scan → recommend → 审核勾选 → build → 预览 → launch。
+ * - 任务描述来自输入框草稿(入口保证非空),面板可改,[重新推荐]重跑。
+ * - scan 只展示结构不勾选;recommend 按描述推荐涉及仓,预勾选 + 理由展示,用户审核。
+ * - recommend 失败/判不出 → 空选 + 提示手勾,不阻塞。
+ * - 原生发送键不可拦截:任务启动必须点面板里的「建任务并预览会话」。
+ * - 草稿不收走:任务描述走面板表单,草稿留给用户自己发。
  */
 function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => unknown }): React.ReactNode {
   const prefs = loadTaskPrefs()
@@ -1138,11 +1149,17 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
   } catch { /* store 不可用时用 input.right + 服务线缓存 */ }
   // 父目录默认只用当前会话 cwd(用户拍板):偏好里的旧值跨工程会串台,直接忽略。
   const [parentRoot, setParentRoot] = useState(defaultParentRoot(liveCwd))
+  // 任务描述:入口收草稿(prefillTaskDesc),面板可改;recommend 按它推荐涉及仓。
+  const [desc, setDesc] = useState(prefillTaskDesc)
   const [repos, setRepos] = useState<TaskRepo[] | null>(null)
   const [checked, setChecked] = useState<string[]>([])
+  const [reasons, setReasons] = useState<Record<string, string>>({})
   const [lead, setLead] = useState('')
   const [slug, setSlug] = useState('')
   const [title, setTitle] = useState('')
+  // autoTitle:上次自动填的标题(推荐附带/AI 或草稿回退)。用户手改标题后不再覆盖,
+  // 下次 recommend 只有"标题仍是旧自动值"时才更新,手改的永远保留。
+  const autoTitle = useRef('')
   const [tasksRoot, setTasksRoot] = useState(prefs.tasksRoot)
   const [templateDir, setTemplateDir] = useState(prefs.templateDir)
   const [provider, setProvider] = useState(prefs.provider)
@@ -1160,21 +1177,62 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
 
   const scan = async (root: string): Promise<void> => {
     if (root === '') { setError('当前会话没有工作区:先在目标父目录的会话里打开面板'); return }
-    setBusy('扫描中…'); setError(null); setRepos(null); setChecked([]); setLead(''); setPreview(null)
+    setBusy('扫描中…'); setError(null); setRepos(null); setChecked([]); setReasons({}); setLead(''); setPreview(null)
     try {
       const r = await api<{ ok: boolean; repos?: TaskRepo[]; error?: string }>('task/scan', { parentRoot: root })
       if (!r.ok) { setError(r.error ?? 'scan failed'); return }
       const found = r.repos ?? []
       setRepos(found)
-      // 扫描结果直接回填:repo 全勾、牵头取首个、slug/标题从父目录名来,用户逐项可改。
+      // ADR-0028:scan 只展示结构,不预勾选;slug 照旧自拟,等 recommend 按描述推荐后再合并。
       const d = suggestScanDefaults(root, found)
-      setChecked(d.checked)
-      setLead(d.lead)
       setSlug(d.slug)
-      setTitle(d.title)
       saveTaskPrefs({ parentRoot: root, tasksRoot, templateDir, provider, model })
+      // 扫完即推荐:任务描述来自输入框草稿(入口保证非空)。
+      await recommend(found)
     } catch (e) {
       setError(String(e))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const recommend = async (found: TaskRepo[]): Promise<void> => {
+    const text = desc.trim()
+    if (text === '') { setError('先写任务描述(输入框草稿会自动带入)再推荐'); return }
+    setBusy('AI 推荐中…'); setError(null)
+    try {
+      const r = await api<{ ok: boolean; recommended?: string[]; reasons?: Record<string, string>; title?: string; error?: string }>(
+        'task/recommend',
+        {
+          description: text,
+          repos: found.map((x) => ({ relPath: x.relPath, kind: x.kind })),
+          sid: liveSid,
+        },
+      )
+      if (!r.ok) {
+        // 判不出/调用失败 → 空选 + 提示手勾,不阻塞;标题回退草稿启发。
+        setChecked([]); setReasons({}); setLead('')
+        setError(`AI 推荐失败,已清空勾选请手动勾选(${r.error ?? 'unknown'})`)
+        if (title === '' || title === autoTitle.current) {
+          const t = suggestTitleFromDraft(text) || slug
+          setTitle(t); autoTitle.current = t
+        }
+        return
+      }
+      const merged = applyRecommendDefaults(found, r.recommended ?? [])
+      setChecked(merged.checked)
+      setReasons(r.reasons ?? {})
+      setLead(merged.lead)
+      // 标题:推荐附带的 AI 标题优先(仅当用户没手改时覆盖);都没有则草稿回退。
+      const aiTitle = String(r.title ?? '').trim()
+      if (title === '' || title === autoTitle.current) {
+        const t = aiTitle !== '' ? aiTitle : suggestTitleFromDraft(text) || slug
+        setTitle(t); autoTitle.current = t
+      }
+      if (merged.checked.length === 0) setError('AI 没有挑出涉及仓,请手动勾选')
+    } catch (e) {
+      setChecked([]); setReasons({}); setLead('')
+      setError(`AI 推荐失败,已清空勾选请手动勾选(${String(e)})`)
     } finally {
       setBusy('')
     }
@@ -1268,7 +1326,14 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
         <button className={C('dshe-close')} onClick={props.onClose} aria-label="关闭">✕</button>
       </div>
       <div className={C('dshe-body')}>
-        <div className={C('dshe-note')}>打开自动扫描当前会话目录 → 核对勾选 → 确认拉起(原生回车只发消息,不触发任务)。</div>
+        <div className={C('dshe-note')}>打开自动扫描当前会话目录 → AI 按任务描述推荐涉及仓 → 你审核勾选 → 确认拉起(原生回车只发消息,不触发任务)。</div>
+        <div className={C('dshe-field')}>
+          <span>任务描述(AI 按它推荐涉及仓,可改)</span>
+          <textarea value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="如 修 broker 空语义" rows={3} />
+          <div className={C('dshe-actions')}>
+            <button type="button" className={C('dshe-copybtn')} onClick={() => { if (repos !== null) void recommend(repos) }} disabled={busy !== '' || repos === null || desc.trim() === ''}>重新推荐</button>
+          </div>
+        </div>
         <div className={C('dshe-field')}>
           <span>父目录(当前会话目录,换仓重扫)</span>
           <input type="text" value={parentRoot} onChange={(e) => setParentRoot(e.target.value)} placeholder="如 D:/Users/xxx/Documents/finance" />
@@ -1278,12 +1343,12 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
         </div>
         {repos !== null && (
           <div className={C('dshe-field')}>
-            <span>扫描结果(勾选参任务仓)</span>
+            <span>扫描结果(AI 推荐已预勾选,逐项审核)</span>
             {repos.map((r) => (
               <label key={r.relPath} className={C('dshe-checkrow')}>
                 <input type="checkbox" checked={checked.includes(r.relPath)} onChange={() => toggle(r.relPath)} />
                 <span>{r.relPath}</span>
-                <span className={C('dshe-note')}>{r.kind}{r.kind === 'external' && r.reason ? ` · ${r.reason}` : ''}</span>
+                <span className={C('dshe-note')}>{r.kind}{r.kind === 'external' && r.reason ? ` · ${r.reason}` : ''}{reasons[r.relPath] ? ` · AI:${reasons[r.relPath]}` : ''}</span>
                 {r.kind !== 'external' && r.kind !== 'unknown' && lead !== r.relPath && (
                   <button type="button" className={C('dshe-copybtn')} onClick={() => setLead(r.relPath)}>牵头</button>
                 )}

@@ -8,6 +8,8 @@ import {
   saveTaskPrefs,
   defaultParentRoot,
   suggestScanDefaults,
+  suggestTitleFromDraft,
+  applyRecommendDefaults,
 } from '../../src/client/task'
 
 describe('parseInvolvedLines', () => {
@@ -81,20 +83,20 @@ describe('defaultParentRoot', () => {
 })
 
 describe('suggestScanDefaults', () => {
-  it('repo 全勾、牵头取首个、slug 从父目录末段来', () => {
+  it('ADR-0028:只定 slug,不预勾选不牵头(等 recommend 再合并)', () => {
     const d = suggestScanDefaults('D:/work/finance', [
       { relPath: 'libs/broker', kind: 'repo' },
       { relPath: 'data', kind: 'external' },
       { relPath: 'quant/x', kind: 'repo' },
       { relPath: 'plain', kind: 'unknown' },
     ])
-    expect(d.checked).toEqual(['libs/broker', 'quant/x'])
-    expect(d.lead).toBe('libs/broker')
+    expect(d.checked).toEqual([])
+    expect(d.lead).toBe('')
     expect(d.slug).toBe('finance')
     expect(d.title).toBe('finance')
   })
 
-  it('无 repo 时牵头空、slug 回退 task', () => {
+  it('无 repo 时 slug 回退 task', () => {
     const d = suggestScanDefaults('', [{ relPath: 'plain', kind: 'unknown' }])
     expect(d.checked).toEqual([])
     expect(d.lead).toBe('')
@@ -104,5 +106,43 @@ describe('suggestScanDefaults', () => {
   it('中文/空格父目录名清洗成可用 slug', () => {
     const d = suggestScanDefaults('D:/工作/我的 仓', [{ relPath: 'a', kind: 'repo' }])
     expect(d.slug).toBe('task')
+  })
+})
+
+describe('suggestTitleFromDraft', () => {
+  it('空白折叠后取前 40 字,超长加省略号', () => {
+    expect(suggestTitleFromDraft('  修 broker\n的空语义  ')).toBe('修 broker 的空语义')
+    const long = 'a'.repeat(50)
+    expect(suggestTitleFromDraft(long)).toBe(`${'a'.repeat(40)}…`)
+  })
+
+  it('空草稿回空(调用方再回退 slug)', () => {
+    expect(suggestTitleFromDraft('')).toBe('')
+    expect(suggestTitleFromDraft('   \n  ')).toBe('')
+  })
+})
+
+describe('applyRecommendDefaults', () => {
+  const found = [
+    { relPath: 'libs/broker', kind: 'repo' },
+    { relPath: 'quant/x', kind: 'repo' },
+    { relPath: 'plain', kind: 'unknown' },
+  ]
+
+  it('推荐与扫描求交,保推荐序,lead 取首个', () => {
+    const d = applyRecommendDefaults(found, ['quant/x', 'libs/broker'])
+    expect(d.checked).toEqual(['quant/x', 'libs/broker'])
+    expect(d.lead).toBe('quant/x')
+  })
+
+  it('未知仓/unknown/external 被过滤,去重', () => {
+    const d = applyRecommendDefaults(found, ['nope', 'libs/broker', 'libs/broker', 'plain'])
+    expect(d.checked).toEqual(['libs/broker'])
+    expect(d.lead).toBe('libs/broker')
+  })
+
+  it('都不中则空选(提示手勾)', () => {
+    expect(applyRecommendDefaults(found, [])).toEqual({ checked: [], lead: '' })
+    expect(applyRecommendDefaults(found, ['nope'])).toEqual({ checked: [], lead: '' })
   })
 })

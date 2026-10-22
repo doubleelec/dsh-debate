@@ -25,7 +25,8 @@ _Avoid_: 开放性问题，观点题，问答题
 _Avoid_: 上下文，背景，会话记录，前情提要
 
 **辩论起点（deliberation_seed）**:
-输入框草稿内容，点辩论按钮时收走并清空，优先于会话历史成为辩论问题。
+输入框草稿内容，点"创建辩论"时收走并清空，优先于会话历史成为辩论问题。
+调用方保证输入框有内容（无草稿不点开菜单）。
 _Avoid_: 草稿，hint，触发语
 
 ### 角色
@@ -329,6 +330,12 @@ _Avoid_: 仓扫描，目录探测，仓库发现
 `build` 写出的任务目录（`<slug>-<stamp>/`）：`directive.md` 总指示（`status: draft`，
 人审完改 `issued`）+ 一仓一封 `to-<short>.md` 派活草稿。占位没填完就报错，不写半成品。
 _Avoid_: 任务目录，派活材料，build 产物
+
+**涉及仓推荐（recommend_involved）**:
+按任务描述从扫描到的仓里挑涉及仓（`task/recommend`，one-shot 子 agent 只给
+推荐 + 理由 + 简短标题）。模型给的是推荐不是判决：面板预勾选后必须经用户审核，
+判不出（描述含糊/调用失败）→ 空选 + 提示手勾。
+_Avoid_: 影响仓库，判定，AI 选仓
 
 **总指示签发（directive_issued）**:
 `directive.md` 的 `status: issued` 行。`launch` 前必验：非 issued 拒收，
