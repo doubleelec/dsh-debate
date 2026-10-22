@@ -28,7 +28,7 @@ def test_client_pure_surface_exists():
         "saveTaskPrefs",
         "defaultParentRoot",
         "suggestScanDefaults",
-        "suggestTitleFromDraft",
+        "suggestSlugFromText",
         "applyRecommendDefaults",
     ):
         assert symbol in task, f"src/client/task.ts missing: {symbol}"
@@ -76,18 +76,26 @@ def test_client_task_dialog_cwd_key_not_snap_current():
 
 
 def test_client_task_recommend_wired():
-    """TaskDialog recommends involved repos via task/recommend (ADR-0028).
+    """TaskDialog recommends involved repos via task/recommend (ADR-0028/0029).
 
     Panel calls task/recommend after scan, merges with applyRecommendDefaults,
-    and shows AI reasons; the entry button is gated on non-empty draft.
+    derives slug via suggestSlugFromText, and shows AI reasons;
+    the entry button is gated on non-empty draft. No lead field (ADR-0029):
+    coordination lives in the task dir itself, no lead repo picker.
     """
     src = _read(PANEL)
     assert "'task/recommend'" in src, "panel must call task/recommend"
     assert "applyRecommendDefaults" in src, "panel must merge recommendation via applyRecommendDefaults"
-    assert "suggestTitleFromDraft" in src, "panel must fall back to draft-derived title"
+    assert "suggestSlugFromText" in src, "panel must derive slug from description/AI title"
     assert "prefillTaskDesc" in src, "task description must be seeded from the input draft"
     assert "✦ 增强会话" in src, "entry button must be renamed to 增强会话"
     assert "disabled={!ready}" in src, "entry button must be disabled on empty draft"
+    stripped = re.sub(r"//.*", "", src)
+    stripped = re.sub(r"/\*.*?\*/", "", stripped, flags=re.S)
+    assert "setLead" not in stripped, "panel must not carry a lead repo field (ADR-0029)"
+    assert "setTitle" not in stripped and "一句话标题" not in stripped, (
+        "panel must not carry a separate title field (ADR-0029)"
+    )
 
 
 def test_client_no_send_key_intercept():

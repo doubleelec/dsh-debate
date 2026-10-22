@@ -49,7 +49,6 @@ describe('task materials(从 dsh-task-launcher 移植)', () => {
     const out = buildMaterials({
       slug: 'demo-task',
       stamp: '20261020_164022',
-      lead: 'libs/broker',
       involved: ['libs/broker', 'quant/value_swing', 'Automatic'],
       title: '演示任务',
       baseline: 'broker 0.3.3 / utils 0.2.0 / ops 0.2.0',
@@ -61,7 +60,7 @@ describe('task materials(从 dsh-task-launcher 移植)', () => {
     expect(out.toFiles.length).toBe(3)
     expect(out.toFiles.map((f) => f.fileName)).toEqual(['to-broker.md', 'to-value-swing.md', 'to-automatic.md'])
     expect(out.toFiles.map((f) => f.repo)).toEqual(['libs/broker', 'quant/value_swing', 'Automatic'])
-    // 头占位全消灭
+    // 头占位全消灭(lead 行 ADR-0029 改 none,占位同样不能残留)
     for (const marker of [
       'slug: <全小写英文短横线',
       'version: <YYYYMMDD_HHMMSS',
@@ -80,14 +79,14 @@ describe('task materials(从 dsh-task-launcher 移植)', () => {
     }
     expect(out.directive).toMatch(/slug: demo-task/)
     expect(out.directive).toMatch(/version: 20261020_164022/)
-    expect(out.directive).toMatch(/lead: libs\/broker/)
+    expect(out.directive).toMatch(/lead: none # 协调位见任务目录/)
     expect(out.directive).toMatch(/# 总指示：演示任务/)
     expect(out.toFiles[1].text).toMatch(/to: quant\/value_swing/)
   })
 
   it('fillDirective/fillTo: draft 标记 + directive 引用', () => {
     const d = fillDirective(DIRECTIVE_TEMPLATE, {
-      slug: 's', stamp: 'T', lead: 'L', involved: ['A'], title: '题', baseline: 'base',
+      slug: 's', stamp: 'T', involved: ['A'], title: '题', baseline: 'base',
     })
     expect(d).toMatch(/status: draft/)
     const t = fillTo(TO_TEMPLATE, { repo: 'R', slug: 's', taskDirName: '.tasks/s-T', title: '题', created: 'C' })
@@ -95,8 +94,8 @@ describe('task materials(从 dsh-task-launcher 移植)', () => {
   })
 
   it('handoffText/reportFileName/reportMarkdown: 派活与回信形状', () => {
-    expect(handoffText('.tasks/s-T', 'libs/broker', true)).toContain('（牵头，先落完整工作文档）')
-    expect(handoffText('.tasks/s-T', 'quant/value_swing', false)).not.toContain('牵头')
+    expect(handoffText('.tasks/s-T', 'libs/broker')).toContain('to-broker.md')
+    expect(handoffText('.tasks/s-T', 'quant/value_swing')).not.toContain('牵头')
     expect(reportFileName('quant/value_swing')).toBe('back-value-swing.md')
     const md = reportMarkdown({
       from: 'libs/broker', to: '', slug: 's', ticket: 'docs/x.md',

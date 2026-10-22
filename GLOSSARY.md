@@ -335,7 +335,14 @@ _Avoid_: 任务目录，派活材料，build 产物
 按任务描述从扫描到的仓里挑涉及仓（`task/recommend`，one-shot 子 agent 只给
 推荐 + 理由 + 简短标题）。模型给的是推荐不是判决：面板预勾选后必须经用户审核，
 判不出（描述含糊/调用失败）→ 空选 + 提示手勾。
+成功/失败都透出 `stopReason` + `rawLen`（失败带原文头 `rawHead`）供排障（ADR-0029）。
 _Avoid_: 影响仓库，判定，AI 选仓
+
+**任务英文缩写（task_slug）**:
+对任务的英文缩写（`suggestSlugFromText`：小写化 → 非 alnum 转短横 → 截 40 →
+空回退 `task`），用于建任务文件夹（`<slug>-<stamp>/`）。
+从任务描述/AI 标题来，不从父目录取（父目录末段是工程名，不是任务缩写）。
+_Avoid_: 文件夹名，工程名，标题缩写
 
 **总指示签发（directive_issued）**:
 `directive.md` 的 `status: issued` 行。`launch` 前必验：非 issued 拒收，

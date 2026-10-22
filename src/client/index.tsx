@@ -24,7 +24,8 @@ import { roleName, roundLabel, roundSummary, stopKey } from './labels'
 import {
   suggestTasksRoot, validateTaskBuild,
   loadTaskPrefs, saveTaskPrefs, defaultParentRoot, suggestScanDefaults,
-  suggestTitleFromDraft, applyRecommendDefaults,
+  suggestSlugFromText,
+  applyRecommendDefaults,
 } from './task'
 import {
   DIALOG_DEFAULT_H, DIALOG_DEFAULT_W,
@@ -1154,12 +1155,9 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
   const [repos, setRepos] = useState<TaskRepo[] | null>(null)
   const [checked, setChecked] = useState<string[]>([])
   const [reasons, setReasons] = useState<Record<string, string>>({})
-  const [lead, setLead] = useState('')
   const [slug, setSlug] = useState('')
-  const [title, setTitle] = useState('')
-  // autoTitle:上次自动填的标题(推荐附带/AI 或草稿回退)。用户手改标题后不再覆盖,
-  // 下次 recommend 只有"标题仍是旧自动值"时才更新,手改的永远保留。
-  const autoTitle = useRef('')
+  // 任务描述即标题(ADR-0029):directive/to 的标题位直接用描述(超长截 80),
+  // 一句话标题字段已删,不再维护 title/autoTitle。
   const [tasksRoot, setTasksRoot] = useState(prefs.tasksRoot)
   const [templateDir, setTemplateDir] = useState(prefs.templateDir)
   const [provider, setProvider] = useState(prefs.provider)
@@ -1177,15 +1175,15 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
 
   const scan = async (root: string): Promise<void> => {
     if (root === '') { setError('当前会话没有工作区:先在目标父目录的会话里打开面板'); return }
-    setBusy('扫描中…'); setError(null); setRepos(null); setChecked([]); setReasons({}); setLead(''); setPreview(null)
+    setBusy('扫描中…'); setError(null); setRepos(null); setChecked([]); setReasons({}); setPreview(null)
     try {
       const r = await api<{ ok: boolean; repos?: TaskRepo[]; error?: string }>('task/scan', { parentRoot: root })
       if (!r.ok) { setError(r.error ?? 'scan failed'); return }
       const found = r.repos ?? []
       setRepos(found)
-      // ADR-0028:scan 只展示结构,不预勾选;slug 照旧自拟,等 recommend 按描述推荐后再合并。
-      const d = suggestScanDefaults(root, found)
-      setSlug(d.slug)
+      // ADR-0029:scan 只展示结构;slug 由任务描述/AI 标题定,不再从父目录取。
+      // 占位回 task,等 recommend 按描述/AI 标题覆盖。
+      setSlug('task')
       saveTaskPrefs({ parentRoot: root, tasksRoot, templateDir, provider, model })
       // 扫完即推荐:任务描述来自输入框草稿(入口保证非空)。
       await recommend(found)
@@ -1201,7 +1199,7 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
     if (text === '') { setError('先写任务描述(输入框草稿会自动带入)再推荐'); return }
     setBusy('AI 推荐中…'); setError(null)
     try {
-      const r = await api<{ ok: boolean; recommended?: string[]; reasons?: Record<string, string>; title?: string; error?: string }>(
+      const r = await api<{ ok: boolean; recommended?: string[]; reasons?: Record<string, string>; title?: string; error?: string; stopReason?: string; rawLen?: number; rawHead?: string }>(
         'task/recommend',
         {
           description: text,
@@ -1210,29 +1208,24 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
         },
       )
       if (!r.ok) {
-        // 判不出/调用失败 → 空选 + 提示手勾,不阻塞;标题回退草稿启发。
-        setChecked([]); setReasons({}); setLead('')
-        setError(`AI 推荐失败,已清空勾选请手动勾选(${r.error ?? 'unknown'})`)
-        if (title === '' || title === autoTitle.current) {
-          const t = suggestTitleFromDraft(text) || slug
-          setTitle(t); autoTitle.current = t
-        }
+        // 判不出/调用失败 → 空选 + 提示手勾,不阻塞;slug 回退描述启发。
+        setChecked([]); setReasons({})
+        const diag = [`stop=${r.stopReason ?? '?'}`, `rawLen=${r.rawLen ?? '?'}`].join(' ')
+        setError(`AI 推荐失败(${diag}):${r.error ?? 'unknown'}${r.rawHead ? ` 原文头:${r.rawHead}` : ''} —— 已清空勾选请手动勾选`)
+        setSlug(suggestSlugFromText(text))
         return
       }
       const merged = applyRecommendDefaults(found, r.recommended ?? [])
       setChecked(merged.checked)
       setReasons(r.reasons ?? {})
-      setLead(merged.lead)
-      // 标题:推荐附带的 AI 标题优先(仅当用户没手改时覆盖);都没有则草稿回退。
+      // slug:AI 标题优先(转英文缩写),没有则描述启发;每次推荐都覆盖(用户可手改)。
       const aiTitle = String(r.title ?? '').trim()
-      if (title === '' || title === autoTitle.current) {
-        const t = aiTitle !== '' ? aiTitle : suggestTitleFromDraft(text) || slug
-        setTitle(t); autoTitle.current = t
-      }
+      setSlug(suggestSlugFromText(aiTitle !== '' ? aiTitle : text))
       if (merged.checked.length === 0) setError('AI 没有挑出涉及仓,请手动勾选')
     } catch (e) {
-      setChecked([]); setReasons({}); setLead('')
+      setChecked([]); setReasons({})
       setError(`AI 推荐失败,已清空勾选请手动勾选(${String(e)})`)
+      setSlug(suggestSlugFromText(desc.trim()))
     } finally {
       setBusy('')
     }
@@ -1248,13 +1241,15 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
 
   const build = async (): Promise<void> => {
     const involved = checked
-    const err = validateTaskBuild({ slug, lead, involved, tasksRoot: tasksRoot.trim() !== '' ? tasksRoot.trim() : suggestTasksRoot(parentRoot.trim()) })
+    const err = validateTaskBuild({ slug, involved, tasksRoot: tasksRoot.trim() !== '' ? tasksRoot.trim() : suggestTasksRoot(parentRoot.trim()) })
     if (err !== null) { setError(err); return }
     const finalTasksRoot = tasksRoot.trim() !== '' ? tasksRoot.trim() : suggestTasksRoot(parentRoot.trim())
     setBusy('建任务目录中…'); setError(null); setTaskDir(null); setPreview(null); setSessions(null); setBacks(null)
     try {
+      // 任务描述即标题(ADR-0029):directive/to 的标题位直接用描述,超长截 80。
+      const titleText = desc.trim().length > 80 ? `${desc.trim().slice(0, 80)}…` : desc.trim()
       const r = await api<{ ok: boolean; taskDir?: string; error?: string }>('task/build', {
-        slug: slug.trim(), lead: lead.trim(), involved, title: title.trim() !== '' ? title.trim() : slug.trim(),
+        slug: slug.trim(), involved, title: titleText !== '' ? titleText : slug.trim(),
         tasksRoot: finalTasksRoot,
         parentRoot: parentRoot.trim() !== '' ? parentRoot.trim() : undefined,
         templateDir: templateDir.trim() !== '' ? templateDir.trim() : undefined,
@@ -1284,7 +1279,6 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
     try {
       const r = await api<{ ok: boolean; sessions?: Array<{ repo: string; ok: boolean; sessionId?: string; error?: string }>; error?: string }>('task/launch', {
         taskDir, involved: checked, parentRoot: parentRoot.trim(),
-        lead: lead.trim() !== '' ? lead.trim() : undefined,
         provider: provider.trim() !== '' ? provider.trim() : undefined,
         model: model.trim() !== '' ? model.trim() : undefined,
         skipIssuedCheck: true,
@@ -1314,7 +1308,7 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
   }
 
   const verdict = validateTaskBuild({
-    slug, lead,
+    slug,
     involved: checked,
     tasksRoot: tasksRoot.trim() !== '' ? tasksRoot.trim() : suggestTasksRoot(parentRoot.trim()),
   })
@@ -1349,9 +1343,6 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
                 <input type="checkbox" checked={checked.includes(r.relPath)} onChange={() => toggle(r.relPath)} />
                 <span>{r.relPath}</span>
                 <span className={C('dshe-note')}>{r.kind}{r.kind === 'external' && r.reason ? ` · ${r.reason}` : ''}{reasons[r.relPath] ? ` · AI:${reasons[r.relPath]}` : ''}</span>
-                {r.kind !== 'external' && r.kind !== 'unknown' && lead !== r.relPath && (
-                  <button type="button" className={C('dshe-copybtn')} onClick={() => setLead(r.relPath)}>牵头</button>
-                )}
               </label>
             ))}
             {repos.length === 0 && <div className={C('dshe-note')}>空目录:换个父目录再扫。</div>}
@@ -1359,17 +1350,9 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
         )}
         <div className={C('dshe-row')}>
           <div className={C('dshe-field')}>
-            <span>slug(小写短横线)</span>
+            <span>slug(任务英文缩写,AI 按描述自动拟,可改)</span>
             <input type="text" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="如 broker-empty-semantics" />
           </div>
-          <div className={C('dshe-field')}>
-            <span>牵头仓</span>
-            <input type="text" value={lead} onChange={(e) => setLead(e.target.value)} placeholder="点扫描结果的「牵头」填入" />
-          </div>
-        </div>
-        <div className={C('dshe-field')}>
-          <span>一句话标题</span>
-          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="如 空语义 broker 试点" />
         </div>
         <div className={C('dshe-field')}>
           <span>任务根目录(.tasks)</span>
@@ -1406,7 +1389,7 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
           <div className={C('dshe-field')}>
             <span>将建立 {preview.length} 个执行会话(确认后拉起)</span>
             {preview.map((p) => (
-              <div key={p.repo} className={C('dshe-note')}><b>{p.repo}</b>{p.repo === lead ? ' (牵头)' : ''}: {p.cwd}</div>
+              <div key={p.repo} className={C('dshe-note')}><b>{p.repo}</b>: {p.cwd}</div>
             ))}
             <div className={C('dshe-actions')}>
               <button className={C('dshe-start')} onClick={() => { void launch() }} disabled={busy !== ''}>{busy !== '' ? busy : '确认拉起'}</button>

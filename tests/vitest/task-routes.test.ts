@@ -124,7 +124,7 @@ describe('task routes(面板 HTTP 路由,ADR-0025)', () => {
     // build:模板内联传(不依赖 finance 真身文件,通用落点最小约束)。
     const tasksRoot = join(tmpBase, 'tasks')
     const b = await call(routes, '/dsh-session-enhance/api/task/build', {
-      slug: 'routetest', lead: 'projA', involved: ['projA', 'plain'],
+      slug: 'routetest', involved: ['projA', 'plain'],
       title: '路由测试', tasksRoot, parentRoot: scanRoot, baselines: 'test-baseline',
       directiveTemplate: '---\nslug: <全小写英文短横线，如 broker-empty-semantics>\nversion: <YYYYMMDD_HHMMSS，与文件名时间戳一致>\nstatus: draft # draft / issued，只改新版文件，不覆盖旧版\nlead: <牵头仓路径，如 libs/broker>\ninvolved: [<仓路径1>, <仓路径2>] # 如 [libs/broker, quant/value_swing, Automatic]\ncatalog_baseline: <如 broker 0.3.3 / utils 0.2.0，抄 libs/catalog.toml>\n---\n\n# 总指示：<一句话中文标题>\n',
       toTemplate: '---\nto: <仓路径，如 libs/broker>\nslug: <与总指示同 slug>\ndirective: <同任务目录 directive.md>\ncreated: <YYYY-MM-DD HH:MM>\n---\n\n# 派活：<一句话>\n',
@@ -135,7 +135,7 @@ describe('task routes(面板 HTTP 路由,ADR-0025)', () => {
 
     // launch:两仓会话 id 必须不同(同毫秒碰撞回归)。
     const l = await call(routes, '/dsh-session-enhance/api/task/launch', {
-      taskDir: b.taskDir, lead: 'projA', involved: ['projA', 'plain'], parentRoot: scanRoot,
+      taskDir: b.taskDir, involved: ['projA', 'plain'], parentRoot: scanRoot,
       provider: 'local-proxy', model: 'opencode-muse-spark-1.3',
       skipIssuedCheck: true,
     })

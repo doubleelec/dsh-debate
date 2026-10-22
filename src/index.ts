@@ -2264,11 +2264,12 @@ export default {
               })
               try {
                 const result = await run.result
+                const raw = textOf(result.output)
                 if (result.stopReason !== 'completed') {
-                  return writeJson(res, { ok: false, error: `recommend subagent: ${result.stopReason}` })
+                  return writeJson(res, { ok: false, error: `recommend subagent: ${result.stopReason}`, stopReason: result.stopReason, rawLen: raw.length, rawHead: raw.slice(0, 200) })
                 }
-                const cleaned = parseRecommendText(textOf(result.output), known)
-                return writeJson(res, { ok: true, ...cleaned })
+                const cleaned = parseRecommendText(raw, known)
+                return writeJson(res, { ok: true, ...cleaned, stopReason: result.stopReason, rawLen: raw.length })
               } finally {
                 await run.dispose()
               }
@@ -2307,14 +2308,12 @@ export default {
         handler: async (req, res) => {
           try {
             const body = await readJsonBody(req)
-            const { slug, lead, title, tasksRoot, baselines, parentRoot: bodyParentRoot } = body as Record<string, unknown>
+            const { slug, title, tasksRoot, baselines, parentRoot: bodyParentRoot } = body as Record<string, unknown>
             const involved = (body as Record<string, unknown>).involved
             if (typeof slug !== 'string' || slug === '') throw new Error('slug required')
-            if (typeof lead !== 'string' || lead === '') throw new Error('lead required')
             if (!Array.isArray(involved) || involved.length === 0) throw new Error('involved required')
             if (typeof tasksRoot !== 'string' || tasksRoot === '') throw new Error('tasksRoot required')
             assertTaskAscii(slug, 'slug')
-            assertTaskAscii(lead, 'lead')
             assertTaskAscii(tasksRoot as string, 'tasksRoot')
             for (const repo of involved as unknown[]) assertTaskAscii(String(repo), 'involved[]')
             // parentRoot 显式给出时即验 involved 落点存在(路径映射错第一时间暴露,
@@ -2322,7 +2321,7 @@ export default {
             if (!(body as Record<string, unknown>).skipInvolvedCheck
               && typeof bodyParentRoot === 'string' && bodyParentRoot !== '') {
               assertTaskAscii(bodyParentRoot, 'parentRoot')
-              const missing = [lead as string, ...(involved as unknown[]).map(String)]
+              const missing = [...(involved as unknown[]).map(String)]
                 .filter((r, i, a) => a.indexOf(r) === i)
                 .map((r) => ({ repo: r, cwd: path.join(bodyParentRoot, ...r.split('/')) }))
                 .filter(({ cwd }) => {
@@ -2363,7 +2362,7 @@ export default {
               : (baselines !== null && typeof baselines === 'object' && typeof (baselines as Record<string, unknown>).catalog === 'string'
                 ? (baselines as Record<string, unknown>).catalog as string : '<基线由调用方填>')
             const out = buildMaterials({
-              slug: slug as string, stamp, lead: lead as string, involved: (involved as unknown[]).map(String),
+              slug: slug as string, stamp, involved: (involved as unknown[]).map(String),
               title: typeof title === 'string' && title !== '' ? title : (slug as string),
               baseline, created,
               directiveTemplate: directiveTemplate as string, toTemplate: toTemplate as string,
@@ -2411,8 +2410,6 @@ export default {
             const agents = ctx.get('agents') as { create(o: unknown): Promise<{ agent?: { followup?: (m: unknown) => void } }> } | undefined
             if (!agents) throw new Error('agents unavailable')
             const bodyRec = body as Record<string, unknown>
-            const lead = typeof bodyRec.lead === 'string' ? bodyRec.lead : ''
-            if (lead !== '') assertTaskAscii(lead, 'lead')
             const provider = typeof bodyRec.provider === 'string' && bodyRec.provider !== '' ? bodyRec.provider : undefined
             const model = typeof bodyRec.model === 'string' && bodyRec.model !== '' ? bodyRec.model : undefined
             const taskRef = taskDir.replace(/\\/g, '/')
@@ -2423,7 +2420,7 @@ export default {
               taskLaunchControllers.set(key, ctl)
               try {
                 const cwd = path.join(parentRoot, ...repo.split('/'))
-                const text = handoffText(taskRef, repo, repo === lead)
+                const text = handoffText(taskRef, repo)
                 if (ctl.signal.aborted) throw new Error('aborted')
                 const out = await ensureGroupedSession(
                   { get: ctx.get.bind(ctx) as (name: string) => unknown, agents: agents as never },

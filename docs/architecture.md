@@ -19,7 +19,7 @@
 - **System Name**: dsh-session-enhance (doubleelec native DSH plugin `elec-session-enhance`).
 - **Functions**: 两个入口、两套 host 接线、一套面板外壳——
   - **辩论**：为开放性论证题跑建构 / 挑战 / 制图三角色，产出一套固定五件套成果地图，而非单一结论句；
-  - **跨仓任务**：扫一父目录下多仓结构（scan）→ AI 按任务描述推荐涉及仓、人审核勾选（recommend，ADR-0028）→ 建任务材料目录（build，人审改 issued）→ 一仓一会话拉起执行（launch）→ 回信汇总（report/collect），见 ADR-0025/ADR-0028。
+  - **跨仓任务**：扫一父目录下多仓结构（scan）→ AI 按任务描述推荐涉及仓、人审核勾选（recommend，ADR-0028；失败透出诊断，ADR-0029）→ 建任务材料目录（build，人审改 issued）→ 一仓一会话拉起执行（launch）→ 回信汇总（report/collect），见 ADR-0025/ADR-0028/ADR-0029。
 - **Scope**: `src/` 下的 host 半区（webServer 路由 + 辩论循环与跨仓任务接线，不注册模型工具）与浏览器 bundle（overlay 对话框 + 输入框入口 + 任务面板）。测试单列 `tests/`（§7：vitest 行为门 + pytest 治理门，两扇门一处放）；部署与发包在圈外（见 spec Out of Scope）。
 - **Two functions, one seam**: 辩论（`src/debate/` 三纯模块 + `src/index.ts` 内 deliberation 接线）与多仓任务（`src/cross_tasks/` 三纯模块 + `src/index.ts` 内 task 接线约 480 行）是**平级对等目录**（S22 对称：`debate/` vs `cross_tasks/`，各管各的纯逻辑；`src/version.ts` 共享）。接线层（路由注册/工具注册/控制器）平台强制同文件（tsdown entry 单 `src/index.ts`、路由表在 `apply()` 逐条注册）。S27 摘出 host 内聚两件（不碰路由表）：工具笼 → `src/host/cage.ts`（白名单/交集核对/guard/`askSubagent`），常驻辩手对 → `src/host/resident.ts`（建对/交棒/停机判定）；`index.ts` 只留路由表 + 重导出（兼容旧 import 面），tests 直连 `src/host/*`。
 
@@ -157,11 +157,11 @@ flowchart TD
 - **Elements (task)**:
   - `src/cross_tasks/` 四纯模块（ADR-0025 + ADR-0028）——
     - `scan.ts`：结构探针（`scanParent`/`probeGit`/`mergeSameGitRoot`，`FsDeps` 注入可测）：输入 parentRoot，输出旗下直接子目录的 git 归属（`repo` 独立检出 / `part` 父库一部分 / `external` 名单或 junction 跳过 / `unknown` 拿不准让人勾）。
-    - `materials.ts`：材料构建（`fillDirective`/`fillTo`/`buildMaterials` + `assertAscii`/`leftoverPlaceholders` + `handoffText`/`reportMarkdown`）：模板真身调用方显式传（`templateDir`/`directiveTemplate`/`toTemplate` 三选一），占位没填完就报错不写半成品。
+    - `materials.ts`：材料构建（`fillDirective`/`fillTo`/`buildMaterials` + `assertAscii`/`leftoverPlaceholders` + `handoffText`/`reportMarkdown`）：模板真身调用方显式传（`templateDir`/`directiveTemplate`/`toTemplate` 三选一），占位没填完就报错不写半成品；牵头仓已取消（ADR-0029：协调位即任务目录自身，directive `lead:` 行写 none）。
     - `ensure-session.ts`：分组会话三道门（`ensureGroupedSession`，`EnsureDeps` 注入可测）：workspace 注册存在（resolve 或 create）→ `agents.create` 建会话（`meta.cwd` + preset + provider/model 显式）→ `attachSession` 挂进分组 → `followup` 派活。
-    - `recommend.ts`：推荐输出清洗（`parseRecommendText`，ADR-0028）：从模型文本提 JSON，只留已知仓（保序去重），标题截 60 字；非法直接抛错（路由回 ok:false）。
-  - `src/index.ts` task 接线（约 560 行，与 deliberation 路由同文件逐条注册）——路由 8 条（`task/version`/`scan`/`recommend`/`build`/`launch`/`report`/`collect`/`stop`），模型工具零个（人工操作插件，面板 HTTP 路由驱动）+ `taskLaunchControllers`（stop 按 key abort 未完成的拉起；已冒出的不回收）；全部参数显式（不从调用会话 cwd 推导），ASCII 门先行，issued 门卡 launch（S18）；`recommend` 起 one-shot 子 agent（parent 三段式照抄 runHostDebate），只给推荐、人审核。
-  - `src/client`（任务半区）: `✦ 增强会话` 菜单（`InputButton` 二选一：辩论/多仓任务，空草稿整钮禁用，ADR-0028 反转 ADR-0025 可达性）+ `TaskDialog`（scan → recommend → 审核勾选 → build → 预览 → launch，偏好存 localStorage）+ `src/client/task.ts` 纯逻辑（推荐合并/标题回退/校验/偏好，无 React/CSS，node environment 直测）。原生发送键不可拦截——任务启动必须点面板显式按钮（`inputActions` 全仓只有 `setDraft`）。
+    - `recommend.ts`：推荐输出清洗（`parseRecommendText`，ADR-0028）：从模型文本提 JSON，只留已知仓（保序去重），标题截 60 字；非法直接抛错（路由回 ok:false；成功/失败都透出 stopReason/rawLen，失败带 rawHead，ADR-0029）。
+  - `src/index.ts` task 接线（约 560 行，与 deliberation 路由同文件逐条注册）——路由 8 条（`task/version`/`scan`/`recommend`/`build`/`launch`/`report`/`collect`/`stop`），模型工具零个（人工操作插件，面板 HTTP 路由驱动）+ `taskLaunchControllers`（stop 按 key abort 未完成的拉起；已冒出的不回收）；全部参数显式（不从调用会话 cwd 推导），ASCII 门先行，issued 门卡 launch（S18）；`recommend` 起 one-shot 子 agent（parent 三段式照抄 runHostDebate），只给推荐、人审核；`build`/`launch` 已去 lead（ADR-0029）。
+  - `src/client`（任务半区）: `✦ 增强会话` 菜单（`InputButton` 二选一：辩论/多仓任务，空草稿整钮禁用，ADR-0028 反转 ADR-0025 可达性）+ `TaskDialog`（scan → recommend → 审核勾选 → build → 预览 → launch，偏好存 localStorage；无牵头仓、无标题字段，任务描述即标题，slug 按描述/AI 自动拟，ADR-0029）+ `src/client/task.ts` 纯逻辑（slug 缩写/推荐合并/校验/偏好，无 React/CSS，node environment 直测）。原生发送键不可拦截——任务启动必须点面板显式按钮（`inputActions` 全仓只有 `setDraft`）。
 
 ### 4.3 Module Documentation Map
 
@@ -218,8 +218,8 @@ sequenceDiagram
     T->>H: POST task/scan parentRoot(打开自动扫)
     H-->>T: repos 分组 repo part external unknown
     T->>H: POST task/recommend description repos(ADR-0028,AI 推荐涉及仓)
-    H-->>T: recommended reasons title(人审核勾选)
-    T->>H: POST task/build slug lead involved
+    H-->>T: recommended reasons title + stopReason/rawLen(人审核勾选,ADR-0029 透出)
+    T->>H: POST task/build slug involved + title=任务描述(ADR-0029 去 lead/标题字段)
     H->>D: 写 directive 加 to(确认即签发)
     H-->>T: taskDir taskDirName files
     T->>T: 预览将建会话逐仓确认
@@ -232,7 +232,7 @@ sequenceDiagram
     H->>D: 读回信写汇总
 ```
 
-- **Elements (4.4b)**: 打开自动扫、AI 推荐人审核、预览确认后直发，无后台直驱、无回退链：scan 只读结构（`mergeSameGitRoot` 同 git 根合并）；recommend 按描述推荐涉及仓（one-shot 子 agent，`parseRecommendText` 清洗，未知仓过滤；失败回空选 + 手勾，不阻塞）；build 写盘即验（ASCII 门 + involved 落点存在 + 占位残留断言）；launch 每仓独立门（ASCII + 三道门 + provider/model 显式；确认即签发带 skipIssuedCheck，directive 照常写盘留痕；issued 门只拦外部直调 host 路由）；stop 只 abort 未完成的拉起控制器，已冒出的会话不回收（人去会话列表跟进）；report/collect 只读回信做汇总。模板真身永不进插件（调用方显式传，见 ADR-0025）。
+- **Elements (4.4b)**: 打开自动扫、AI 推荐人审核、预览确认后直发，无后台直驱、无回退链：scan 只读结构（`mergeSameGitRoot` 同 git 根合并）；recommend 按描述推荐涉及仓（one-shot 子 agent，`parseRecommendText` 清洗，未知仓过滤；失败回空选 + 手勾，不阻塞；成功/失败都透出 stopReason/rawLen，失败带 rawHead，ADR-0029）；build 写盘即验（ASCII 门 + involved 落点存在 + 占位残留断言；已去 lead，协调位即任务目录自身）；launch 每仓独立门（ASCII + 三道门 + provider/model 显式；确认即签发带 skipIssuedCheck，directive 照常写盘留痕；issued 门只拦外部直调 host 路由）；stop 只 abort 未完成的拉起控制器，已冒出的会话不回收（人去会话列表跟进）；report/collect 只读回信做汇总。模板真身永不进插件（调用方显式传，见 ADR-0025）。
 
 ### 4.5 Deployment/Physical View
 
@@ -272,7 +272,8 @@ sequenceDiagram
 - [ADR-0024](adr/0024-single-thread-fork.md): 单线分叉——单模型双角色交替线（互盲拿掉：挑战者能看到建构原文逐条反驳；载体用分叉保主会话零污染；种子照抄原生 fork；防呆 `isRouteIneffective` 豁免单线）。
 - [ADR-0025](adr/0025-task-merge.md): 增强入口与跨仓任务并入——输入框按钮改"✦ 增强"弹菜单（辩论/多仓任务），原生发送键不借用（`inputActions` 全仓只有 `setDraft`）；task 三纯模块并入 `src/cross_tasks/`（S23 由 `src/task/` 改名，原型废弃后腾名），路由挂 `/dsh-session-enhance/api/task/*` 7 条，模型工具零个（人工操作插件，面板 HTTP 路由驱动，不注册模型工具），launch 三道门 + issued 门照抄 launcher。
 - [ADR-0026](adr/0026-task-autofill-preview.md): 任务面板打开即扫 + 预览即确认门——父目录默认只用当前会话 cwd（偏好旧值忽略防串台），repo 全勾/牵头首个/slug 自拟自动回填（⚠️ 回填部分已被 ADR-0028 作废：scan 只展示，涉及仓由推荐定）；"扫描结构"按钮改为"重新扫描"；build 成功直接进预览（逐仓"仓→cwd→provider/model"），确认才 launch（确认即签发带 `skipIssuedCheck`，issued 门只拦外部直调）。
-- [ADR-0028](adr/0028-task-recommend-review.md): 任务面板 AI 推荐涉及仓 + 入口前置草稿门——`task/recommend` 按任务描述推荐涉及仓（只给推荐 + 理由 + 标题，人审核；判不出回空选 + 手勾）；入口改名"✦ 增强会话"，空草稿整钮禁用（有意反转 ADR-0025 可达性）；WIRE-01 task 路由 7→8 条。
+- [ADR-0028](adr/0028-task-recommend-review.md): 任务面板 AI 推荐涉及仓 + 入口前置草稿门——`task/recommend` 按任务描述推荐涉及仓（只给推荐 + 理由 + 标题，人审核；判不出回空选 + 手勾）；入口改名"✦ 增强会话"，空草稿整钮禁用（有意反转 ADR-0025 可达性）；WIRE-01 task 路由 7→8 条。（部分被 ADR-0029 作废：牵头取首个 + 标题机制。）
+- [ADR-0029](adr/0029-task-no-lead-slug-desc.md): 去牵头仓 + slug 按任务 + 去标题字段——协调位即任务目录自身（directive `lead:` 写 none）；slug 从描述/AI 标题经 `suggestSlugFromText` 定（不再从父目录取工程名）；留任务描述去一句话标题（标题位直接用描述，截 80）；recommend 成功/失败透出 stopReason/rawLen（失败带 rawHead）供排障。
 
 ## 6. Constraints and Risks
 

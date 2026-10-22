@@ -49,7 +49,7 @@ One row per test function in each `tests/<module>/test_invariants.py`. Placehold
 | `test_invariants.py::test_client_task_dialog_wired` | src/client TaskDialog wired to task calls | dialog or a task/* call disappears |
 | `test_invariants.py::test_client_task_dialog_takes_sessions` | src/client TaskDialog takes useSessions like DebateDialog (ADR-0026 fix) | the useSessions prop threading is lost in a merge |
 | `test_invariants.py::test_client_task_dialog_cwd_key_not_snap_current` | src/client TaskDialog keys cwd lookup on currentSid (0.2.0 snapshots carry no current) | TaskDialog keys byId lookup on snap.current alone |
-| `test_invariants.py::test_client_task_recommend_wired` | src/client TaskDialog recommends involved repos via task/recommend (ADR-0028) | panel drops the recommend call, merge, or entry draft gate |
+| `test_invariants.py::test_client_task_recommend_wired` | src/client TaskDialog recommends involved repos via task/recommend (ADR-0028/0029: no lead, no title field) | panel drops the recommend call, merge, entry draft gate, or reintroduces lead/title fields |
 | `test_invariants.py::test_client_no_send_key_intercept` | src/client send key stays unwired (ADR-0025) | panel code touches `inputActions`/`actions` beyond `setDraft` |
 | `test_invariants.py::test_debate_pure_surface_exists` | src/debate pure modules keep entry points (S22) | an exported pure function disappears |
 | `test_invariants.py::test_debate_vitest_mirrors_exist` | src/debate every module keeps vitest mirror (S22) | a deliberation vitest file is missing |
@@ -71,10 +71,10 @@ One row per file (each file's cases are the gate). Run: `npm run test:sandbox`.
 | `dialogLayout.test.ts` | 对话框尺寸钳制 + 高度持久化 | 面板尺寸越界或记忆丢失 |
 | `labels.test.ts` | 角色名 + 轮次标签/小结 + stopKey | 面板人话标签漂移 |
 | `task-scan.test.ts` | 跨仓结构探针 + git 归属判定 | 仓识别错（repo/part/external 误判）|
-| `task-materials.test.ts` | directive/to 模板填充 + ASCII 门 + 回信汇总 | 材料缺占位或混入非 ASCII |
+| `task-materials.test.ts` | directive/to 模板填充 + ASCII 门 + 回信汇总（ADR-0029 去牵头仓） | 材料缺占位或混入非 ASCII |
 | `task-ensure-session.test.ts` | 分组会话三道门 + 临时会话回收 | 会话拉错仓或泄漏 |
 | `task-routes.test.ts` | task 七路由 + 模型工具参数校验 | 路由/工具与纯模块脱节 |
-| `task-panel.test.ts` | 面板任务纯逻辑（推荐合并/标题回退/校验/偏好） | 表单校验、推荐合并或偏好读写坏掉 |
+| `task-panel.test.ts` | 面板任务纯逻辑（slug 缩写/推荐合并/校验/偏好，ADR-0029） | slug 生成、推荐合并或偏好读写坏掉 |
 | `task-recommend.test.ts` | 涉及仓推荐输出解析（ADR-0028） | 模型输出清洗（过滤/截断/抛错）坏掉 |
 
 ## Maintenance rules

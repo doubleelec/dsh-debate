@@ -14,7 +14,6 @@ export function shortName(repo: string): string {
 export interface FillDirectiveOpts {
   slug: string
   stamp: string
-  lead: string
   involved: string[]
   title: string
   baseline: string
@@ -28,7 +27,7 @@ export function fillDirective(
   template: string,
   opts: FillDirectiveOpts,
 ): string {
-  const { slug, stamp, lead, involved, title, baseline } = opts
+  const { slug, stamp, involved, title, baseline } = opts
   let text = template
   text = text.replace(
     'slug: <全小写英文短横线，如 broker-empty-semantics>', `slug: ${slug}`,
@@ -40,7 +39,8 @@ export function fillDirective(
     'status: draft # draft / issued / closed，只改新版文件，不覆盖旧版',
     'status: draft # 草稿：人审完改 issued，只改新版文件，不覆盖旧版',
   )
-  text = text.replace('lead: <牵头仓路径，如 libs/broker>', `lead: ${lead}`)
+  // 牵头仓已取消(ADR-0029):协调位就是任务目录自身,lead 行写 none(占位必须消灭)。
+  text = text.replace('lead: <牵头仓路径，如 libs/broker>', 'lead: none # 协调位见任务目录(ADR-0029 去牵头仓)')
   text = text.replace(
     'involved: [<仓路径1>, <仓路径2>] # 如 [libs/broker, quant/value_swing, Automatic]',
     `involved: [${involved.join(', ')}]`,
@@ -79,7 +79,6 @@ export function fillTo(template: string, opts: FillToOpts): string {
 export interface BuildMaterialsOpts {
   slug: string
   stamp: string
-  lead: string
   involved: string[]
   title: string
   baseline: string
@@ -104,12 +103,12 @@ export function buildMaterials(opts: BuildMaterialsOpts): {
   toFiles: ToFile[]
 } {
   const {
-    slug, stamp, lead, involved, title, baseline, created,
+    slug, stamp, involved, title, baseline, created,
     directiveTemplate, toTemplate, tasksPrefix = '.tasks',
   } = opts
   const taskDirName = `${slug}-${stamp}`
   const taskRef = `${tasksPrefix}/${taskDirName}`
-  const directive = fillDirective(directiveTemplate, { slug, stamp, lead, involved, title, baseline })
+  const directive = fillDirective(directiveTemplate, { slug, stamp, involved, title, baseline })
   const toFiles = involved.map((repo) => ({
     repo,
     fileName: `to-${shortName(repo)}.md`,
@@ -133,10 +132,9 @@ export function leftoverPlaceholders(text: string): string[] {
 }
 
 /** 派活首句：执行会话唯一的上下文入口（照抄 cross-tasks 开会话清单形状）。 */
-export function handoffText(taskRef: string, repo: string, isLead: boolean): string {
+export function handoffText(taskRef: string, repo: string): string {
   const short = shortName(repo)
-  const base = `读 ${taskRef}/to-${short}.md，同目录 directive.md 可一并读，按 §做什么干活`
-  return isLead ? `${base}（牵头，先落完整工作文档）` : base
+  return `读 ${taskRef}/to-${short}.md，同目录 directive.md 可一并读，按 §做什么干活`
 }
 
 /** 回信文件名：back-\<short\>.md（short 规则与 to 一致）。 */

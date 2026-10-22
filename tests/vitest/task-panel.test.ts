@@ -8,7 +8,7 @@ import {
   saveTaskPrefs,
   defaultParentRoot,
   suggestScanDefaults,
-  suggestTitleFromDraft,
+  suggestSlugFromText,
   applyRecommendDefaults,
 } from '../../src/client/task'
 
@@ -49,15 +49,14 @@ describe('validateSlug', () => {
 })
 
 describe('validateTaskBuild', () => {
-  const good = { slug: 'demo', lead: 'libs/a', involved: ['libs/a'], tasksRoot: '/t/.tasks' }
+  const good = { slug: 'demo', involved: ['libs/a'], tasksRoot: '/t/.tasks' }
 
   it('全齐通过', () => {
     expect(validateTaskBuild(good)).toBe(null)
   })
 
-  it('按 slug→lead→involved→tasksRoot 顺序报首个缺项', () => {
+  it('按 slug→involved→tasksRoot 顺序报首个缺项(ADR-0029 去牵头仓)', () => {
     expect(validateTaskBuild({ ...good, slug: '' })).toContain('slug')
-    expect(validateTaskBuild({ ...good, lead: '' })).toContain('牵头仓')
     expect(validateTaskBuild({ ...good, involved: [] })).toContain('涉及仓')
     expect(validateTaskBuild({ ...good, tasksRoot: '' })).toContain('任务根')
   })
@@ -83,7 +82,7 @@ describe('defaultParentRoot', () => {
 })
 
 describe('suggestScanDefaults', () => {
-  it('ADR-0028:只定 slug,不预勾选不牵头(等 recommend 再合并)', () => {
+  it('ADR-0029:只占位,不预勾选不拟 slug(等 recommend 按描述/AI 标题覆盖)', () => {
     const d = suggestScanDefaults('D:/work/finance', [
       { relPath: 'libs/broker', kind: 'repo' },
       { relPath: 'data', kind: 'external' },
@@ -91,34 +90,27 @@ describe('suggestScanDefaults', () => {
       { relPath: 'plain', kind: 'unknown' },
     ])
     expect(d.checked).toEqual([])
-    expect(d.lead).toBe('')
-    expect(d.slug).toBe('finance')
-    expect(d.title).toBe('finance')
-  })
-
-  it('无 repo 时 slug 回退 task', () => {
-    const d = suggestScanDefaults('', [{ relPath: 'plain', kind: 'unknown' }])
-    expect(d.checked).toEqual([])
-    expect(d.lead).toBe('')
     expect(d.slug).toBe('task')
   })
 
-  it('中文/空格父目录名清洗成可用 slug', () => {
-    const d = suggestScanDefaults('D:/工作/我的 仓', [{ relPath: 'a', kind: 'repo' }])
+  it('参数忽略,恒回占位', () => {
+    const d = suggestScanDefaults('', [{ relPath: 'plain', kind: 'unknown' }])
+    expect(d.checked).toEqual([])
     expect(d.slug).toBe('task')
   })
 })
 
-describe('suggestTitleFromDraft', () => {
-  it('空白折叠后取前 40 字,超长加省略号', () => {
-    expect(suggestTitleFromDraft('  修 broker\n的空语义  ')).toBe('修 broker 的空语义')
-    const long = 'a'.repeat(50)
-    expect(suggestTitleFromDraft(long)).toBe(`${'a'.repeat(40)}…`)
+describe('suggestSlugFromText', () => {
+  it('英文描述洗成小写短横,截 40', () => {
+    expect(suggestSlugFromText('Fix Broker Empty Semantics Now')).toBe('fix-broker-empty-semantics-now')
+    expect(suggestSlugFromText('a'.repeat(50))).toBe('a'.repeat(40))
   })
 
-  it('空草稿回空(调用方再回退 slug)', () => {
-    expect(suggestTitleFromDraft('')).toBe('')
-    expect(suggestTitleFromDraft('   \n  ')).toBe('')
+  it('中文描述洗空回退 task,用户手改', () => {
+    expect(suggestSlugFromText('修 broker 的空语义')).toBe('broker')
+    expect(suggestSlugFromText('中文全中文')).toBe('task')
+    expect(suggestSlugFromText('')).toBe('task')
+    expect(suggestSlugFromText('   ')).toBe('task')
   })
 })
 
@@ -129,20 +121,18 @@ describe('applyRecommendDefaults', () => {
     { relPath: 'plain', kind: 'unknown' },
   ]
 
-  it('推荐与扫描求交,保推荐序,lead 取首个', () => {
+  it('推荐与扫描求交,保推荐序去重不过 lead', () => {
     const d = applyRecommendDefaults(found, ['quant/x', 'libs/broker'])
     expect(d.checked).toEqual(['quant/x', 'libs/broker'])
-    expect(d.lead).toBe('quant/x')
   })
 
   it('未知仓/unknown/external 被过滤,去重', () => {
     const d = applyRecommendDefaults(found, ['nope', 'libs/broker', 'libs/broker', 'plain'])
     expect(d.checked).toEqual(['libs/broker'])
-    expect(d.lead).toBe('libs/broker')
   })
 
   it('都不中则空选(提示手勾)', () => {
-    expect(applyRecommendDefaults(found, [])).toEqual({ checked: [], lead: '' })
-    expect(applyRecommendDefaults(found, ['nope'])).toEqual({ checked: [], lead: '' })
+    expect(applyRecommendDefaults(found, [])).toEqual({ checked: [] })
+    expect(applyRecommendDefaults(found, ['nope'])).toEqual({ checked: [] })
   })
 })
