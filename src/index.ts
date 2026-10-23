@@ -29,7 +29,7 @@ import { fromRecord, markInterrupted, renderReport, reportRelPath, STORAGE_TABLE
 import { findLens, type LensTemplate } from './debate/lenses'
 // 跨仓任务(task):scan/build/launch/report/collect/stop —— 从 dsh-task-launcher 移植(ADR-0025)。
 import { scanParent, defaultDeps as taskDefaultDeps } from './cross_tasks/scan'
-import { buildMaterials, handoffText, reportFileName, reportMarkdown, assertAscii as assertTaskAscii, leftoverPlaceholders } from './cross_tasks/materials'
+import { buildMaterials, handoffText, reportFileName, reportMarkdown, assertAscii as assertTaskAscii, leftoverPlaceholders, DEFAULT_DIRECTIVE_TEMPLATE, DEFAULT_TO_TEMPLATE } from './cross_tasks/materials'
 import { ensureGroupedSession, clearTempHandles as clearTaskTempHandles } from './cross_tasks/ensure-session'
 import { parseRecommendText } from './cross_tasks/recommend'
 import { describeRepos, defaultDescDeps as taskDescDeps } from './cross_tasks/candidates'
@@ -2402,6 +2402,51 @@ export default {
       },
       {
         kind: 'exact',
+        path: '/dsh-session-enhance/api/task/models',
+        handler: async (_req, res) => {
+          // 面板下拉数据(ADR-0031):provider/model 让人选而不是手打。
+          // llm 服务不在(老宿主/测试 fake ctx)时回空列表 + 当前默认,面板退化为手输。
+          const out: {
+            ok: boolean
+            providers: Array<{ id: string; name: string }>
+            models: Array<{ provider: string; id: string; name: string }>
+            current: { provider: string; model: string } | null
+            error?: string
+          } = { ok: true, providers: [], models: [], current: null }
+          try {
+            const llm = ctx.get('llm') as
+              | { listProviders?(): Array<{ id?: string; name?: string }>; listModels?(p: string): Promise<Array<{ id?: string; name?: string; provider?: string }>> }
+              | undefined
+            for (const p of llm?.listProviders?.() ?? []) {
+              const id = String(p?.id ?? '')
+              if (id === '') continue
+              out.providers.push({ id, name: String(p?.name ?? id) })
+            }
+            if (typeof llm?.listModels === 'function') {
+              for (const p of out.providers) {
+                try {
+                  for (const m of await llm.listModels(p.id)) {
+                    const id = String(m?.id ?? '')
+                    if (id === '') continue
+                    out.models.push({ provider: p.id, id, name: String(m?.name ?? id) })
+                  }
+                } catch { /* 单个 provider 取模型失败不影响其余 */ }
+              }
+            }
+            const dm = ctx.get('agentDefaultModel') as { currentSelection?: () => { provider?: string; model?: string } } | undefined
+            const sel = dm?.currentSelection?.()
+            if (sel && typeof sel.provider === 'string' && typeof sel.model === 'string') {
+              out.current = { provider: sel.provider, model: sel.model }
+            }
+          } catch (e) {
+            out.ok = false
+            out.error = e instanceof Error ? e.message : String(e)
+          }
+          return writeJson(res, out)
+        },
+      },
+      {
+        kind: 'exact',
         path: '/dsh-session-enhance/api/task/scan',
         handler: async (req, res) => {
           try {
@@ -2460,22 +2505,24 @@ export default {
             const taskDir = path.join(tRoot, taskDirName)
             if (fs.existsSync(taskDir)) throw new Error(`task dir collision under ${tRoot} for slug ${slug as string}`)
             const created = taskCreatedOf()
-            // 模板真身在编排库:调用方显式传 templateDir,或显式传 directiveTemplate/toTemplate 文本覆盖文件读取;
-            // 都不传才回退 tasksRoot 上一级,回退路径仍做 ASCII 门。
+            // 模板来源优先级(ADR-0031):调用方显式文本 > templateDir 里的真身 > 内建默认。
+            // 以前不传就回退 tasksRoot 上一级找 directive_template.md,那里没这文件 → ENOENT。
             const bodyRec = body as Record<string, unknown>
             let directiveTemplate = typeof bodyRec.directiveTemplate === 'string' ? bodyRec.directiveTemplate : null
             let toTemplate = typeof bodyRec.toTemplate === 'string' ? bodyRec.toTemplate : null
-            if (!directiveTemplate || !toTemplate) {
-              const templateDir = typeof bodyRec.templateDir === 'string' && bodyRec.templateDir !== ''
-                ? bodyRec.templateDir
-                : path.resolve(tRoot, '..')
+            const templateDir = typeof bodyRec.templateDir === 'string' && bodyRec.templateDir !== ''
+              ? bodyRec.templateDir
+              : null
+            if ((!directiveTemplate || !toTemplate) && templateDir !== null) {
               assertTaskAscii(templateDir, 'templateDir')
               directiveTemplate = directiveTemplate ?? fs.readFileSync(path.join(templateDir, 'directive_template.md'), 'utf-8')
               toTemplate = toTemplate ?? fs.readFileSync(path.join(templateDir, 'to_template.md'), 'utf-8')
             }
+            directiveTemplate = directiveTemplate ?? DEFAULT_DIRECTIVE_TEMPLATE
+            toTemplate = toTemplate ?? DEFAULT_TO_TEMPLATE
             const baseline = typeof baselines === 'string' ? baselines
               : (baselines !== null && typeof baselines === 'object' && typeof (baselines as Record<string, unknown>).catalog === 'string'
-                ? (baselines as Record<string, unknown>).catalog as string : '<基线由调用方填>')
+                ? (baselines as Record<string, unknown>).catalog as string : '未登记')
             const out = buildMaterials({
               slug: slug as string, stamp, involved: (involved as unknown[]).map(String),
               title: typeof title === 'string' && title !== '' ? title : (slug as string),

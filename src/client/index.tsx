@@ -1176,6 +1176,10 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
   const [backs, setBacks] = useState<Array<{ file: string; text: string }> | null>(null)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // provider/model 下拉数据(ADR-0031):llm 服务给列表,取不到就退化为手输。
+  const [modelOpts, setModelOpts] = useState<{ providers: Array<{ id: string; name: string }>; models: Array<{ provider: string; id: string; name: string }> }>({ providers: [], models: [] })
+  const [scannedRoot, setScannedRoot] = useState('')
+  const [recommendedDesc, setRecommendedDesc] = useState('')
   // 推荐失败现场(ADR-0030):候选清单 + 模型原文,折叠展示,说清"为什么没挑出来"。
   const [recFail, setRecFail] = useState<{ reason: string; candidates: string[]; descriptors: Record<string, string>; rawHead: string; stopReason?: string; rawLen?: number } | null>(null)
 
@@ -1191,9 +1195,12 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
       if (!r.ok) { setError(r.error ?? 'scan failed'); return }
       const found = r.repos ?? []
       setRepos(found)
+      setScannedRoot(root)
       // ADR-0029:scan 只展示结构;slug 由任务描述/AI 标题定,不再从父目录取。
       // 占位回 task,等 recommend 按描述/AI 标题覆盖。
       setSlug('task')
+      // 任务根目录没填就落到默认 .tasks(不再靠「默认 .tasks」按钮提示)。
+      if (tasksRoot.trim() === '') setTasksRoot(suggestTasksRoot(root))
       saveTaskPrefs({ parentRoot: root, tasksRoot, templateDir, provider, model })
       // 扫完即推荐:任务描述来自输入框草稿(入口保证非空)。
       await recommend(found)
@@ -1208,6 +1215,7 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
     const text = desc.trim()
     if (text === '') { setError('先写任务描述(输入框草稿会自动带入)再推荐'); return }
     setBusy('AI 推荐中…'); setError(null)
+    setRecommendedDesc(text)
     try {
       const r = await api<{ ok: boolean; recommended?: string[]; reasons?: Record<string, string>; title?: string; error?: string; stopReason?: string; rawLen?: number; rawHead?: string; knownCount?: number; candidates?: string[]; descriptors?: Record<string, string> }>(
         'task/recommend',
@@ -1256,7 +1264,20 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
     if (autoScanned.current) return
     autoScanned.current = true
     void scan(defaultParentRoot(liveCwd))
+    void (async () => {
+      try {
+        const m = await api<{ ok: boolean; providers?: Array<{ id: string; name: string }>; models?: Array<{ provider: string; id: string; name: string }>; current?: { provider: string; model: string } | null }>('task/models', {})
+        if (m.ok) setModelOpts({ providers: m.providers ?? [], models: m.models ?? [] })
+      } catch { /* 取不到列表就退化为手输 */ }
+    })()
   }, [])
+
+  /** 父目录改了才重扫(替代「重新扫描」按钮):失焦或回车触发,值没变不打扰。 */
+  const rescanIfChanged = (): void => {
+    const root = parentRoot.trim()
+    if (root === '' || root === scannedRoot) return
+    void scan(root)
+  }
 
   const build = async (): Promise<void> => {
     const involved = checked
@@ -1331,6 +1352,10 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
     involved: checked,
     tasksRoot: tasksRoot.trim() !== '' ? tasksRoot.trim() : suggestTasksRoot(parentRoot.trim()),
   })
+  // 只把能当任务落点的仓列出来(ADR-0031):unknown/external 不是仓,列出来也没法全选。
+  const usableRepos = (repos ?? []).filter((r) => r.kind === 'repo' || r.kind === 'part')
+  const ignoredRepos = (repos ?? []).filter((r) => r.kind !== 'repo' && r.kind !== 'part')
+  const providerModels = modelOpts.models.filter((m) => provider === '' || m.provider === provider)
   return (
     <div className={C('dshe-overlay')} role="dialog" aria-label="多仓任务">
       <div className={C('dshe-header')}>
@@ -1353,49 +1378,62 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
         )}
         <div className={C('dshe-note')}>打开自动扫描当前会话目录 → AI 按任务描述推荐涉及仓 → 你审核勾选 → 确认拉起(原生回车只发消息,不触发任务)。</div>
         <div className={C('dshe-field')}>
-          <span>任务描述(AI 按它推荐涉及仓,可改)</span>
-          <textarea value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="如 修 broker 空语义" rows={3} />
-          <div className={C('dshe-actions')}>
-            <button type="button" className={C('dshe-copybtn')} onClick={() => { if (repos !== null) void recommend(repos) }} disabled={busy !== '' || repos === null || desc.trim() === ''}>重新推荐</button>
-          </div>
+          <span>任务描述(AI 按它推荐涉及仓,改完失焦即重推)</span>
+          <textarea
+            value={desc}
+            onChange={(e) => setDesc(e.target.value)}
+            onBlur={() => {
+              if (repos === null) return
+              if (desc.trim() === '' || desc.trim() === recommendedDesc) return
+              void recommend(repos)
+            }}
+            placeholder="如 清理本文件夹下所有的 .tmp"
+            rows={3}
+          />
         </div>
         <div className={C('dshe-field')}>
-          <span>父目录(当前会话目录,换仓重扫)</span>
-          <input type="text" value={parentRoot} onChange={(e) => setParentRoot(e.target.value)} placeholder="如 D:/Users/xxx/Documents/finance" />
-          <div className={C('dshe-actions')}>
-            <button className={C('dshe-start')} onClick={() => { void scan(parentRoot.trim()) }} disabled={busy !== ''}>{busy === '扫描中…' ? busy : '重新扫描'}</button>
-          </div>
+          <span>父目录(换目录后失焦即重扫)</span>
+          <input
+            type="text"
+            value={parentRoot}
+            onChange={(e) => setParentRoot(e.target.value)}
+            onBlur={rescanIfChanged}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); rescanIfChanged() } }}
+            placeholder="如 D:/Users/xxx/Documents/finance"
+          />
         </div>
         {repos !== null && (
           <div className={C('dshe-field')}>
             <span>扫描结果(AI 推荐已预勾选,逐项审核)</span>
             <div className={C('dshe-checklist')}>
-              {repos.map((r) => (
+              {usableRepos.map((r) => (
                 <label key={r.relPath} className={C('dshe-checkrow')}>
                   <input type="checkbox" checked={checked.includes(r.relPath)} onChange={() => toggle(r.relPath)} />
                   <span className={C('dshe-checkpath')}>{r.relPath}</span>
                   <span className={C('dshe-checkkind')}>{r.kind}</span>
-                  {r.kind === 'external' && r.reason && (
-                    <span className={C('dshe-note')}> · {r.reason}</span>
-                  )}
                   {reasons[r.relPath] && (
                     <span className={C('dshe-checkreason')}>AI:{reasons[r.relPath]}</span>
                   )}
                 </label>
               ))}
             </div>
-            {repos.length === 0 && <div className={C('dshe-note')}>空目录:换个父目录再扫。</div>}
-            {repos.length > 0 && (
+            {usableRepos.length === 0 && <div className={C('dshe-note')}>空目录:换个父目录再扫。</div>}
+            {ignoredRepos.length > 0 && (
+              <div className={C('dshe-note')}>
+                已忽略 {ignoredRepos.length} 个非仓目录:{ignoredRepos.map((r) => r.relPath).join('、')}
+              </div>
+            )}
+            {usableRepos.length > 0 && (
               <div className={C('dshe-actions')}>
                 <button
                   type="button"
                   className={C('dshe-copybtn')}
-                  onClick={() => setChecked(repos.filter((r) => r.kind === 'repo' || r.kind === 'part').map((r) => r.relPath))}
+                  onClick={() => setChecked(usableRepos.map((r) => r.relPath))}
                 >
                   全选可用仓
                 </button>
                 <button type="button" className={C('dshe-copybtn')} onClick={() => setChecked([])}>全不选</button>
-                <span className={C('dshe-note')}>已选 {checked.length} / 可用 {repos.filter((r) => r.kind === 'repo' || r.kind === 'part').length}</span>
+                <span className={C('dshe-note')}>已选 {checked.length} / 可用 {usableRepos.length}</span>
               </div>
             )}
           </div>
@@ -1425,28 +1463,49 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
         </div>
         <div className={C('dshe-field')}>
           <span>任务根目录(.tasks)</span>
-          <input type="text" value={tasksRoot} onChange={(e) => setTasksRoot(e.target.value)} placeholder={suggestTasksRoot(parentRoot.trim()) || '如 D:/…/cross-tasks/.tasks'} />
-          <div className={C('dshe-actions')}>
-            <button type="button" className={C('dshe-copybtn')} onClick={() => setTasksRoot(suggestTasksRoot(parentRoot.trim()))} disabled={parentRoot.trim() === ''}>默认 .tasks</button>
-          </div>
+          <input type="text" value={tasksRoot} onChange={(e) => setTasksRoot(e.target.value)} />
         </div>
         <div className={C('dshe-field')}>
-          <span>模板目录(可选,缺省任务根上一级)</span>
+          <span>模板目录(可选,留空用内建模板)</span>
           <input type="text" value={templateDir} onChange={(e) => setTemplateDir(e.target.value)} placeholder="含 directive_template.md / to_template.md 的编排库" />
         </div>
         <div className={C('dshe-row')}>
           <div className={C('dshe-field')}>
-            <span>provider(可选)</span>
-            <input type="text" value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="缺省读宿主默认" />
+            <span>provider</span>
+            {modelOpts.providers.length > 0 ? (
+              <select
+                value={provider}
+                onChange={(e) => { setProvider(e.target.value); setModel('') }}
+              >
+                <option value="">宿主默认</option>
+                {modelOpts.providers.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            ) : (
+              <input type="text" value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="宿主默认" />
+            )}
           </div>
           <div className={C('dshe-field')}>
-            <span>model(可选)</span>
-            <input type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="缺省读宿主默认" />
+            <span>model</span>
+            {providerModels.length > 0 ? (
+              <select value={model} onChange={(e) => setModel(e.target.value)}>
+                <option value="">宿主默认</option>
+                {providerModels.map((m) => (
+                  <option key={`${m.provider}/${m.id}`} value={m.id}>
+                    {provider === '' ? `${m.provider}/${m.name}` : m.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="宿主默认" />
+            )}
           </div>
         </div>
         {verdict !== null && <div className={C('dshe-note')}>待填:{verdict}</div>}
         <div className={C('dshe-actions')}>
           <button className={C('dshe-start')} onClick={() => { void build() }} disabled={busy !== '' || verdict !== null}>{busy !== '' ? busy : '建任务并预览会话'}</button>
+          <button className={C('dshe-copybtn')} onClick={props.onClose} disabled={busy !== ''}>取消</button>
         </div>
         {taskDir !== null && (
           <div className={C('dshe-resolved')}>

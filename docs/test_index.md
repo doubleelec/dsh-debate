@@ -43,7 +43,7 @@ One row per test function in each `tests/<module>/test_invariants.py`. Placehold
 | `test_invariants.py::test_src_debater_tool_allowlist_is_closed` | src debater allowlist closed at six tools (ADR-0022) | the allowlist gains/loses an entry |
 | `test_invariants.py::test_src_synth_tool_allowlist_is_closed` | src synth allowlist closed at three tools (ADR-0022) | the allowlist gains/loses an entry |
 | `test_invariants.py::test_src_registered_tools_match_manifest` | src registers no model tools, manifest tools empty (human-operated plugin) | a tools.register returns or manifest tools non-empty |
-| `test_invariants.py::test_src_task_routes_are_nine` | src task wiring keeps nine routes (ADR-0025 + ADR-0028 recommend + ADR-0030 log) | a task route is added/removed/renamed |
+| `test_invariants.py::test_src_task_routes_are_ten` | src task wiring keeps ten routes (0025 + 0028 recommend + 0030 log + 0031 models) | a task route is added/removed/renamed |
 | `test_invariants.py::test_src_peer_symmetry` | src debate/ vs task/ peer symmetry (S22, S27: host/ joins) | a peer dir loses module.toml, flat leftovers return, or wiring leaks into peers |
 | `test_invariants.py::test_client_pure_surface_exists` | src/client pure modules keep entry points | an exported pure function disappears |
 | `test_invariants.py::test_client_task_dialog_wired` | src/client TaskDialog wired to task calls | dialog or a task/* call disappears |
@@ -73,7 +73,7 @@ One row per file (each file's cases are the gate). Run: `npm run test:sandbox`.
 | `task-scan.test.ts` | 跨仓结构探针 + git 归属判定 | 仓识别错（repo/part/external 误判）|
 | `task-materials.test.ts` | directive/to 模板填充 + ASCII 门 + 回信汇总（ADR-0029 去牵头仓） | 材料缺占位或混入非 ASCII |
 | `task-ensure-session.test.ts` | 分组会话三道门 + 临时会话回收 | 会话拉错仓或泄漏 |
-| `task-routes.test.ts` | task 九路由（含 ADR-0030 recommend/log）+ 模型工具参数校验 | 路由/工具与纯模块脱节 |
+| `task-routes.test.ts` | task 十路由（含 0030 recommend/log、0031 models）+ 内建模板 build + 工具参数校验 | 路由/工具与纯模块脱节，或缺模板即崩 |
 | `task-panel.test.ts` | 面板任务纯逻辑（slug 缩写/推荐合并/校验/偏好，ADR-0029） | slug 生成、推荐合并或偏好读写坏掉 |
 | `task-recommend.test.ts` | 涉及仓推荐输出解析 + 写法宽容匹配（ADR-0028/0030） | 模型输出清洗（过滤/截断/抛错/归一）坏掉 |
 | `task-candidates.test.ts` | 候选仓自述来源优先级 + 截断（ADR-0030） | 分仓员拿不到仓自述或自述优先级错 |

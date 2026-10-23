@@ -76,6 +76,52 @@ export function fillTo(template: string, opts: FillToOpts): string {
   return text
 }
 
+/**
+ * 内建默认模板(ADR-0031):调用方不传文本、也不传 templateDir 时用它,不再去父目录
+ * 找 directive_template.md——那里通常没有该文件,会直接 ENOENT 把 build 打死。
+ * 占位符拼写必须与 fillDirective/fillTo 的 replace 目标逐字一致,否则残留断言会拦下。
+ */
+export const DEFAULT_DIRECTIVE_TEMPLATE = [
+  '---',
+  'slug: <全小写英文短横线，如 broker-empty-semantics>',
+  'version: <YYYYMMDD_HHMMSS，与文件名时间戳一致>',
+  'status: draft # draft / issued / closed，只改新版文件，不覆盖旧版',
+  'lead: <牵头仓路径，如 libs/broker>',
+  'involved: [<仓路径1>, <仓路径2>] # 如 [libs/broker, quant/value_swing, Automatic]',
+  'catalog_baseline: <如 broker 0.3.3 / utils 0.2.0，抄 libs/catalog.toml>',
+  '---',
+  '',
+  '# 总指示：<一句话中文标题>',
+  '',
+  '## 目标',
+  '写清要达成的结果与可判的验收标准。',
+  '',
+  '## 涉及',
+  '逐仓列出要改的点,各仓细节见同目录 to-*.md。',
+  '',
+  '## 约束',
+  '- 只改本任务范围内的文件,不顺手重构无关代码。',
+  '- 完成后在任务目录留回信:做了什么 / 怎么验证的 / 遗留风险。',
+].join('\n')
+
+export const DEFAULT_TO_TEMPLATE = [
+  '---',
+  'to: <仓路径，如 libs/broker>',
+  'slug: <与总指示同 slug>',
+  'directive: <同任务目录 directive.md>',
+  'created: <YYYY-MM-DD HH:MM>',
+  '---',
+  '',
+  '# 派活：<一句话>',
+  '',
+  '先读同目录 directive.md(总指示),只做与你仓相关的部分。',
+  '',
+  '## 交付',
+  '1. 改动清单(文件 + 一句话说明)',
+  '2. 验证方式',
+  '3. 遗留问题',
+].join('\n')
+
 export interface BuildMaterialsOpts {
   slug: string
   stamp: string

@@ -101,12 +101,13 @@ const tmpBase = join(tmpdir(), `dsh-session-enhance-task-routes-${Date.now()}`)
 mkdirSync(tmpBase, { recursive: true })
 
 describe('task routes(面板 HTTP 路由,ADR-0025)', () => {
-  it('routes: /api/task/* 九路由注册(ADR-0030 增 recommend/log)', () => {
+  it('routes: /api/task/* 十路由注册(ADR-0030 log + ADR-0031 models)', () => {
     const taskPaths = routes.map((r) => r.path).filter((p) => p.startsWith('/dsh-session-enhance/api/task/')).sort()
     expect(taskPaths).toEqual([
       '/dsh-session-enhance/api/task/build',
       '/dsh-session-enhance/api/task/collect',
       '/dsh-session-enhance/api/task/launch',
+      '/dsh-session-enhance/api/task/models',
       '/dsh-session-enhance/api/task/recommend',
       '/dsh-session-enhance/api/task/recommend/log',
       '/dsh-session-enhance/api/task/report',
@@ -196,6 +197,25 @@ describe('task routes(面板 HTTP 路由,ADR-0025)', () => {
     })
     expect(issued.ok).toBe(true)
     rmSync(tmpBase, { recursive: true, force: true })
+  })
+
+  it('routes: 不传模板也能建材料(内建默认,ADR-0031 消灭 ENOENT)', async () => {
+    const tasksRoot2 = join(tmpBase, 'tasks-default-tpl')
+    const b2 = await call(routes, '/dsh-session-enhance/api/task/build', {
+      slug: 'defaulttpl', involved: ['projA'], title: '内建模板', tasksRoot: tasksRoot2,
+    })
+    expect(b2.ok).toBe(true)
+    const text = readFileSync(join(b2.taskDir as string, 'directive.md'), 'utf-8')
+    expect(text).toContain('slug: defaulttpl')
+    expect(text).toContain('involved: [projA]')
+    expect(text).toContain('lead: none')
+  })
+
+  it('routes: task/models 无 llm 服务时回空列表不抛(面板退化手输)', async () => {
+    const m = await call(routes, '/dsh-session-enhance/api/task/models', {})
+    expect(m.ok).toBe(true)
+    expect(m.providers).toEqual([])
+    expect(m.models).toEqual([])
   })
 
   it('routes: 中文路径显式报错', async () => {

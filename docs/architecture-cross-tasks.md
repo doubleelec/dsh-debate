@@ -19,7 +19,7 @@
   人审核勾选（recommend，ADR-0028）→ 建任务材料目录（build，人审改 issued）→
   一仓一会话拉起执行（launch）→ 回信汇总（report / collect），见 ADR-0025/0028/0029。
 - **Scope**: `src/cross_tasks/` 四纯模块（scan / materials / ensure-session / recommend）+
-  `src/index.ts` 内 task 接线（8 条路由 + `taskLaunchControllers`，模型工具零个）+
+  `src/index.ts` 内 task 接线（10 条路由 + `taskLaunchControllers`，模型工具零个）+
   `src/client` 任务半区（`✦ 增强会话`菜单 + TaskDialog + `task.ts` 纯逻辑）+
   共用的 `src/version.ts` 与面板外壳。辩论不在本文档内，见 `docs/architecture-debate.md`。
 - **One seam**: 纯逻辑（`src/cross_tasks/`，零 IO 或依赖注入，可单测）与 host 接线
@@ -51,7 +51,7 @@
 
 ### 4.1 Context View
 
-- **Purpose**: 任务半区在 DSH 里占什么位置：一个 task 接线 + 8 条 HTTP 路由 + 一个任务面板，
+- **Purpose**: 任务半区在 DSH 里占什么位置：一个 task 接线 + 10 条 HTTP 路由 + 一个任务面板，
   不碰会话主循环。黑盒只讲边界。
 - **Model/Diagram**:
 
@@ -161,12 +161,15 @@ flowchart TD
     `meta.cwd` + preset + provider / model 显式 → `attachSession` 挂进分组 →
     `followup` 派活）+ `clearTempHandles`。
   - `src/index.ts` task 接线（约 560 行，与 deliberation 路由同文件逐条注册）：
-    路由 8 条（`task/version` / `scan` / `recommend` / `build` / `launch` / `report` /
-    `collect` / `stop`），模型工具零个（人工操作插件，面板 HTTP 路由驱动）+
+    路由 10 条（`task/version` / `scan` / `recommend` / `recommend/log` / `models` /
+    `build` / `launch` / `report` / `collect` / `stop`），模型工具零个
+    （人工操作插件，面板 HTTP 路由驱动）+
     `taskLaunchControllers`（stop 按 key abort 未完成的拉起；已冒出的不回收）；
     全部参数显式（不从调用会话 cwd 推导），ASCII 门先行，issued 门卡 launch（S18）；
     `recommend` 起 one-shot 子 agent（parent 三段式照抄 runHostDebate），只给推荐、人审核；
-    `build` / `launch` 已去 lead（ADR-0029）。
+    `recommend/log` 回最近 20 次尝试（ADR-0030）；`models` 给面板 provider/model 下拉
+    （`llm.listProviders` + `listModels`，取不到退化为手输，ADR-0031）；
+    `build` / `launch` 已去 lead（ADR-0029），模板缺省走内建（ADR-0031）。
   - `src/client` 任务半区：`✦ 增强会话`菜单（`InputButton` 二选一：辩论 / 多仓任务，
     空草稿整钮禁用，ADR-0028 反转 ADR-0025 可达性）+ TaskDialog（scan → recommend →
     审核勾选 → build → 预览 → launch，偏好存 localStorage；无牵头仓、无标题字段，
@@ -263,7 +266,13 @@ sequenceDiagram
 - [ADR-0030](adr/0030-recommend-context-and-log.md): 推荐链补上下文与可观测——
   候选仓带一行自述（`candidates.ts`）、模型输出写法宽容归一（`matchRecommended`）、
   空推荐回候选清单 + 原文、最近 20 次推荐进环形缓冲 + `/api/task/recommend/log`
-  （WIRE-01 8→9 条；调试不再依赖界面复述）。
+  （WIRE-01 8→9 条；调试不再依赖界面复述）。提示词只讲"数量不是判断标准"。
+- [ADR-0031](adr/0031-task-panel-controls-and-defaults.md): 面板控件与缺省——
+  去"重新扫描"/"重新推荐"（父目录、描述失焦即重算）、加"取消"、勾选区只列真仓
+  （unknown/external 收进一行忽略提示）、去"默认 .tasks"按钮（scan 直接填）、
+  provider/model 改下拉（新增 `task/models`）、模板内建
+  （`DEFAULT_DIRECTIVE_TEMPLATE` / `DEFAULT_TO_TEMPLATE`，消灭父目录找模板的 ENOENT；
+  WIRE-01 9→10 条）。
 
 ## 6. Constraints and Risks
 
@@ -295,4 +304,4 @@ sequenceDiagram
 - **Invariants (TOML)**:
   - PURE-01（`src/cross_tasks/module.toml`）：三纯模块导出面 + vitest 镜像不丢。
   - PANEL-01（`src/client/module.toml`）：TaskDialog 接 task 调用不掉线、发送键不扩权。
-  - WIRE-01 / SYM-01（`src/module.toml`）：task 8 路由面 + `debate/` 与 `cross_tasks/` 平级对称。
+  - WIRE-01 / SYM-01（`src/module.toml`）：task 10 路由面 + `debate/` 与 `cross_tasks/` 平级对称。
