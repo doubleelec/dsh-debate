@@ -1199,7 +1199,7 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
     if (text === '') { setError('先写任务描述(输入框草稿会自动带入)再推荐'); return }
     setBusy('AI 推荐中…'); setError(null)
     try {
-      const r = await api<{ ok: boolean; recommended?: string[]; reasons?: Record<string, string>; title?: string; error?: string; stopReason?: string; rawLen?: number; rawHead?: string }>(
+      const r = await api<{ ok: boolean; recommended?: string[]; reasons?: Record<string, string>; title?: string; error?: string; stopReason?: string; rawLen?: number; rawHead?: string; knownCount?: number }>(
         'task/recommend',
         {
           description: text,
@@ -1208,9 +1208,9 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
         },
       )
       if (!r.ok) {
-        // 判不出/调用失败 → 空选 + 提示手勾,不阻塞;slug 回退描述启发。
+        // 判不出/调用失败/空推荐 → 空选 + 提示手勾,不阻塞;slug 回退描述启发。
         setChecked([]); setReasons({})
-        const diag = [`stop=${r.stopReason ?? '?'}`, `rawLen=${r.rawLen ?? '?'}`].join(' ')
+        const diag = [`stop=${r.stopReason ?? '?'}`, `rawLen=${r.rawLen ?? '?'}`, `known=${r.knownCount ?? '?'}`].join(' ')
         setError(`AI 推荐失败(${diag}):${r.error ?? 'unknown'}${r.rawHead ? ` 原文头:${r.rawHead}` : ''} —— 已清空勾选请手动勾选`)
         setSlug(suggestSlugFromText(text))
         return
@@ -1221,7 +1221,6 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
       // slug:AI 标题优先(转英文缩写),没有则描述启发;每次推荐都覆盖(用户可手改)。
       const aiTitle = String(r.title ?? '').trim()
       setSlug(suggestSlugFromText(aiTitle !== '' ? aiTitle : text))
-      if (merged.checked.length === 0) setError('AI 没有挑出涉及仓,请手动勾选')
     } catch (e) {
       setChecked([]); setReasons({})
       setError(`AI 推荐失败,已清空勾选请手动勾选(${String(e)})`)
@@ -1338,21 +1337,27 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
         {repos !== null && (
           <div className={C('dshe-field')}>
             <span>扫描结果(AI 推荐已预勾选,逐项审核)</span>
-            {repos.map((r) => (
-              <label key={r.relPath} className={C('dshe-checkrow')}>
-                <input type="checkbox" checked={checked.includes(r.relPath)} onChange={() => toggle(r.relPath)} />
-                <span>{r.relPath}</span>
-                <span className={C('dshe-note')}>{r.kind}{r.kind === 'external' && r.reason ? ` · ${r.reason}` : ''}{reasons[r.relPath] ? ` · AI:${reasons[r.relPath]}` : ''}</span>
-              </label>
-            ))}
+            <div className={C('dshe-checklist')}>
+              {repos.map((r) => (
+                <label key={r.relPath} className={C('dshe-checkrow')}>
+                  <input type="checkbox" checked={checked.includes(r.relPath)} onChange={() => toggle(r.relPath)} />
+                  <span className={C('dshe-checkpath')}>{r.relPath}</span>
+                  <span className={C('dshe-checkkind')}>{r.kind}</span>
+                  {r.kind === 'external' && r.reason && (
+                    <span className={C('dshe-note')}> · {r.reason}</span>
+                  )}
+                  {reasons[r.relPath] && (
+                    <span className={C('dshe-checkreason')}>AI:{reasons[r.relPath]}</span>
+                  )}
+                </label>
+              ))}
+            </div>
             {repos.length === 0 && <div className={C('dshe-note')}>空目录:换个父目录再扫。</div>}
           </div>
         )}
-        <div className={C('dshe-row')}>
-          <div className={C('dshe-field')}>
-            <span>slug(任务英文缩写,AI 按描述自动拟,可改)</span>
-            <input type="text" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="如 broker-empty-semantics" />
-          </div>
+        <div className={C('dshe-field')}>
+          <span>slug(任务英文缩写,AI 按描述自动拟,可改)</span>
+          <input type="text" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="如 broker-empty-semantics" />
         </div>
         <div className={C('dshe-field')}>
           <span>任务根目录(.tasks)</span>
@@ -1388,9 +1393,14 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
         {preview !== null && (
           <div className={C('dshe-field')}>
             <span>将建立 {preview.length} 个执行会话(确认后拉起)</span>
-            {preview.map((p) => (
-              <div key={p.repo} className={C('dshe-note')}><b>{p.repo}</b>: {p.cwd}</div>
-            ))}
+            <div className={C('dshe-checklist')}>
+              {preview.map((p) => (
+                <div key={p.repo} className={C('dshe-previewrow')}>
+                  <span className={C('dshe-checkpath')}>{p.repo}</span>
+                  <span className={C('dshe-note')}>{p.cwd}</span>
+                </div>
+              ))}
+            </div>
             <div className={C('dshe-actions')}>
               <button className={C('dshe-start')} onClick={() => { void launch() }} disabled={busy !== ''}>{busy !== '' ? busy : '确认拉起'}</button>
             </div>

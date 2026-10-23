@@ -2269,6 +2269,16 @@ export default {
                   return writeJson(res, { ok: false, error: `recommend subagent: ${result.stopReason}`, stopReason: result.stopReason, rawLen: raw.length, rawHead: raw.slice(0, 200) })
                 }
                 const cleaned = parseRecommendText(raw, known)
+                // 空推荐即失败(ADR-0029 修订):模型真给了空，或全被已知仓过滤掉，
+                // 两者对用户都是"没挑出来"。回 ok:false + 诊断，面板走失败分支
+                // （带原文透出 + 手勾提示），不再报误导人的"AI 没有挑出"。
+                if (cleaned.recommended.length === 0) {
+                  return writeJson(res, {
+                    ok: false, error: 'recommend empty: 模型没给出可用涉及仓(可能全被过滤)',
+                    stopReason: result.stopReason, rawLen: raw.length, rawHead: raw.slice(0, 200),
+                    knownCount: known.length,
+                  })
+                }
                 return writeJson(res, { ok: true, ...cleaned, stopReason: result.stopReason, rawLen: raw.length })
               } finally {
                 await run.dispose()

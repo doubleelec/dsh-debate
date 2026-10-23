@@ -503,13 +503,67 @@
   background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12));
 }
 
-/* 任务面板勾选行:复选框 + 路径 + 类型 + 牵头按钮。 */
-.dshe-checkrow {
+/* 任务面板勾选行:复选框 + 路径 + 类型胶囊,AI 理由/外部原因另起一行缩进。 */
+.dshe-checklist {
   display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dshe-checkrow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: 8px;
+  row-gap: 1px;
   align-items: center;
-  gap: 8px;
   font-size: 13px;
-  padding: 2px 0;
+  padding: 3px 0;
+}
+
+.dshe-checkrow input[type="checkbox"] {
+  margin: 0;
+  grid-row: span 2;
+  align-self: start;
+  margin-top: 3px;
+}
+
+.dshe-checkpath {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  word-break: break-all;
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+}
+
+.dshe-checkkind {
+  font-size: 11px;
+  color: var(--dsw-alias-label-caption, #8a8a8a);
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.35));
+  border-radius: 999px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.dshe-checkreason {
+  grid-column: 2 / -1;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary, #9a9a9a);
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+/* 预览行:与勾选行同网格口径,仓路径左对齐,cwd 右列。 */
+.dshe-previewrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  column-gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+  padding: 3px 0;
+  border-bottom: 1px dashed var(--dsw-alias-border-l3, rgba(128,128,128,.2));
+}
+
+.dshe-previewrow:last-child {
+  border-bottom: 0;
 }
 
 /* 会话 id 行:裸 id + 复制按钮,小字灰色不抢戏。 */
