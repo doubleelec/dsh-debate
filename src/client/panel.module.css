@@ -503,6 +503,46 @@
   background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12));
 }
 
+/* 忙/错固定贴顶:探测、推荐、建材料、拉起、汇总的进度与错误都留在视口顶部,
+   不随面板内容滚走(ADR-0030 反馈可见性)。 */
+.dshe-statusbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0 8px;
+  background: var(--dsw-alias-bg-layer-0, #1e1e1e);
+}
+
+.dshe-busyrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--dsw-alias-border-l3, rgba(128,128,128,.25));
+  border-left: 3px solid var(--dsw-alias-accent, #4c8dff);
+  background: var(--dsw-alias-bg-layer-1, #222);
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+}
+
+.dshe-spinner {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid var(--dsw-alias-accent, #4c8dff);
+  border-top-color: transparent;
+  animation: dshe-spin 0.8s linear infinite;
+}
+
+@keyframes dshe-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* 推荐失败现场(ADR-0030):说清"为什么没挑出来",原文折叠。 */
 .dshe-recfail {
   border: 1px solid var(--dsw-alias-border-l3, rgba(128,128,128,.25));

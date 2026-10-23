@@ -1338,6 +1338,18 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
         <button className={C('dshe-close')} onClick={props.onClose} aria-label="关闭">✕</button>
       </div>
       <div className={C('dshe-body')}>
+        {/* 忙/错条固定贴顶(不随内容滚走):探测、推荐、建材料、拉起、汇总全在这里报进度。 */}
+        {(busy !== '' || error !== null) && (
+          <div className={C('dshe-statusbar')}>
+            {busy !== '' && (
+              <div className={C('dshe-busyrow')}>
+                <span className={C('dshe-spinner')} aria-hidden="true" />
+                <span>{busy}</span>
+              </div>
+            )}
+            {busy === '' && error !== null && <div className={C('dshe-error')}>{error}</div>}
+          </div>
+        )}
         <div className={C('dshe-note')}>打开自动扫描当前会话目录 → AI 按任务描述推荐涉及仓 → 你审核勾选 → 确认拉起(原生回车只发消息,不触发任务)。</div>
         <div className={C('dshe-field')}>
           <span>任务描述(AI 按它推荐涉及仓,可改)</span>
@@ -1372,6 +1384,19 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
               ))}
             </div>
             {repos.length === 0 && <div className={C('dshe-note')}>空目录:换个父目录再扫。</div>}
+            {repos.length > 0 && (
+              <div className={C('dshe-actions')}>
+                <button
+                  type="button"
+                  className={C('dshe-copybtn')}
+                  onClick={() => setChecked(repos.filter((r) => r.kind === 'repo' || r.kind === 'part').map((r) => r.relPath))}
+                >
+                  全选可用仓
+                </button>
+                <button type="button" className={C('dshe-copybtn')} onClick={() => setChecked([])}>全不选</button>
+                <span className={C('dshe-note')}>已选 {checked.length} / 可用 {repos.filter((r) => r.kind === 'repo' || r.kind === 'part').length}</span>
+              </div>
+            )}
           </div>
         )}
         {recFail !== null && (
@@ -1464,7 +1489,6 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
             ))}
           </div>
         )}
-        {error !== null && <div className={C('dshe-error')}>{error}</div>}
       </div>
     </div>
   )
