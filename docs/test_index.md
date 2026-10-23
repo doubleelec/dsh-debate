@@ -73,7 +73,7 @@ One row per file (each file's cases are the gate). Run: `npm run test:sandbox`.
 | `task-scan.test.ts` | 跨仓结构探针 + git 归属判定 | 仓识别错（repo/part/external 误判）|
 | `task-materials.test.ts` | directive/to 模板填充 + ASCII 门 + 回信汇总（ADR-0029 去牵头仓） | 材料缺占位或混入非 ASCII |
 | `task-ensure-session.test.ts` | 分组会话三道门 + 临时会话回收 | 会话拉错仓或泄漏 |
-| `task-routes.test.ts` | task 十路由（含 0030 recommend/log、0031 models）+ 内建模板 build + 工具参数校验 | 路由/工具与纯模块脱节，或缺模板即崩 |
+| `task-routes.test.ts` | task 十路由（0030 recommend/log、0032 models 契约）+ 内建模板 build + 工具参数校验 | 路由/工具与纯模块脱节，或缺模板即崩，或 llm 缺失被静默吞 |
 | `task-panel.test.ts` | 面板任务纯逻辑（slug 缩写/推荐合并/校验/偏好，ADR-0029） | slug 生成、推荐合并或偏好读写坏掉 |
 | `task-recommend.test.ts` | 涉及仓推荐输出解析 + 写法宽容匹配（ADR-0028/0030） | 模型输出清洗（过滤/截断/抛错/归一）坏掉 |
 | `task-candidates.test.ts` | 候选仓自述来源优先级 + 截断（ADR-0030） | 分仓员拿不到仓自述或自述优先级错 |

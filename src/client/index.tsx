@@ -1176,8 +1176,15 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
   const [backs, setBacks] = useState<Array<{ file: string; text: string }> | null>(null)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState<string | null>(null)
-  // provider/model 下拉数据(ADR-0031):llm 服务给列表,取不到就退化为手输。
-  const [modelOpts, setModelOpts] = useState<{ providers: Array<{ id: string; name: string }>; models: Array<{ provider: string; id: string; name: string }> }>({ providers: [], models: [] })
+  // provider/model 下拉数据(ADR-0032):llm 服务给列表;取不到就是接线缺陷,报错不退化。
+  const [modelsInfo, setModelsInfo] = useState<{
+    ok: boolean
+    providers: Array<{ id: string; name: string }>
+    models: Array<{ provider: string; id: string; name: string }>
+    providerErrors: Array<{ provider: string; error: string }>
+    current: { provider: string; model: string } | null
+    error?: string
+  } | null>(null)
   const [scannedRoot, setScannedRoot] = useState('')
   const [recommendedDesc, setRecommendedDesc] = useState('')
   // 推荐失败现场(ADR-0030):候选清单 + 模型原文,折叠展示,说清"为什么没挑出来"。
@@ -1266,9 +1273,30 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
     void scan(defaultParentRoot(liveCwd))
     void (async () => {
       try {
-        const m = await api<{ ok: boolean; providers?: Array<{ id: string; name: string }>; models?: Array<{ provider: string; id: string; name: string }>; current?: { provider: string; model: string } | null }>('task/models', {})
-        if (m.ok) setModelOpts({ providers: m.providers ?? [], models: m.models ?? [] })
-      } catch { /* 取不到列表就退化为手输 */ }
+        const m = await api<{
+          ok: boolean
+          providers?: Array<{ id: string; name: string }>
+          models?: Array<{ provider: string; id: string; name: string }>
+          providerErrors?: Array<{ provider: string; error: string }>
+          current?: { provider: string; model: string } | null
+          error?: string
+        }>('task/models', {})
+        setModelsInfo({
+          ok: m.ok,
+          providers: m.providers ?? [],
+          models: m.models ?? [],
+          providerErrors: m.providerErrors ?? [],
+          current: m.current ?? null,
+          error: m.error,
+        })
+        // 首次把宿主当前选择回显到下拉,避免用户以为必须重选。
+        if (m.ok && m.current) {
+          setProvider((prev) => (prev === '' ? m.current!.provider : prev))
+          setModel((prev) => (prev === '' ? m.current!.model : prev))
+        }
+      } catch (e) {
+        setModelsInfo({ ok: false, providers: [], models: [], providerErrors: [], current: null, error: String(e) })
+      }
     })()
   }, [])
 
@@ -1355,7 +1383,13 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
   // 只把能当任务落点的仓列出来(ADR-0031):unknown/external 不是仓,列出来也没法全选。
   const usableRepos = (repos ?? []).filter((r) => r.kind === 'repo' || r.kind === 'part')
   const ignoredRepos = (repos ?? []).filter((r) => r.kind !== 'repo' && r.kind !== 'part')
-  const providerModels = modelOpts.models.filter((m) => provider === '' || m.provider === provider)
+  const listReady = modelsInfo?.ok === true
+  const providerModels = (modelsInfo?.models ?? []).filter((m) => provider === '' || m.provider === provider)
+  const providerListError = provider === ''
+    ? undefined
+    : modelsInfo?.providerErrors.find((e) => e.provider === provider)
+  // 该 provider 明确不广告模型(适配器能力所限)才允许手填 id;其余情况一律只能选。
+  const manualModelAllowed = provider !== '' && providerModels.length === 0 && providerListError !== undefined
   return (
     <div className={C('dshe-overlay')} role="dialog" aria-label="多仓任务">
       <div className={C('dshe-header')}>
@@ -1469,36 +1503,51 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
           <span>模板目录(可选,留空用内建模板)</span>
           <input type="text" value={templateDir} onChange={(e) => setTemplateDir(e.target.value)} placeholder="含 directive_template.md / to_template.md 的编排库" />
         </div>
+        {modelsInfo === null && <div className={C('dshe-note')}>provider/model 列表加载中…</div>}
+        {modelsInfo !== null && !modelsInfo.ok && (
+          <div className={C('dshe-recfail')}>
+            <div><b>provider/model 列表获取失败:</b>{modelsInfo.error ?? 'unknown'}</div>
+            <div className={C('dshe-note')}>
+              这是接线缺陷(宿主 Context.llm 应提供 listProviders/listModels),不是需要手填的理由;
+              在修好之前只能用宿主默认。
+            </div>
+          </div>
+        )}
         <div className={C('dshe-row')}>
           <div className={C('dshe-field')}>
             <span>provider</span>
-            {modelOpts.providers.length > 0 ? (
-              <select
-                value={provider}
-                onChange={(e) => { setProvider(e.target.value); setModel('') }}
-              >
-                <option value="">宿主默认</option>
-                {modelOpts.providers.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            ) : (
-              <input type="text" value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="宿主默认" />
-            )}
+            <select
+              value={provider}
+              disabled={!listReady}
+              onChange={(e) => { setProvider(e.target.value); setModel('') }}
+            >
+              <option value="">宿主默认{modelsInfo?.current ? `(${modelsInfo.current.provider})` : ''}</option>
+              {(modelsInfo?.providers ?? []).map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
           </div>
           <div className={C('dshe-field')}>
             <span>model</span>
-            {providerModels.length > 0 ? (
-              <select value={model} onChange={(e) => setModel(e.target.value)}>
-                <option value="">宿主默认</option>
-                {providerModels.map((m) => (
-                  <option key={`${m.provider}/${m.id}`} value={m.id}>
-                    {provider === '' ? `${m.provider}/${m.name}` : m.name}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="宿主默认" />
+            <select
+              value={manualModelAllowed ? '' : model}
+              disabled={!listReady || providerModels.length === 0}
+              onChange={(e) => setModel(e.target.value)}
+            >
+              <option value="">宿主默认{modelsInfo?.current ? `(${modelsInfo.current.model})` : ''}</option>
+              {providerModels.map((m) => (
+                <option key={`${m.provider}/${m.id}`} value={m.id}>
+                  {provider === '' ? `${m.provider}/${m.name}` : m.name}
+                </option>
+              ))}
+            </select>
+            {manualModelAllowed && (
+              <>
+                <div className={C('dshe-note')}>
+                  该 provider 未广告模型清单({providerListError?.error}),只能手填 model id:
+                </div>
+                <input type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="如 opencode-muse-spark-1.3" />
+              </>
             )}
           </div>
         </div>

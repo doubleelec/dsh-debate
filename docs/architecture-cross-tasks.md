@@ -273,6 +273,10 @@ sequenceDiagram
   provider/model 改下拉（新增 `task/models`）、模板内建
   （`DEFAULT_DIRECTIVE_TEMPLATE` / `DEFAULT_TO_TEMPLATE`，消灭父目录找模板的 ENOENT；
   WIRE-01 9→10 条）。
+- [ADR-0032](adr/0032-no-silent-degradation.md): 能力缺失是缺陷不是退化理由——`llm` 是宿主
+  Context 服务（`Context.llm: LlmRuntime`，`listProviders`/`listModels`），取不到即接线缺陷，
+  `task/models` 回 `ok:false` 让面板报错（ADR-0030 排障同精神）；适配器不广告模型属合法能力
+  差异，收进 `providerErrors` 点名，只有该情形才允许手填 model id。
 
 ## 6. Constraints and Risks
 

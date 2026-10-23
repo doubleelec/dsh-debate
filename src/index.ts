@@ -2404,33 +2404,46 @@ export default {
         kind: 'exact',
         path: '/dsh-session-enhance/api/task/models',
         handler: async (_req, res) => {
-          // 面板下拉数据(ADR-0031):provider/model 让人选而不是手打。
-          // llm 服务不在(老宿主/测试 fake ctx)时回空列表 + 当前默认,面板退化为手输。
+          // 面板下拉数据(ADR-0032):provider/model 由 llm 服务给出,人只做选择。
+          // llm 是宿主注册的 Context 服务(Context.llm: LlmRuntime),取不到即接线缺陷,
+          // 一律 ok:false 报出来——不做"退化手输"那种藏故障的兜底。
+          // 单个 provider 的 listModels 抛错同样带 provider 名回错误(适配器可能不广告清单)。
           const out: {
             ok: boolean
             providers: Array<{ id: string; name: string }>
             models: Array<{ provider: string; id: string; name: string }>
+            providerErrors: Array<{ provider: string; error: string }>
             current: { provider: string; model: string } | null
             error?: string
-          } = { ok: true, providers: [], models: [], current: null }
+          } = { ok: false, providers: [], models: [], providerErrors: [], current: null }
           try {
             const llm = ctx.get('llm') as
-              | { listProviders?(): Array<{ id?: string; name?: string }>; listModels?(p: string): Promise<Array<{ id?: string; name?: string; provider?: string }>> }
+              | {
+                listProviders(): Array<{ id?: string; name?: string }>
+                listModels(p: string): Promise<Array<{ id?: string; name?: string }>>
+              }
               | undefined
-            for (const p of llm?.listProviders?.() ?? []) {
+            if (!llm || typeof llm.listProviders !== 'function' || typeof llm.listModels !== 'function') {
+              return writeJson(res, {
+                ...out,
+                error: 'llm 服务不可用(应为 Context.llm: LlmRuntime)——provider/model 列表无从获取',
+              })
+            }
+            for (const p of llm.listProviders()) {
               const id = String(p?.id ?? '')
               if (id === '') continue
               out.providers.push({ id, name: String(p?.name ?? id) })
             }
-            if (typeof llm?.listModels === 'function') {
-              for (const p of out.providers) {
-                try {
-                  for (const m of await llm.listModels(p.id)) {
-                    const id = String(m?.id ?? '')
-                    if (id === '') continue
-                    out.models.push({ provider: p.id, id, name: String(m?.name ?? id) })
-                  }
-                } catch { /* 单个 provider 取模型失败不影响其余 */ }
+            for (const p of out.providers) {
+              try {
+                for (const m of await llm.listModels(p.id)) {
+                  const id = String(m?.id ?? '')
+                  if (id === '') continue
+                  out.models.push({ provider: p.id, id, name: String(m?.name ?? id) })
+                }
+              } catch (e) {
+                // 适配器不广告模型是合法情形(目录仅供选择,路由不依赖它):点名报出,不静默。
+                out.providerErrors.push({ provider: p.id, error: e instanceof Error ? e.message : String(e) })
               }
             }
             const dm = ctx.get('agentDefaultModel') as { currentSelection?: () => { provider?: string; model?: string } } | undefined
@@ -2438,6 +2451,7 @@ export default {
             if (sel && typeof sel.provider === 'string' && typeof sel.model === 'string') {
               out.current = { provider: sel.provider, model: sel.model }
             }
+            out.ok = true
           } catch (e) {
             out.ok = false
             out.error = e instanceof Error ? e.message : String(e)

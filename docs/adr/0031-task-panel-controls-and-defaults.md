@@ -26,8 +26,9 @@
 4. **去"默认 .tasks"按钮**：`tasksRoot` 空时由 scan 直接填好默认值，字段不再需要按钮或占位提示。
 5. **provider / model 改下拉**：新增只读路由 `POST /api/task/models`
    （`llm.listProviders()` + 逐 provider `listModels()` + `agentDefaultModel.currentSelection()`）；
-   面板拿到列表就渲染 `<select>`（首项"宿主默认"），拿不到（老宿主/测试 fake ctx）退化为手输。
-   WIRE-01 task 路由 9→10 条。
+   面板拿到列表就渲染 `<select>`（首项"宿主默认"）。
+   ⚠️ 初版在此处写了"拿不到就退化为手输"——**已被 ADR-0032 推翻**：`llm` 是宿主 Context 服务，
+   取不到属接线缺陷，必须报错而不是退化。WIRE-01 task 路由 9→10 条。
 6. **模板内建**：`cross_tasks/materials.ts` 导出 `DEFAULT_DIRECTIVE_TEMPLATE` /
    `DEFAULT_TO_TEMPLATE`，来源优先级改为 **显式文本 > `templateDir` 里的真身 > 内建默认**。
    旧逻辑在两者都不给时去 `tasksRoot` 上一级找 `directive_template.md`——那里通常没有该文件，

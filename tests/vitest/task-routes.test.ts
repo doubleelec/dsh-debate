@@ -63,6 +63,28 @@ function makeCtx(recommendText?: string): {
           async mount(): Promise<void> {},
         }
       }
+      // llm 服务契约(Context.llm: LlmRuntime):provider/model 下拉的数据源。
+      // 一个 provider 正常广告两个模型,一个明确不广告(适配器能力所限)。
+      if (name === 'llm') {
+        return {
+          listProviders(): Array<{ id: string; name: string }> {
+            return [
+              { id: 'local-proxy', name: 'Local Proxy' },
+              { id: 'closed-box', name: 'Closed Box' },
+            ]
+          },
+          async listModels(provider: string): Promise<Array<{ id: string; name: string }>> {
+            if (provider === 'closed-box') throw new Error('adapter does not advertise models')
+            return [
+              { id: 'opencode-muse-spark-1.3', name: 'Muse Spark' },
+              { id: 'deepseek-chat', name: 'DeepSeek Chat' },
+            ]
+          },
+        }
+      }
+      if (name === 'agentDefaultModel') {
+        return { currentSelection(): { provider: string; model: string } { return { provider: 'local-proxy', model: 'opencode-muse-spark-1.3' } } }
+      }
       if (name === 'storage') return undefined
       return undefined
     },
@@ -211,11 +233,31 @@ describe('task routes(面板 HTTP 路由,ADR-0025)', () => {
     expect(text).toContain('lead: none')
   })
 
-  it('routes: task/models 无 llm 服务时回空列表不抛(面板退化手输)', async () => {
+  it('routes: task/models 走 llm 服务给 provider/model 列表(ADR-0032)', async () => {
     const m = await call(routes, '/dsh-session-enhance/api/task/models', {})
     expect(m.ok).toBe(true)
-    expect(m.providers).toEqual([])
-    expect(m.models).toEqual([])
+    expect(m.providers).toEqual([
+      { id: 'local-proxy', name: 'Local Proxy' },
+      { id: 'closed-box', name: 'Closed Box' },
+    ])
+    // 正常 provider 的两个模型 + closed-box 的失败被点名捕获(不是静默吞掉)。
+    expect(m.models).toEqual([
+      { provider: 'local-proxy', id: 'opencode-muse-spark-1.3', name: 'Muse Spark' },
+      { provider: 'local-proxy', id: 'deepseek-chat', name: 'DeepSeek Chat' },
+    ])
+    expect(m.providerErrors).toEqual([{ provider: 'closed-box', error: 'adapter does not advertise models' }])
+    expect(m.current).toEqual({ provider: 'local-proxy', model: 'opencode-muse-spark-1.3' })
+  })
+
+  it('routes: llm 服务缺失时 task/models 报错而不是空列表(不退化)', async () => {
+    const c4 = makeCtx('{"recommended": [], "reasons": {}, "title": "t"}')
+    const noLlm = c4.ctx as unknown as { get(n: string): unknown }
+    const original = noLlm.get.bind(noLlm)
+    noLlm.get = (n: string): unknown => (n === 'llm' ? undefined : original(n))
+    apply(c4.ctx)
+    const m = await call(c4.routes, '/dsh-session-enhance/api/task/models', {})
+    expect(m.ok).toBe(false)
+    expect(String(m.error)).toContain('llm 服务不可用')
   })
 
   it('routes: 中文路径显式报错', async () => {
