@@ -2212,8 +2212,17 @@ export default {
             const known = repos
               .filter((r) => (r.kind === 'repo' || r.kind === 'part') && typeof r.relPath === 'string')
               .map((r) => ({ relPath: String(r.relPath), kind: String(r.kind) }))
-            for (const r of known) assertTaskAscii(r.relPath, 'repos[].relPath')
-            if (known.length === 0) return writeJson(res, { ok: false, error: 'no recommendable repos' })
+            for (const r of known) {
+              try {
+                assertTaskAscii(r.relPath, 'repos[].relPath')
+              } catch (e) {
+                return writeJson(res, { ok: false, error: `repos[].relPath 非 ASCII(${r.relPath}):${e instanceof Error ? e.message : String(e)}` })
+              }
+            }
+            if (known.length === 0) {
+              const kinds = repos.map((r) => `${String((r as Record<string, unknown>).relPath ?? '?')}:${String((r as Record<string, unknown>).kind ?? '?')}`).join(', ')
+              return writeJson(res, { ok: false, error: `no recommendable repos(全是 external/unknown):${kinds.slice(0, 300)}` })
+            }
             const agents = ctx.get('agents') as AgentsLike | undefined
             const subagents = ctx.get('subagents') as SubagentsLike | undefined
             if (!agents || !subagents) return writeJson(res, { ok: false, error: 'agents/subagents unavailable' })

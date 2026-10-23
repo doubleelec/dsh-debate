@@ -36,13 +36,20 @@ import {
 const C = (k: string): string => styles[k] ?? k
 
 // ---------- 与 Host 的 JSON RPC ----------
+// 先读 text 再 JSON.parse:host 路由抛错时框架可能回非 JSON(HTML 错误页),
+// res.json() 直接炸成 SyntaxError,连路由的 ok:false 都看不到。text 透出原文头。
 async function api<T = unknown>(method: string, payload: Record<string, unknown>): Promise<T> {
   const res = await fetch(`/dsh-session-enhance/api/${method}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(payload),
   })
-  return res.json() as Promise<T>
+  const text = await res.text()
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    throw new Error(`HTTP ${res.status}:非 JSON 响应(路由可能抛错):${text.slice(0, 200)}`)
+  }
 }
 
 // ---------- 国际化 ----------
@@ -1223,7 +1230,7 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
       setSlug(suggestSlugFromText(aiTitle !== '' ? aiTitle : text))
     } catch (e) {
       setChecked([]); setReasons({})
-      setError(`AI 推荐失败,已清空勾选请手动勾选(${String(e)})`)
+      setError(`AI 推荐失败(fetch 层:${String(e)}) —— 已清空勾选请手动勾选`)
       setSlug(suggestSlugFromText(desc.trim()))
     } finally {
       setBusy('')
