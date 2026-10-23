@@ -334,9 +334,22 @@ _Avoid_: 任务目录，派活材料，build 产物
 **涉及仓推荐（recommend_involved）**:
 按任务描述从扫描到的仓里挑涉及仓（`task/recommend`，one-shot 子 agent 只给
 推荐 + 理由 + 简短标题）。模型给的是推荐不是判决：面板预勾选后必须经用户审核，
-判不出（描述含糊/调用失败）→ 空选 + 提示手勾。
-成功/失败都透出 `stopReason` + `rawLen`（失败带原文头 `rawHead`）供排障（ADR-0029）。
+判不出（描述含糊/调用失败）→ 空选 + 提示手勾（程序不做词法兜底，不替人判断）。
+候选带一行自述（`candidate_descriptor`）作判断依据；成功/失败都透出 `stopReason` +
+`rawLen`（失败带原文头 `rawHead` + 候选清单）供排障（ADR-0029/0030）。
 _Avoid_: 影响仓库，判定，AI 选仓
+
+**候选仓自述（candidate_descriptor）**:
+分仓员看到的每个候选仓那一行 `— <自述>`（`candidates.ts`：`package.json` description →
+`module.toml` description → README 首个标题 → 顶层目录名单，截 120 字）。
+只读小文件不递归；目的是让模型有语义依据，不必从仓名猜（ADR-0030）。
+_Avoid_: 仓描述，README 摘要，仓画像
+
+**推荐尝试日志（recommend_log）**:
+最近 20 次推荐尝试的完整现场（描述 / 候选 / 自述 / 模型原文 / 结论 / 耗时），
+内存环形缓冲，经只读路由 `POST /api/task/recommend/log` 取。
+排障用：替代"让用户在界面上复述报错"，与 `scripts/probe-recommend.mjs` 配套（ADR-0030）。
+_Avoid_: 错误日志，调试输出，诊断面板
 
 **任务英文缩写（task_slug）**:
 对任务的英文缩写（`suggestSlugFromText`：小写化 → 非 alnum 转短横 → 截 40 →
