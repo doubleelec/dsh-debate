@@ -12,10 +12,12 @@ function makeCtx(recommendText?: string): {
   routes: Array<{ path: string; handler(req: unknown, res: unknown): Promise<unknown> }>
   created: unknown[]
   attached: unknown[]
+  prompts: string[]
 } {
   const routes: Array<{ path: string; handler(req: unknown, res: unknown): Promise<unknown> }> = []
   const created: unknown[] = []
   const attached: unknown[] = []
+  const prompts: string[] = []
   const agents = {
     async create(args: never): Promise<unknown> {
       created.push(args)
@@ -40,9 +42,11 @@ function makeCtx(recommendText?: string): {
       // 推荐桩:用注文当模型输出(无注文时抛,走 ok:false 分支)。
       if (name === 'subagents') {
         return {
-          async start(): Promise<never> {
+          async start(_kind: unknown, args: unknown): Promise<never> {
             if (recommendText === undefined) throw new Error('no subagents in route test')
             const text = recommendText
+            const blocks = (args as { prompt?: Array<{ text?: string }> })?.prompt ?? []
+            prompts.push(blocks.map((b) => String(b?.text ?? '')).join('\n'))
             return {
               result: Promise.resolve({ output: [{ type: 'text', text }], stopReason: 'completed' }),
               async dispose(): Promise<void> {},
@@ -66,7 +70,7 @@ function makeCtx(recommendText?: string): {
     logger: { info(): void {}, warn(): void {} },
     effect(): () => void { return () => {} },
   }
-  return { ctx: ctx as never, routes, created, attached }
+  return { ctx: ctx as never, routes, created, attached, prompts }
 }
 
 function fakeReq(payload: unknown): unknown {
@@ -264,5 +268,17 @@ describe('task/recommend(ADR-0028:模型推荐涉及仓,人审核)', () => {
     expect(last.candidates).toEqual(['libs/broker', 'quant/x'])
     expect(String(last.raw)).toContain('recommended')
     expect(last.ok).toBe(true)
+  })
+
+  it('routes: 推荐提示词说"数量不是判断标准"(1/几个/全部,ADR-0030)', async () => {
+    const c3 = makeCtx('{"recommended": ["quant/x"], "reasons": {}, "title": "t"}')
+    apply(c3.ctx)
+    await call(c3.routes, '/dsh-session-enhance/api/task/recommend', {
+      description: '清理本文件夹下所有的 .tmp。', repos, parentRoot: 'D:/w',
+    })
+    const prompt = c3.prompts[c3.prompts.length - 1]
+    expect(prompt).toContain('数量不是判断标准')
+    expect(prompt).toContain('全部候选')
+    expect(prompt).toContain('父目录')
   })
 })

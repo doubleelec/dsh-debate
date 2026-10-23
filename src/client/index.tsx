@@ -1214,6 +1214,7 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
         {
           description: text,
           repos: found.map((x) => ({ relPath: x.relPath, kind: x.kind, absPath: x.absPath ?? '' })),
+          parentRoot: parentRoot.trim(),
           sid: liveSid,
         },
       )

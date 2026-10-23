@@ -50,10 +50,32 @@ rawHead: {"recommended": [], "reasons": {}, "title": "修 broker 空语义"}
 - 未做（明确放弃）：词法兜底预勾选（违背"推荐不是判决"）；让分仓员读仓内容（成本高、
   自述已够用，必要时再加）。
 
+## 修订（2026-10-23）：推荐只有一件事——选集合
+
+上线后用户真实草稿是 `清理本文件夹下所有的 .tmp。`——模型仍回空，但**这次模型没错**：
+提示词只教了"改某个仓的 bug"这一档，而这是"每个仓各清各的 `.tmp`"。
+
+第一版修订把任务分成"归属型 / 遍在型"两类，**这个二分是假的**（用户指出）：把一个任务
+分给多个仓的会话，和分给一个仓的会话，是同一件事——选出这次工作会动到的仓集合。
+数量（1 个 / 几个 / 全部 / 0 个）不是分类，是基数。
+
+最终提示词只说一句判断标准："数量不是判断标准：可以是 1 个、几个、或全部候选，
+只看'这活会不会动到它'"，配四个基数示例（修某仓 bug → 1；清理各仓 `.tmp` → 全部；
+只补某仓 README → 1；毫不相干 → 空）。另把 `parentRoot` 带进 prompt（"候选仓都在它
+下面"），让"本文件夹/这里/所有目录"这类指代可解析。
+
+双向实测（同模型）：
+- `清理本文件夹下所有的 .tmp。` → 三个仓全中，理由"清理范围覆盖整个父文件夹，该仓的
+  .tmp 也在范围内"。
+- `修 dsh-shims 里 ssh 钩子生成的 shim 名字冲突。` → 只中 `dsh-shims`，未多选。
+
+只改**判断依据**，不改"AI 推荐、人审核"边界，也不引入词法兜底。
+
 ## 验证
 
 - `tests/vitest/task-candidates.test.ts`：自述来源优先级 / 截断 / 批量。
 - `tests/vitest/task-recommend.test.ts`：写法归一匹配 + reasons 漂移键。
-- `tests/vitest/task-routes.test.ts`：空推荐回候选清单、`recommend/log` 可取。
+- `tests/vitest/task-routes.test.ts`：空推荐回候选清单、`recommend/log` 可取、
+  提示词保留"数量不是判断标准"这一句。
 - `tests/src/test_invariants.py::test_src_task_routes_are_nine`。
 - 真机闭环：`node scripts/probe-recommend.mjs <parentRoot> "<描述>"`。
