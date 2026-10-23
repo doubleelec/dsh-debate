@@ -60,15 +60,16 @@ def test_src_registered_tools_match_manifest():
     assert manifest == [], f"manifest contributes.tools must be empty, got {manifest}"
 
 
-def test_src_task_routes_are_eight():
-    """Task wiring (ADR-0025 + ADR-0028 recommend): eight /api/task/* routes registered."""
+def test_src_task_routes_are_nine():
+    """Task wiring (ADR-0025 + ADR-0028 recommend + ADR-0030 log): nine /api/task/* routes."""
     src = _read(SRC_INDEX)
-    routes = sorted(set(re.findall(r"path: '/dsh-session-enhance/api/(task/[a-z]+)'", src)))
+    routes = sorted(set(re.findall(r"path: '/dsh-session-enhance/api/(task/[a-z/]+)'", src)))
     assert routes == [
         "task/build",
         "task/collect",
         "task/launch",
         "task/recommend",
+        "task/recommend/log",
         "task/report",
         "task/scan",
         "task/stop",

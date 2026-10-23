@@ -97,13 +97,14 @@ const tmpBase = join(tmpdir(), `dsh-session-enhance-task-routes-${Date.now()}`)
 mkdirSync(tmpBase, { recursive: true })
 
 describe('task routes(面板 HTTP 路由,ADR-0025)', () => {
-  it('routes: /api/task/* 八路由注册', () => {
+  it('routes: /api/task/* 九路由注册(ADR-0030 增 recommend/log)', () => {
     const taskPaths = routes.map((r) => r.path).filter((p) => p.startsWith('/dsh-session-enhance/api/task/')).sort()
     expect(taskPaths).toEqual([
       '/dsh-session-enhance/api/task/build',
       '/dsh-session-enhance/api/task/collect',
       '/dsh-session-enhance/api/task/launch',
       '/dsh-session-enhance/api/task/recommend',
+      '/dsh-session-enhance/api/task/recommend/log',
       '/dsh-session-enhance/api/task/report',
       '/dsh-session-enhance/api/task/scan',
       '/dsh-session-enhance/api/task/stop',
@@ -236,5 +237,32 @@ describe('task/recommend(ADR-0028:模型推荐涉及仓,人审核)', () => {
       description: '修 broker', repos,
     })
     expect(r.ok).toBe(false)
+  })
+
+  it('routes: 空推荐回 ok:false + 候选清单 + 原文(ADR-0030 说清原因)', async () => {
+    const { ctx: c2, routes: r2 } = makeCtx('{"recommended": [], "reasons": {}, "title": "t"}')
+    apply(c2)
+    const r = await call(r2, '/dsh-session-enhance/api/task/recommend', {
+      description: '修 broker', repos,
+    })
+    expect(r.ok).toBe(false)
+    expect(String(r.error)).toContain('候选里没有相关仓')
+    expect(r.candidates).toEqual(['libs/broker', 'quant/x'])
+    expect(String(r.rawHead)).toContain('recommended')
+  })
+
+  it('routes: 推荐尝试落环形日志,/recommend/log 可取(ADR-0030 闭环调试)', async () => {
+    const { ctx: c2, routes: r2 } = makeCtx('{"recommended": ["quant/x"], "reasons": {}, "title": "t"}')
+    apply(c2)
+    await call(r2, '/dsh-session-enhance/api/task/recommend', { description: '修 quant', repos })
+    const log = await call(r2, '/dsh-session-enhance/api/task/recommend/log', { limit: 5 })
+    expect(log.ok).toBe(true)
+    const entries = log.entries as Array<Record<string, unknown>>
+    expect(entries.length).toBeGreaterThan(0)
+    const last = entries[entries.length - 1]
+    expect(last.description).toBe('修 quant')
+    expect(last.candidates).toEqual(['libs/broker', 'quant/x'])
+    expect(String(last.raw)).toContain('recommended')
+    expect(last.ok).toBe(true)
   })
 })

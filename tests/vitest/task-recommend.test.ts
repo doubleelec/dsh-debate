@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseRecommendText } from '../../src/cross_tasks/recommend'
+import { parseRecommendText, matchRecommended, normalizeRepoRef } from '../../src/cross_tasks/recommend'
 
 const known = [
   { relPath: 'libs/broker', kind: 'repo' },
@@ -37,5 +37,38 @@ describe('parseRecommendText', () => {
   it('缺字段容忍:无 recommended 回空选', () => {
     const r = parseRecommendText('{"title": "t"}', known)
     expect(r).toEqual({ recommended: [], reasons: {}, title: 't' })
+  })
+})
+
+describe('normalizeRepoRef / matchRecommended(ADR-0030 写法宽容)', () => {
+  const repos = [
+    { relPath: 'dsh-session-enhance', kind: 'repo' },
+    { relPath: 'libs/broker', kind: 'repo' },
+    { relPath: 'plain', kind: 'unknown' },
+  ]
+
+  it('归一:大小写/反斜杠/前后缀斜杠/./ 前缀', () => {
+    expect(normalizeRepoRef('  Dsh-Session-Enhance/  ')).toBe('dsh-session-enhance')
+    expect(normalizeRepoRef('.\\libs\\broker')).toBe('libs/broker')
+    expect(normalizeRepoRef('./libs/broker/')).toBe('libs/broker')
+  })
+
+  it('漂移写法都能对上已知仓,输出用原始 relPath', () => {
+    expect(matchRecommended(['Dsh-Session-Enhance'], repos)).toEqual(['dsh-session-enhance'])
+    expect(matchRecommended(['./libs/broker/'], repos)).toEqual(['libs/broker'])
+    expect(matchRecommended(['broker'], repos)).toEqual(['libs/broker'])
+  })
+
+  it('unknown/external 与完全无关的路径仍被丢弃', () => {
+    expect(matchRecommended(['plain', 'nope', 'libs/broker'], repos)).toEqual(['libs/broker'])
+  })
+
+  it('reasons 用漂移键也能挂上', () => {
+    const r = parseRecommendText(
+      '{"recommended": ["Dsh-Session-Enhance"], "reasons": {"dsh-session-enhance/": "面板在这里"}, "title": ""}',
+      repos,
+    )
+    expect(r.recommended).toEqual(['dsh-session-enhance'])
+    expect(r.reasons).toEqual({ 'dsh-session-enhance': '面板在这里' })
   })
 })

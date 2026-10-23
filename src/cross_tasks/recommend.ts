@@ -20,6 +20,52 @@ export interface RecommendResult {
 }
 
 /** 从模型文本中提取并清洗推荐 JSON；非法直接抛错。 */
+
+/**
+ * 仓引用归一（ADR-0030）：模型常回 `Dsh-Session-Enhance`、`dsh-session-enhance/`、
+ * `./dsh-session-enhance` 等写法；严格全等下一处漂移就整单空。归一口径：
+ * 去空白、反斜杠转正斜杠、去 `./` 前缀、去尾斜杠、小写。
+ */
+export function normalizeRepoRef(ref: string): string {
+  return String(ref ?? '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
+    .replace(/\/+$/, '')
+    .toLowerCase()
+}
+
+/**
+ * 推荐列表与已知仓匹配（容忍写法漂移）：归一后全等 → 只给仓名时按末段匹配 →
+ * 给的路径是已知仓后缀（`broker` vs `libs/broker`）。返回已知仓的原始 relPath。
+ */
+export function matchRecommended(rawList: unknown, known: RecommendInput[]): string[] {
+  const candidates = (known ?? [])
+    .filter((r) => r.kind === 'repo' || r.kind === 'part')
+    .map((r) => ({ rel: String(r.relPath ?? ''), norm: normalizeRepoRef(r.relPath) }))
+    .filter((c) => c.norm !== '')
+  const out: string[] = []
+  const seen = new Set<string>()
+  const push = (rel: string): void => {
+    if (seen.has(rel)) return
+    seen.add(rel)
+    out.push(rel)
+  }
+  for (const item of Array.isArray(rawList) ? rawList : []) {
+    const norm = normalizeRepoRef(String(item ?? ''))
+    if (norm === '') continue
+    const exact = candidates.find((c) => c.norm === norm)
+    if (exact) { push(exact.rel); continue }
+    if (!norm.includes('/')) {
+      const byBase = candidates.find((c) => c.norm.split('/').pop() === norm)
+      if (byBase) { push(byBase.rel); continue }
+    }
+    const bySuffix = candidates.find((c) => c.norm.endsWith(`/${norm}`))
+    if (bySuffix) push(bySuffix.rel)
+  }
+  return out
+}
+
 export function parseRecommendText(text: string, known: RecommendInput[]): RecommendResult {
   const raw = String(text ?? '')
   const start = raw.indexOf('{')
@@ -37,27 +83,20 @@ export function parseRecommendText(text: string, known: RecommendInput[]): Recom
     throw new Error('recommend: 模型输出不是对象')
   }
   const obj = parsed as Record<string, unknown>
-  const knownSet = new Set(
-    (known ?? [])
-      .filter((r) => r.kind === 'repo' || r.kind === 'part')
-      .map((r) => String(r.relPath ?? '')),
-  )
-  const recommended: string[] = []
-  const seen = new Set<string>()
-  const rawList = Array.isArray(obj.recommended) ? obj.recommended : []
-  for (const item of rawList) {
-    const rel = String(item ?? '').trim()
-    if (rel === '' || seen.has(rel) || !knownSet.has(rel)) continue
-    seen.add(rel)
-    recommended.push(rel)
-  }
+  const recommended = matchRecommended(obj.recommended, known)
   const reasons: Record<string, string> = {}
   const rawReasons =
     obj.reasons !== null && typeof obj.reasons === 'object' && !Array.isArray(obj.reasons)
       ? (obj.reasons as Record<string, unknown>)
       : {}
+  // 理由按归一键找回（模型可能用漂移写法当 reasons 的键）。
+  const reasonByNorm = new Map<string, string>()
+  for (const [k, v] of Object.entries(rawReasons)) {
+    const t = String(v ?? '').trim()
+    if (t !== '') reasonByNorm.set(normalizeRepoRef(k), t)
+  }
   for (const rel of recommended) {
-    const r = String(rawReasons[rel] ?? '').trim()
+    const r = reasonByNorm.get(normalizeRepoRef(rel)) ?? ''
     if (r !== '') reasons[rel] = r
   }
   let title = String((obj as Record<string, unknown>).title ?? '').replace(/\s+/g, ' ').trim()

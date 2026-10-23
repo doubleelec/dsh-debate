@@ -1128,6 +1128,7 @@ function InputEntry(props: { useInput?: (s: unknown) => unknown; inputActions?: 
 /** 扫描条目(host /api/task/scan 原样)。 */
 interface TaskRepo {
   relPath: string
+  absPath?: string
   kind: 'repo' | 'part' | 'external' | 'unknown'
   gitRoot?: string | null
   reason?: string
@@ -1175,6 +1176,8 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
   const [backs, setBacks] = useState<Array<{ file: string; text: string }> | null>(null)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // 推荐失败现场(ADR-0030):候选清单 + 模型原文,折叠展示,说清"为什么没挑出来"。
+  const [recFail, setRecFail] = useState<{ reason: string; candidates: string[]; descriptors: Record<string, string>; rawHead: string; stopReason?: string; rawLen?: number } | null>(null)
 
   const toggle = (rel: string): void => {
     setChecked((prev) => (prev.includes(rel) ? prev.filter((r) => r !== rel) : [...prev, rel]))
@@ -1206,22 +1209,30 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
     if (text === '') { setError('先写任务描述(输入框草稿会自动带入)再推荐'); return }
     setBusy('AI 推荐中…'); setError(null)
     try {
-      const r = await api<{ ok: boolean; recommended?: string[]; reasons?: Record<string, string>; title?: string; error?: string; stopReason?: string; rawLen?: number; rawHead?: string; knownCount?: number }>(
+      const r = await api<{ ok: boolean; recommended?: string[]; reasons?: Record<string, string>; title?: string; error?: string; stopReason?: string; rawLen?: number; rawHead?: string; knownCount?: number; candidates?: string[]; descriptors?: Record<string, string> }>(
         'task/recommend',
         {
           description: text,
-          repos: found.map((x) => ({ relPath: x.relPath, kind: x.kind })),
+          repos: found.map((x) => ({ relPath: x.relPath, kind: x.kind, absPath: x.absPath ?? '' })),
           sid: liveSid,
         },
       )
       if (!r.ok) {
-        // 判不出/调用失败/空推荐 → 空选 + 提示手勾,不阻塞;slug 回退描述启发。
+        // 判不出/调用失败/空推荐 → 空选 + 说清原因(ADR-0030),不阻塞;slug 回退描述启发。
         setChecked([]); setReasons({})
-        const diag = [`stop=${r.stopReason ?? '?'}`, `rawLen=${r.rawLen ?? '?'}`, `known=${r.knownCount ?? '?'}`].join(' ')
-        setError(`AI 推荐失败(${diag}):${r.error ?? 'unknown'}${r.rawHead ? ` 原文头:${r.rawHead}` : ''} —— 已清空勾选请手动勾选`)
+        setRecFail({
+          reason: r.error ?? 'unknown',
+          candidates: r.candidates ?? found.filter((x) => x.kind === 'repo' || x.kind === 'part').map((x) => x.relPath),
+          descriptors: r.descriptors ?? {},
+          rawHead: r.rawHead ?? '',
+          stopReason: r.stopReason,
+          rawLen: r.rawLen,
+        })
+        setError(`AI 推荐未给出结果:${r.error ?? 'unknown'} —— 已清空勾选,请按下面候选手动勾选`)
         setSlug(suggestSlugFromText(text))
         return
       }
+      setRecFail(null)
       const merged = applyRecommendDefaults(found, r.recommended ?? [])
       setChecked(merged.checked)
       setReasons(r.reasons ?? {})
@@ -1230,7 +1241,8 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
       setSlug(suggestSlugFromText(aiTitle !== '' ? aiTitle : text))
     } catch (e) {
       setChecked([]); setReasons({})
-      setError(`AI 推荐失败(fetch 层:${String(e)}) —— 已清空勾选请手动勾选`)
+      setRecFail({ reason: `请求失败:${String(e)}`, candidates: [], descriptors: {}, rawHead: '' })
+      setError(`AI 推荐请求失败(fetch 层):${String(e)} —— 已清空勾选请手动勾选`)
       setSlug(suggestSlugFromText(desc.trim()))
     } finally {
       setBusy('')
@@ -1360,6 +1372,25 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
               ))}
             </div>
             {repos.length === 0 && <div className={C('dshe-note')}>空目录:换个父目录再扫。</div>}
+          </div>
+        )}
+        {recFail !== null && (
+          <div className={C('dshe-recfail')}>
+            <div><b>AI 为什么没挑出来:</b>{recFail.reason}</div>
+            {recFail.candidates.length > 0 && (
+              <div className={C('dshe-note')}>候选:{recFail.candidates.join('、')}</div>
+            )}
+            <details>
+              <summary className={C('dshe-note')}>
+                模型原文与候选自述(stop={recFail.stopReason ?? '?'} rawLen={recFail.rawLen ?? '?'})
+              </summary>
+              <pre className={C('dshe-rawpre')}>{recFail.rawHead || '(无原文)'}</pre>
+              {Object.keys(recFail.descriptors).length > 0 && (
+                <pre className={C('dshe-rawpre')}>
+                  {Object.entries(recFail.descriptors).map(([k, v]) => `${k} — ${v}`).join('\n')}
+                </pre>
+              )}
+            </details>
           </div>
         )}
         <div className={C('dshe-field')}>

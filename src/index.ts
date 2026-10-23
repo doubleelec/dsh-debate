@@ -32,6 +32,7 @@ import { scanParent, defaultDeps as taskDefaultDeps } from './cross_tasks/scan'
 import { buildMaterials, handoffText, reportFileName, reportMarkdown, assertAscii as assertTaskAscii, leftoverPlaceholders } from './cross_tasks/materials'
 import { ensureGroupedSession, clearTempHandles as clearTaskTempHandles } from './cross_tasks/ensure-session'
 import { parseRecommendText } from './cross_tasks/recommend'
+import { describeRepos, defaultDescDeps as taskDescDeps } from './cross_tasks/candidates'
 
 /** 请求面(结构子集,镜像 explorer)。 */
 export interface DebateHttpRequest {
@@ -856,6 +857,41 @@ const controllers = new Map<string, AbortController>()
 
 /** 每次 launch 一仓一控制器(stop 按 key abort 未完成的拉起；已冒出的不回收)。 */
 const taskLaunchControllers = new Map<string, AbortController>()
+
+/**
+ * 推荐尝试环形缓冲(ADR-0030,排障用):最近 N 次 recommend 的描述/候选/模型原文/结论。
+ * 面板文案再全也不如现场原文——调试时 GET /api/task/recommend/log 直接取，
+ * 不需要用户在界面上复述、也不需要临时探针脚本(scripts/probe-recommend.mjs 同源)。
+ */
+export interface RecommendLogEntry {
+  at: string
+  description: string
+  candidates: string[]
+  descriptors: Record<string, string>
+  ok: boolean
+  error?: string
+  stopReason?: string
+  rawLen: number
+  raw: string
+  recommended: string[]
+  elapsedMs: number
+}
+
+const RECOMMEND_LOG_MAX = 20
+const recommendLog: RecommendLogEntry[] = []
+
+function pushRecommendLog(entry: RecommendLogEntry): RecommendLogEntry {
+  const clipped = { ...entry, raw: String(entry.raw ?? '').slice(0, 4000) }
+  recommendLog.push(clipped)
+  while (recommendLog.length > RECOMMEND_LOG_MAX) recommendLog.shift()
+  return clipped
+}
+
+/** 读最近推荐记录(最新在后;limit 截尾)。 */
+export function readRecommendLog(limit = RECOMMEND_LOG_MAX): RecommendLogEntry[] {
+  const n = Math.max(1, Math.min(RECOMMEND_LOG_MAX, Number(limit) || RECOMMEND_LOG_MAX))
+  return recommendLog.slice(-n)
+}
 
 function taskStampOf(nowMs: number = Date.now()): string {
   const d = new Date(nowMs)
@@ -2211,7 +2247,11 @@ export default {
             if (repos.length === 0) return writeJson(res, { ok: false, error: 'repos required' })
             const known = repos
               .filter((r) => (r.kind === 'repo' || r.kind === 'part') && typeof r.relPath === 'string')
-              .map((r) => ({ relPath: String(r.relPath), kind: String(r.kind) }))
+              .map((r) => ({
+                relPath: String(r.relPath),
+                kind: String(r.kind),
+                absPath: typeof r.absPath === 'string' ? r.absPath : '',
+              }))
             for (const r of known) {
               try {
                 assertTaskAscii(r.relPath, 'repos[].relPath')
@@ -2249,12 +2289,20 @@ export default {
               parent = full.agent
             }
             if (!parent || !parent.session) return writeJson(res, { ok: false, error: 'no live parent' })
-            const list = known.map((r) => `- ${r.relPath} (${r.kind})`).join('\n')
+            // 候选仓自述(ADR-0030):只给仓名模型无从判断,补一行 description/README/目录。
+            const descs = await describeRepos(
+              known.filter((r) => r.absPath !== '').map((r) => ({ relPath: r.relPath, absPath: r.absPath })),
+              taskDescDeps(),
+            )
+            const list = known
+              .map((r) => (descs[r.relPath] ? `- ${r.relPath} (${r.kind}) — ${descs[r.relPath]}` : `- ${r.relPath} (${r.kind})`))
+              .join('\n')
             const prompt = [
               '你是分仓员。只做一件事：按下面的任务描述，从候选仓里挑出本次任务涉及的仓。',
               '只输出一段 JSON，不要解释，不要调用任何工具，不要输出别的：',
               '{"recommended": ["仓路径1", ...], "reasons": {"仓路径1": "一句话理由", ...}, "title": "任务简短标题(20字内)"}',
               '规则：recommended 只从候选里选，按相关度由高到低排；判不出就给空数组；title 是给人看的一句话。',
+              '每个候选后的破折号是它的自述，可据此判断相关性；仓路径必须原样抄候选的路径。',
               '',
               '任务描述：',
               description,
@@ -2272,23 +2320,51 @@ export default {
                 signal: ctl.signal,
               })
               try {
+                const started = Date.now()
                 const result = await run.result
                 const raw = textOf(result.output)
-                if (result.stopReason !== 'completed') {
-                  return writeJson(res, { ok: false, error: `recommend subagent: ${result.stopReason}`, stopReason: result.stopReason, rawLen: raw.length, rawHead: raw.slice(0, 200) })
-                }
-                const cleaned = parseRecommendText(raw, known)
-                // 空推荐即失败(ADR-0029 修订):模型真给了空，或全被已知仓过滤掉，
-                // 两者对用户都是"没挑出来"。回 ok:false + 诊断，面板走失败分支
-                // （带原文透出 + 手勾提示），不再报误导人的"AI 没有挑出"。
-                if (cleaned.recommended.length === 0) {
-                  return writeJson(res, {
-                    ok: false, error: 'recommend empty: 模型没给出可用涉及仓(可能全被过滤)',
-                    stopReason: result.stopReason, rawLen: raw.length, rawHead: raw.slice(0, 200),
-                    knownCount: known.length,
+                const finish = (payload: Record<string, unknown>, ok: boolean, recommended: string[], error?: string): void => {
+                  pushRecommendLog({
+                    at: new Date().toISOString(),
+                    description,
+                    candidates: known.map((r) => r.relPath),
+                    descriptors: descs,
+                    ok,
+                    error,
+                    stopReason: result.stopReason,
+                    rawLen: raw.length,
+                    raw,
+                    recommended,
+                    elapsedMs: Date.now() - started,
                   })
+                  writeJson(res, { ...payload, candidates: known.map((r) => r.relPath), descriptors: descs })
                 }
-                return writeJson(res, { ok: true, ...cleaned, stopReason: result.stopReason, rawLen: raw.length })
+                if (result.stopReason !== 'completed') {
+                  return finish({
+                    ok: false, error: `recommend subagent: ${result.stopReason}`,
+                    stopReason: result.stopReason, rawLen: raw.length, rawHead: raw.slice(0, 200),
+                  }, false, [], `stopReason=${result.stopReason}`)
+                }
+                let cleaned
+                try {
+                  cleaned = parseRecommendText(raw, known)
+                } catch (e) {
+                  return finish({
+                    ok: false, error: e instanceof Error ? e.message : String(e),
+                    stopReason: result.stopReason, rawLen: raw.length, rawHead: raw.slice(0, 400),
+                  }, false, [], e instanceof Error ? e.message : String(e))
+                }
+                // 空推荐即失败(ADR-0029):模型真给了空或全被过滤,对用户都是"没挑出来"。
+                // 说明白是哪种(ADR-0030):候选清单 + 原文头一起回,面板直接展示原因。
+                if (cleaned.recommended.length === 0) {
+                  return finish({
+                    ok: false,
+                    error: 'AI 认为候选里没有相关仓(模型回空)',
+                    stopReason: result.stopReason, rawLen: raw.length, rawHead: raw.slice(0, 400),
+                    knownCount: known.length,
+                  }, false, [], 'recommended=[]')
+                }
+                return finish({ ok: true, ...cleaned, stopReason: result.stopReason, rawLen: raw.length }, true, cleaned.recommended)
               } finally {
                 await run.dispose()
               }
@@ -2301,6 +2377,21 @@ export default {
             if (owned) {
               try { await owned.dispose() } catch { /* 自建 parent 回收失败不影响结果 */ }
             }
+          }
+        },
+      },
+      {
+        kind: 'exact',
+        path: '/dsh-session-enhance/api/task/recommend/log',
+        handler: async (req, res) => {
+          // 推荐排障(ADR-0030):最近 N 次尝试的完整现场(描述/候选/自述/原文/结论)。
+          // 与 /api/debug* 同性质:只读、无副作用,调试时不依赖界面复述。
+          try {
+            const body = await readJsonBody(req)
+            const limit = typeof body.limit === 'number' ? body.limit : undefined
+            return writeJson(res, { ok: true, entries: readRecommendLog(limit) })
+          } catch (e) {
+            return writeJson(res, { ok: false, error: e instanceof Error ? e.message : String(e) })
           }
         },
       },

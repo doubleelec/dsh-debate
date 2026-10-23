@@ -503,6 +503,38 @@
   background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12));
 }
 
+/* 推荐失败现场(ADR-0030):说清"为什么没挑出来",原文折叠。 */
+.dshe-recfail {
+  border: 1px solid var(--dsw-alias-border-l3, rgba(128,128,128,.25));
+  border-left: 3px solid var(--dsw-alias-warning, #c80);
+  background: var(--dsw-alias-bg-layer-1, #222);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary, #9a9a9a);
+}
+
+.dshe-recfail b {
+  color: var(--dsw-alias-label-primary, #e8e8e8);
+}
+
+.dshe-rawpre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  max-height: 180px;
+  overflow: auto;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--dsw-alias-bg-layer-2, #262626);
+  border-radius: 8px;
+}
+
 /* 任务面板勾选行:复选框 + 路径 + 类型胶囊,AI 理由/外部原因另起一行缩进。 */
 .dshe-checklist {
   display: flex;

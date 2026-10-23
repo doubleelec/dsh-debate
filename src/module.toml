@@ -30,8 +30,8 @@ reason = "No cross-module facade: single-module plugin, host/client wired via ds
 # WIRE-01 re-scoped to routes only.)
 [[invariant.wiring.rules]]
 id = "WIRE-01"
-desc = "Host route surface is locked: 9 deliberation routes, 8 task routes; no model tools registered."
-test_ref = "tests/src/test_invariants.py::test_src_task_routes_are_eight"
+desc = "Host route surface is locked: 9 deliberation routes, 9 task routes; no model tools registered."
+test_ref = "tests/src/test_invariants.py::test_src_task_routes_are_nine"
 
 [[invariant.cage.rules]]
 id = "CAGE-01"

@@ -143,7 +143,13 @@ flowchart TD
     `EXTERNAL_NAMES`（data / `.gm_*` / `.tmp` / node_modules / `.git`）。
   - `src/cross_tasks/recommend.ts`（推荐输出清洗，纯逻辑）：`parseRecommendText`
     （首 `{`…末 `}` 提取；只留扫描已知仓保序去重；理由只留推荐仓；标题截 60 字；
-    非法直接抛错，路由回 ok:false）。
+    非法直接抛错，路由回 ok:false）+ `normalizeRepoRef` / `matchRecommended`
+    （ADR-0030 写法宽容：大小写/反斜杠/尾斜杠/`./` 前缀/裸仓名都归一到已知仓）。
+  - `src/cross_tasks/candidates.ts`（候选仓自述，纯逻辑 + 注入 `DescDeps`，ADR-0030）：
+    `describeRepo` / `describeRepos`——给分仓员一行判断依据，优先级
+    `package.json` description → `module.toml` description → README 首个标题 →
+    顶层目录名单，截 120 字；解析器 `parsePackageDescription` /
+    `parseModuleTomlDescription` / `parseReadmeTitle` / `topDirsOf` 单独可测。
   - `src/cross_tasks/materials.ts`（材料构建，纯函数零 IO）：
     `fillDirective` / `fillTo`（模板真身调用方显式传 `templateDir` / `directiveTemplate` /
     `toTemplate` 三选一，占位没填完就报错不写半成品）/ `buildMaterials` /
@@ -254,6 +260,10 @@ sequenceDiagram
   （`task/recommend` 8 路由之一、只推荐 + 理由 + 标题、人审核；WIRE-01 7→8 条）。
 - [ADR-0029](adr/0029-task-no-lead-slug-desc.md): 去牵头仓 + slug 按任务 + 去标题字段
   （`lead: none`、slug 按描述 / AI、自拟；推荐成功 / 失败透 stopReason / rawLen / rawHead）。
+- [ADR-0030](adr/0030-recommend-context-and-log.md): 推荐链补上下文与可观测——
+  候选仓带一行自述（`candidates.ts`）、模型输出写法宽容归一（`matchRecommended`）、
+  空推荐回候选清单 + 原文、最近 20 次推荐进环形缓冲 + `/api/task/recommend/log`
+  （WIRE-01 8→9 条；调试不再依赖界面复述）。
 
 ## 6. Constraints and Risks
 

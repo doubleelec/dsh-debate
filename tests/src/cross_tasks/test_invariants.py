@@ -34,9 +34,14 @@ def test_task_pure_surface_exists():
     assert "export async function ensureGroupedSession" in ensure
     recommend = _read(TASK / "recommend.ts")
     assert "export function parseRecommendText" in recommend
+    assert "export function normalizeRepoRef" in recommend
+    assert "export function matchRecommended" in recommend
+    candidates = _read(TASK / "candidates.ts")
+    for symbol in ("describeRepo", "describeRepos", "parsePackageDescription", "parseModuleTomlDescription", "parseReadmeTitle", "topDirsOf"):
+        assert symbol in candidates, f"src/cross_tasks/candidates.ts missing: {symbol}"
 
 
 def test_task_vitest_mirrors_exist():
     """Every task module has a vitest behavior file (no orphan pure module)."""
-    for name in ("task-scan", "task-materials", "task-ensure-session", "task-recommend"):
+    for name in ("task-scan", "task-materials", "task-ensure-session", "task-recommend", "task-candidates"):
         assert (VITEST / f"{name}.test.ts").is_file(), f"missing {name}.test.ts"
