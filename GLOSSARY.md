@@ -353,10 +353,25 @@ _Avoid_: 仓描述，README 摘要，仓画像
 _Avoid_: 错误日志，调试输出，诊断面板
 
 **任务英文缩写（task_slug）**:
-对任务的英文缩写（`suggestSlugFromText`：小写化 → 非 alnum 转短横 → 截 40 →
-空回退 `task`），用于建任务文件夹（`<slug>-<stamp>/`）。
-从任务描述/AI 标题来，不从父目录取（父目录末段是工程名，不是任务缩写）。
-_Avoid_: 文件夹名，工程名，标题缩写
+对任务的英文缩写，2-3 个英文词、短横线连接、不超过 20 字符（如 `cleanup-tmp`），
+用于建任务文件夹（`<slug>-<stamp>/`）。**由 AI 在推荐时一并给出**（它看得懂中文任务），
+`sanitizeTaskSlug` 归一（小写 / 非 alnum 转短横 / 词边界截断到 20）；AI 没给时才回落到
+`suggestSlugFromText` 的有限词表＋ASCII 词启发，全洗空回 `task`（ADR-0033）。
+从任务描述来，不从父目录取（父目录末段是工程名，不是任务缩写）。
+_Avoid_: 文件夹名，工程名，标题缩写，拼音缩写
+
+**任务根目录 / 任务目录（tasks_root / task_dir）**:
+`tasks_root` 缺省 `<父目录>/.cross-tasks`（`suggestTasksRoot`），可改；
+`task_dir` 是它下面带时间戳的实建目录（`<tasks_root>/<slug>-<stamp>/`）。
+面板显示完整 `task_dir` 预览（slug 已定、时间戳待建时确定），不再只显示根目录（ADR-0033）。
+_Avoid_: 输出目录，工作目录，cross-tasks 目录
+
+**模板目录（template_dir）**:
+可选，含 `directive_template.md` 与 `to_template.md` 的编排库目录：前者出总指示骨架
+（slug/version/involved/标题等占位后填），后者出每仓派活骨架。留空即用内建默认
+（`DEFAULT_DIRECTIVE_TEMPLATE` / `DEFAULT_TO_TEMPLATE`，ADR-0031）；优先级
+**显式文本 > 模板目录 > 内建默认**。
+_Avoid_: 模板文件，骨架文件，素材目录
 
 **总指示签发（directive_issued）**:
 `directive.md` 的 `status: issued` 行。`launch` 前必验：非 issued 拒收，

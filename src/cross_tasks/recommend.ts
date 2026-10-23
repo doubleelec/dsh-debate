@@ -17,6 +17,33 @@ export interface RecommendResult {
   recommended: string[]
   reasons: Record<string, string>
   title: string
+  /** 任务英文缩写(2-3 词、≤20 字符,如 cleanup-tmp);模型没给或洗不出来是 ''。 */
+  slug: string
+}
+
+/**
+ * slug 清洗(ADR-0033):模型给的是"任务英文缩写",常带空格/大写/超长词。
+ * 归一:小写 → 非 [a-z0-9] 转短横 → 按词边界截到 ≤20 → 去首尾横。
+ */
+export function sanitizeTaskSlug(raw: unknown): string {
+  const words = String(raw ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .split('-')
+    .filter((w) => w !== '')
+  const out: string[] = []
+  let len = 0
+  for (const w of words) {
+    const word = w.length > 20 ? w.slice(0, 20) : w
+    const add = out.length === 0 ? word.length : word.length + 1
+    if (len + add > 20) {
+      if (out.length === 0) out.push(word)
+      break
+    }
+    out.push(word)
+    len += add
+  }
+  return out.join('-')
 }
 
 /** 从模型文本中提取并清洗推荐 JSON；非法直接抛错。 */
@@ -101,5 +128,6 @@ export function parseRecommendText(text: string, known: RecommendInput[]): Recom
   }
   let title = String((obj as Record<string, unknown>).title ?? '').replace(/\s+/g, ' ').trim()
   if (title.length > 60) title = `${title.slice(0, 60)}…`
-  return { recommended, reasons, title }
+  const slug = sanitizeTaskSlug(obj.slug)
+  return { recommended, reasons, title, slug }
 }

@@ -1224,7 +1224,7 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
     setBusy('AI 推荐中…'); setError(null)
     setRecommendedDesc(text)
     try {
-      const r = await api<{ ok: boolean; recommended?: string[]; reasons?: Record<string, string>; title?: string; error?: string; stopReason?: string; rawLen?: number; rawHead?: string; knownCount?: number; candidates?: string[]; descriptors?: Record<string, string> }>(
+      const r = await api<{ ok: boolean; recommended?: string[]; reasons?: Record<string, string>; title?: string; slug?: string; error?: string; stopReason?: string; rawLen?: number; rawHead?: string; knownCount?: number; candidates?: string[]; descriptors?: Record<string, string> }>(
         'task/recommend',
         {
           description: text,
@@ -1252,9 +1252,10 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
       const merged = applyRecommendDefaults(found, r.recommended ?? [])
       setChecked(merged.checked)
       setReasons(r.reasons ?? {})
-      // slug:AI 标题优先(转英文缩写),没有则描述启发;每次推荐都覆盖(用户可手改)。
+      // slug:AI 给的缩写优先(它看得懂中文任务),没有才回落到词表启发(ADR-0033)。
+      const aiSlug = String(r.slug ?? '').trim()
       const aiTitle = String(r.title ?? '').trim()
-      setSlug(suggestSlugFromText(aiTitle !== '' ? aiTitle : text))
+      setSlug(aiSlug !== '' ? aiSlug : suggestSlugFromText(aiTitle !== '' ? aiTitle : text))
     } catch (e) {
       setChecked([]); setReasons({})
       setRecFail({ reason: `请求失败:${String(e)}`, candidates: [], descriptors: {}, rawHead: '' })
@@ -1492,17 +1493,34 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
           </div>
         )}
         <div className={C('dshe-field')}>
-          <span>slug(任务英文缩写,AI 按描述自动拟,可改)</span>
-          <input type="text" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="如 broker-empty-semantics" />
+          <span>slug(任务英文缩写:2-3 个词、≤20 字符,AI 按描述拟,可改)</span>
+          <input type="text" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="如 cleanup-tmp" />
         </div>
         <div className={C('dshe-field')}>
-          <span>任务根目录(.tasks)</span>
-          <input type="text" value={tasksRoot} onChange={(e) => setTasksRoot(e.target.value)} />
+          <span>任务目录(将创建)</span>
+          <div className={C('dshe-taskdir')}>
+            {(tasksRoot.trim() !== '' ? tasksRoot.trim().replace(/[\\/]+$/, '') : '<任务根目录>')}/{(slug.trim() !== '' ? slug.trim() : '<slug>')}-&lt;时间戳&gt;
+          </div>
+          <div className={C('dshe-note')}>
+            directive.md(总指示)+ 每个涉及仓一份 to-&lt;仓&gt;.md(派活)都落在这里。
+          </div>
         </div>
-        <div className={C('dshe-field')}>
-          <span>模板目录(可选,留空用内建模板)</span>
-          <input type="text" value={templateDir} onChange={(e) => setTemplateDir(e.target.value)} placeholder="含 directive_template.md / to_template.md 的编排库" />
-        </div>
+        <details className={C('dshe-adv')}>
+          <summary className={C('dshe-note')}>高级:任务根目录与自定义模板</summary>
+          <div className={C('dshe-field')}>
+            <span>任务根目录(缺省 &lt;父目录&gt;/.cross-tasks)</span>
+            <input type="text" value={tasksRoot} onChange={(e) => setTasksRoot(e.target.value)} />
+          </div>
+          <div className={C('dshe-field')}>
+            <span>模板目录(留空用内建模板)</span>
+            <input type="text" value={templateDir} onChange={(e) => setTemplateDir(e.target.value)} placeholder="含 directive_template.md / to_template.md 的编排库" />
+          </div>
+          <div className={C('dshe-note')}>
+            模板是产出物的骨架:directive_template.md 出总指示(填 slug/version/involved/标题…),
+            to_template.md 出每仓派活(填 to/slug/directive/created/一句话)。内建模板已够跑,
+            只有你有自家仓库模板规范时才需要指目录。
+          </div>
+        </details>
         {modelsInfo === null && <div className={C('dshe-note')}>provider/model 列表加载中…</div>}
         {modelsInfo !== null && !modelsInfo.ok && (
           <div className={C('dshe-recfail')}>
@@ -1553,8 +1571,10 @@ function TaskDialog(props: { onClose: () => void; useSessions?: (s: unknown) => 
         </div>
         {verdict !== null && <div className={C('dshe-note')}>待填:{verdict}</div>}
         <div className={C('dshe-actions')}>
-          <button className={C('dshe-start')} onClick={() => { void build() }} disabled={busy !== '' || verdict !== null}>{busy !== '' ? busy : '建任务并预览会话'}</button>
-          <button className={C('dshe-copybtn')} onClick={props.onClose} disabled={busy !== ''}>取消</button>
+          <div className={C('dshe-btnrow')}>
+            <button className={C('dshe-start')} onClick={() => { void build() }} disabled={busy !== '' || verdict !== null}>{busy !== '' ? busy : '建任务并预览会话'}</button>
+            <button className={C('dshe-start')} onClick={props.onClose} disabled={busy !== ''}>取消</button>
+          </div>
         </div>
         {taskDir !== null && (
           <div className={C('dshe-resolved')}>

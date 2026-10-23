@@ -29,11 +29,11 @@ export function parseInvolvedLines(text: string): string[] {
   return out
 }
 
-/** tasksRoot 缺省:parentRoot 下 `.tasks`(斜杠归一,尾斜杠去掉)。 */
+/** tasksRoot 缺省:parentRoot 下 `.cross-tasks`(斜杠归一,尾斜杠去掉)。 */
 export function suggestTasksRoot(parentRoot: string): string {
   const p = String(parentRoot ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
   if (p === '') return ''
-  return `${p}/.tasks`
+  return `${p}/.cross-tasks`
 }
 
 /** slug 格式提示(ASCII 小写短横线/数字):host 的 ASCII 门是底线,这里只拦明显手误。 */
@@ -42,6 +42,7 @@ export function validateSlug(slug: string): string | null {
   if (s === '') return 'slug 不能为空'
   if (/[^\x00-\x7F]/.test(s)) return 'slug 只能用 ASCII(中文 host 会拒收)'
   if (!/^[a-z0-9][a-z0-9-]*$/.test(s)) return 'slug 用小写英文/数字/短横线(字母或数字开头)'
+  if (s.length > 20) return 'slug 不超过 20 个字符(2-3 个英文词,如 cleanup-tmp)'
   return null
 }
 
@@ -50,22 +51,78 @@ export function validateTaskBuild(input: TaskBuildInput): string | null {
   const slugErr = validateSlug(input.slug)
   if (slugErr !== null) return slugErr
   if (!Array.isArray(input.involved) || input.involved.length === 0) return '涉及仓不能为空(等 AI 推荐或手动勾选)'
-  if (String(input.tasksRoot ?? '').trim() === '') return '任务根目录不能为空(点「默认 .tasks」填入)'
+  if (String(input.tasksRoot ?? '').trim() === '') return '任务根目录不能为空'
   return null
 }
 
 /**
- * 任务英文缩写 slug(ADR-0029):从任务描述/AI 标题洗成 ASCII 小写短横(建文件夹用)。
- * 小写化 → 非 [a-z0-9]+ 转短横 → 压前后横 → 截 40 → 空回退 task。
- * 中文描述洗成空是正常的(回退 task,用户手改)。
+ * 中文词 → 英文词的有限映射:描述是中文时靠它给出可读 slug(ADR-0033)。
+ * 只列高频动词/对象,不做翻译;命中即用,不命中的中文直接丢。
+ */
+const SLUG_WORDS: Array<[RegExp, string]> = [
+  [/清理|清除|打扫|清空/, 'cleanup'],
+  [/删除|移除|去掉/, 'remove'],
+  [/修复|修正|修好|修 /, 'fix'],
+  [/重构/, 'refactor'],
+  [/迁移/, 'migrate'],
+  [/升级|更新/, 'upgrade'],
+  [/优化/, 'optimize'],
+  [/重命名|改名/, 'rename'],
+  [/格式化/, 'format'],
+  [/新增|添加|补上|加一个/, 'add'],
+  [/测试/, 'test'],
+  [/文档/, 'docs'],
+  [/依赖/, 'deps'],
+  [/版本/, 'version'],
+  [/配置/, 'config'],
+  [/脚本/, 'script'],
+  [/面板/, 'panel'],
+  [/推荐/, 'recommend'],
+  [/会话/, 'session'],
+  [/任务/, 'task'],
+  [/编译|构建/, 'build'],
+  [/部署/, 'deploy'],
+  [/回滚/, 'revert'],
+  [/校验|验证/, 'verify'],
+  [/临时/, 'tmp'],
+  [/缓存/, 'cache'],
+  [/日志/, 'log'],
+]
+
+/** 无意义 ASCII 词(不作为 slug 组成)。 */
+const SLUG_NOISE = new Set(['a', 'an', 'the', 'to', 'of', 'and', 'or', 'in', 'on', 'for', 'all', 'ai', 'dsh'])
+
+/**
+ * 任务英文缩写 slug(ADR-0033):2-3 个英文词、短横线连接、≤20 字符(如 cleanup-tmp)。
+ * 优先中文词映射,再取描述里的 ASCII 词;AI 没给 slug 时的兜底。
+ * 全部洗空回 'task'(用户手改)。
  */
 export function suggestSlugFromText(text: string): string {
-  const slug = String(text ?? '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40)
-    .replace(/-+$/g, '')
+  const raw = String(text ?? '')
+  const words: string[] = []
+  const push = (w: string): void => {
+    if (w !== '' && !words.includes(w)) words.push(w)
+  }
+  for (const [re, en] of SLUG_WORDS) if (re.test(raw)) push(en)
+  for (const m of raw.toLowerCase().matchAll(/[a-z0-9]+/g)) {
+    const w = m[0]
+    if (w.length < 2 || SLUG_NOISE.has(w) || words.includes(w)) continue
+    push(w)
+  }
+  const out: string[] = []
+  let len = 0
+  for (const w of words) {
+    const word = w.length > 20 ? w.slice(0, 20).replace(/-+$/, '') : w
+    const add = out.length === 0 ? word.length : word.length + 1
+    if (len + add > 20) {
+      if (out.length === 0) out.push(word)
+      break
+    }
+    out.push(word)
+    len += add
+    if (out.length === 3) break
+  }
+  const slug = out.join('-').replace(/^-+|-+$/g, '')
   return slug === '' ? 'task' : slug
 }
 

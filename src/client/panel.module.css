@@ -274,6 +274,37 @@
   align-items: center;
 }
 
+/* 主次操作等权(ADR-0033):两键同宽同高,差别只在底色。 */
+.dshe-btnrow {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.dshe-btnrow .dshe-start {
+  flex: 1 1 0;
+}
+
+.dshe-btnrow .dshe-start + .dshe-start {
+  background: transparent;
+  border: 1px solid var(--dsw-alias-line-default, #c9cdd4);
+  color: inherit;
+}
+
+.dshe-taskdir {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-secondary, #f3f4f6);
+  word-break: break-all;
+}
+
+.dshe-adv > summary {
+  cursor: pointer;
+}
+
 .dshe-start {
   flex: 1;
   padding: 10px;

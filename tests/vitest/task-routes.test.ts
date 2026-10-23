@@ -342,5 +342,19 @@ describe('task/recommend(ADR-0028:模型推荐涉及仓,人审核)', () => {
     expect(prompt).toContain('数量不是判断标准')
     expect(prompt).toContain('全部候选')
     expect(prompt).toContain('父目录')
+    // slug 规则(ADR-0033):模型要顺手给出任务英文缩写。
+    expect(prompt).toContain('slug 规则')
+    expect(prompt).toContain('cleanup-tmp')
+    expect(prompt).toContain('20 个字符')
+  })
+
+  it('routes: 推荐把模型的 slug 带回给面板(ADR-0033)', async () => {
+    const c5 = makeCtx('{"recommended": ["quant/x"], "reasons": {}, "title": "清理临时文件", "slug": "Cleanup TMP"}')
+    apply(c5.ctx)
+    const r = await call(c5.routes, '/dsh-session-enhance/api/task/recommend', {
+      description: '清理本文件夹下所有的 .tmp。', repos, parentRoot: 'D:/w',
+    })
+    expect(r.ok).toBe(true)
+    expect(r.slug).toBe('cleanup-tmp')
   })
 })

@@ -34,9 +34,18 @@ describe('parseRecommendText', () => {
     expect(() => parseRecommendText('{"recommended": [', known)).toThrow('解析失败')
   })
 
-  it('缺字段容忍:无 recommended 回空选', () => {
+  it('缺字段容忍:无 recommended 回空选,无 slug 回空串', () => {
     const r = parseRecommendText('{"title": "t"}', known)
-    expect(r).toEqual({ recommended: [], reasons: {}, title: 't' })
+    expect(r).toEqual({ recommended: [], reasons: {}, title: 't', slug: '' })
+  })
+
+  it('slug 带回并清洗:大写/空格/超长都归一(ADR-0033)', () => {
+    expect(parseRecommendText('{"recommended": ["libs/broker"], "slug": "Cleanup TMP"}', known).slug)
+      .toBe('cleanup-tmp')
+    expect(parseRecommendText('{"recommended": ["libs/broker"], "slug": "清理-tmp"}', known).slug)
+      .toBe('tmp')
+    expect(parseRecommendText('{"recommended": ["libs/broker"], "slug": "a-very-long-english-slug-here"}', known).slug)
+      .toBe('a-very-long-english')
   })
 })
 

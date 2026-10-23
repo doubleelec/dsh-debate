@@ -173,10 +173,12 @@ flowchart TD
   - `src/client` 任务半区：`✦ 增强会话`菜单（`InputButton` 二选一：辩论 / 多仓任务，
     空草稿整钮禁用，ADR-0028 反转 ADR-0025 可达性）+ TaskDialog（scan → recommend →
     审核勾选 → build → 预览 → launch，偏好存 localStorage；无牵头仓、无标题字段，
-    任务描述即标题，slug 按描述 / AI 自动拟，ADR-0029）+ `src/client/task.ts` 纯逻辑
+    任务描述即标题；slug 由推荐一并拟成 2-3 个英文词、≤20 字符（ADR-0033，词表启发仅兜底）；
+    主界面显示完整任务目录预览（`<tasks_root>/<slug>-<stamp>`），任务根目录与模板目录收进
+    "高级"（模板缺省内建，ADR-0031），建任务与取消两键等权；ADR-0029）+ `src/client/task.ts` 纯逻辑
     （slug 缩写 / 推荐合并 / 校验 / 偏好，无 React / CSS，node environment 直测；
     `suggestSlugFromText` / `applyRecommendDefaults` / `suggestScanDefaults` /
-    `validateTaskBuild` / `loadTaskPrefs` / `saveTaskPrefs`）。
+    `suggestTasksRoot`（`.cross-tasks`）/ `validateTaskBuild` / `loadTaskPrefs` / `saveTaskPrefs`）。
     原生发送键不可拦截——任务启动必须点面板显式按钮（`inputActions` 全仓只有 `setDraft`）。
 
 ### 4.3 Module Documentation Map
@@ -277,6 +279,9 @@ sequenceDiagram
   Context 服务（`Context.llm: LlmRuntime`，`listProviders`/`listModels`），取不到即接线缺陷，
   `task/models` 回 `ok:false` 让面板报错（ADR-0030 排障同精神）；适配器不广告模型属合法能力
   差异，收进 `providerErrors` 点名，只有该情形才允许手填 model id。
+- [ADR-0033](adr/0033-slug-from-ai-and-task-dir.md): slug 由推荐一并拟（2-3 词、≤20 字符，
+  `sanitizeTaskSlug` 归一；词表启发仅兜底），任务根目录缺省 `<父目录>/.cross-tasks`，
+  主界面显示完整任务目录预览，模板目录进"高级"，两键等权。
 
 ## 6. Constraints and Risks
 

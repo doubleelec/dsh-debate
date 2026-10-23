@@ -207,6 +207,7 @@ flowchart TD
 - [ADR-0030](adr/0030-recommend-context-and-log.md): 推荐链补上下文与可观测——候选仓带一行自述（`candidates.ts`：package/module.toml/README/目录），模型输出写法宽容归一（`normalizeRepoRef`/`matchRecommended`），空推荐回候选清单 + 原文，推荐尝试进 20 条环形缓冲并开只读路由 `task/recommend/log`（WIRE-01 8→9 条），排障走 `scripts/probe-recommend.mjs` 直打真实 host（部分修订 ADR-0028：候选不再只给路径）。
 - [ADR-0031](adr/0031-task-panel-controls-and-defaults.md): 任务面板控件与缺省——去"重新扫描"/"重新推荐"（父目录、描述失焦即重算）、加"取消"、勾选区只列真仓（unknown/external 收进一行忽略提示）、去"默认 .tasks"按钮（scan 直接填）、provider/model 改下拉（新增只读路由 `task/models`，取不到退化为手输）、模板内建（`DEFAULT_DIRECTIVE_TEMPLATE`/`DEFAULT_TO_TEMPLATE`，消灭父目录找模板的 ENOENT；WIRE-01 9→10 条）。
 - [ADR-0032](adr/0032-no-silent-degradation.md): 能力缺失是缺陷不是退化理由——`llm` 是宿主 Context 服务（`listProviders`/`listModels`），取不到即接线缺陷，`task/models` 回 `ok:false` 让面板报错而不是退化为手输；适配器不广告模型（合法能力差异）收进 `providerErrors` 点名，只有该情形才允许手填 model id。以"以防万一"为由的静默兜底一律按缺陷处理。
+- [ADR-0033](adr/0033-slug-from-ai-and-task-dir.md): slug 由 AI 拟（`{"slug":"cleanup-tmp"}`，2-3 词、≤20 字符，`sanitizeTaskSlug` 归一，词表启发仅作兜底），任务根目录缺省改 `<父目录>/.cross-tasks` 并显示完整任务目录预览，模板目录降级进"高级"并解释其用途，建任务与取消两键等权。
 
 ## 6. Constraints and Risks
 

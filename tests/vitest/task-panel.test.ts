@@ -24,9 +24,9 @@ describe('parseInvolvedLines', () => {
 })
 
 describe('suggestTasksRoot', () => {
-  it('parentRoot 下 .tasks(斜杠归一)', () => {
-    expect(suggestTasksRoot('D:\\finance\\cross-tasks')).toBe('D:/finance/cross-tasks/.tasks')
-    expect(suggestTasksRoot('/f/cross-tasks/')).toBe('/f/cross-tasks/.tasks')
+  it('parentRoot 下 .cross-tasks(斜杠归一,ADR-0033)', () => {
+    expect(suggestTasksRoot('D:\\finance\\cross-tasks')).toBe('D:/finance/cross-tasks/.cross-tasks')
+    expect(suggestTasksRoot('/f/cross-tasks/')).toBe('/f/cross-tasks/.cross-tasks')
   })
 
   it('空 parentRoot 回空', () => {
@@ -42,8 +42,13 @@ describe('validateSlug', () => {
     expect(validateSlug('Broker')).toContain('小写英文')
   })
 
+  it('超过 20 字符被拒(ADR-0033)', () => {
+    expect(validateSlug('cleanup-all-tmp-files-now')).toContain('20')
+    expect(validateSlug('fix-dsh-shim')).toBe(null)
+  })
+
   it('合法 slug 通过', () => {
-    expect(validateSlug('broker-empty-semantics')).toBe(null)
+    expect(validateSlug('cleanup-tmp')).toBe(null)
     expect(validateSlug('a1')).toBe(null)
   })
 })
@@ -101,13 +106,19 @@ describe('suggestScanDefaults', () => {
 })
 
 describe('suggestSlugFromText', () => {
-  it('英文描述洗成小写短横,截 40', () => {
-    expect(suggestSlugFromText('Fix Broker Empty Semantics Now')).toBe('fix-broker-empty-semantics-now')
-    expect(suggestSlugFromText('a'.repeat(50))).toBe('a'.repeat(40))
+  it('中文任务靠词表给出 2-3 词短 slug(ADR-0033)', () => {
+    expect(suggestSlugFromText('清理本文件夹下所有的 .tmp。')).toBe('cleanup-tmp')
+    expect(suggestSlugFromText('修复 broker 的空语义')).toBe('fix-broker')
+    expect(suggestSlugFromText('升级依赖并跑测试')).toBe('upgrade-test-deps')
   })
 
-  it('中文描述洗空回退 task,用户手改', () => {
-    expect(suggestSlugFromText('修 broker 的空语义')).toBe('broker')
+  it('英文描述取前三个词,总长不超过 20', () => {
+    expect(suggestSlugFromText('Fix Broker Empty Semantics Now')).toBe('fix-broker-empty')
+    expect(suggestSlugFromText('a'.repeat(50))).toBe('a'.repeat(20))
+    expect(suggestSlugFromText('cleanup')).toBe('cleanup')
+  })
+
+  it('洗不出词回退 task,用户手改', () => {
     expect(suggestSlugFromText('中文全中文')).toBe('task')
     expect(suggestSlugFromText('')).toBe('task')
     expect(suggestSlugFromText('   ')).toBe('task')
